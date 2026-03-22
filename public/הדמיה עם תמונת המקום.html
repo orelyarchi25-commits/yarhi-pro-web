@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ירחי אלומיניום - הדמיה מקצועית</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700;800;900&display=swap');
+        body { font-family: 'Assistant', sans-serif; margin: 0; overflow: hidden; background-color: #f1f5f9; transition: background-color 0.5s ease; }
+        body.night-mode { background-color: #0b1120; }
+        #canvas-container { position: absolute; top: 0; left: 0; right: 0; bottom: 56px; z-index: 1; outline: none; }
+        .ui-overlay { position: relative; z-index: 10; pointer-events: none; height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+        .controls-panel { pointer-events: auto; width: 360px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(15px); border-radius: 24px; box-shadow: 0 10px 50px rgba(0,0,0,0.15); padding: 20px; border: 1px solid #e2e8f0; max-height: 85vh; overflow-y: auto; transition: all 0.3s ease; }
+        .night-mode .controls-panel { background: rgba(15, 23, 42, 0.9); border-color: #334155; color: #f8fafc; box-shadow: 0 10px 50px rgba(0,0,0,0.5); }
+        .section-title { font-weight: 800; color: #0f172a; font-size: 0.85rem; margin-bottom: 10px; border-bottom: 2px solid #3b82f6; padding-bottom: 5px; display: flex; align-items: center; gap: 8px; margin-top: 15px; }
+        .night-mode .section-title { color: #f1f5f9; border-bottom-color: #60a5fa; }
+        .control-group { margin-bottom: 10px; }
+        .control-label { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 3px; }
+        .night-mode .control-label { color: #cbd5e1; }
+        select, input[type="range"], input[type="number"] { pointer-events: auto; width: 100%; }
+        .night-mode select, .night-mode input[type="number"] { background-color: #1e293b; color: white; border-color: #475569; }
+        .counter-ui { display: flex; align-items: center; justify-content: space-between; background: #f8fafc; padding: 6px 10px; border-radius: 10px; border: 1px solid #e2e8f0; pointer-events: auto; }
+        .night-mode .counter-ui { background: #1e293b; border-color: #475569; }
+        .counter-btn { width: 24px; height: 24px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-weight: bold; transition: all 0.2s; }
+        .night-mode .counter-btn { background: #334155; border-color: #475569; color: white; }
+        .counter-btn:hover { background: #3b82f6; color: white; border-color: #3b82f6; }
+        .color-option { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: transform 0.2s; flex-shrink: 0; }
+        .night-mode .color-option { border-color: #475569; }
+        .color-option.active { outline: 2px solid #3b82f6; transform: scale(1.2); border-color: white; }
+        .color-picker-container { display: flex; gap: 6px; flex-wrap: wrap; max-height: 80px; overflow-y: auto; padding: 4px; }
+        .divider-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: #f1f5f9; border-radius: 8px; margin-bottom: 4px; font-size: 11px; border: 1px solid #e2e8f0; }
+        .night-mode .divider-item { background: #1e293b; border-color: #475569; }
+        .dimension-label { position: absolute; background: rgba(15, 23, 42, 0.85); color: white; padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; pointer-events: none; z-index: 5; transition: all 0.2s; border: 1px solid rgba(255,255,255,0.1); }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .night-mode .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
+        .side-control-card { background: #f8fafc; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 8px; }
+        .night-mode .side-control-card { background: #1e293b; border-color: #475569; }
+        
+        @media print {
+            @page { size: landscape; margin: 0; }
+            *, *::before, *::after { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; color-adjust: exact !important; }
+            body, html { width: 100% !important; height: 100% !important; margin: 0 !important; padding: 0 !important; }
+            .ui-overlay, .top-btn-group, #price-badge, #sim-caption-overlay { display: none !important; }
+            #labels-overlay { display: block !important; }
+            #canvas-container { position: absolute !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; bottom: auto !important; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+<div id="labels-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 56px; pointer-events: none; z-index: 5;"></div>
+<div id="sim-caption-overlay" style="position: fixed; bottom: 0; left: 0; right: 0; background: #1e293b; color: white; text-align: center; padding: 14px 20px; font-weight: bold; font-size: 1.1rem; z-index: 20; border-top: 1px solid #334155; font-family: 'Assistant', sans-serif; pointer-events: none;" dir="rtl">ירחי אלומיניום מפעל ייצור הסולל 3 חולון</div>
+
+<div class="absolute top-4 right-4 pointer-events-auto z-50 flex gap-2 top-btn-group">
+    <button onclick="togglePanel()" id="toggle-panel-btn" class="bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-slate-900 transition flex items-center border border-slate-700">
+        👁️ הסתר תפריט
+    </button>
+    <button onclick="toggleNightMode()" id="btn-night-mode" class="bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-indigo-700 transition flex items-center border border-indigo-500">
+        🌙 מצב לילה
+    </button>
+</div>
+
+<!-- Price Calculator Badge -->
+<div id="price-badge" class="absolute top-6 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-3xl shadow-2xl flex flex-col items-center transition-all duration-300">
+    <div class="flex items-center justify-between w-full mb-1">
+        <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest" id="price-title">הערכת מחיר למערכת</p>
+        <button onclick="togglePricingPanel()" class="text-slate-400 hover:text-slate-600 transition" title="הגדרות תמחור">⚙️</button>
+    </div>
+    <h2 class="text-3xl font-black text-blue-600 tracking-tight" id="price-val">₪0</h2>
+    <p class="text-[9px] text-slate-400 mt-1">* לא כולל מע"מ והתקנה מורכבת</p>
+</div>
+
+<!-- Pricing Settings Panel (Hidden by default) -->
+<div id="pricing-settings-panel" class="absolute top-32 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-2xl shadow-xl hidden" style="width: 300px;">
+    <h3 class="font-bold text-slate-800 mb-3 border-b pb-2 text-sm">הגדרות מחירון (₪)</h3>
+    <div class="space-y-2 text-xs">
+        <div class="flex justify-between items-center">
+            <label>מסגרת ועמודים (למ"ר):</label>
+            <input type="number" id="price-base" class="w-16 border rounded px-1 text-center" value="800" onchange="updateModel()">
+        </div>
+        <div class="flex justify-between items-center">
+            <label>שלבים קבועים (למ"ר):</label>
+            <input type="number" id="price-slats" class="w-16 border rounded px-1 text-center" value="500" onchange="updateModel()">
+        </div>
+        <div class="flex justify-between items-center">
+            <label>גג PVC (למ"ר):</label>
+            <input type="number" id="price-pvc" class="w-16 border rounded px-1 text-center" value="600" onchange="updateModel()">
+        </div>
+        <div class="flex justify-between items-center">
+            <label>חציץ / מחיצה (ליחידה):</label>
+            <input type="number" id="price-divider" class="w-16 border rounded px-1 text-center" value="450" onchange="updateModel()">
+        </div>
+        <div class="flex justify-between items-center">
+            <label>מסך גלילה Zip (למטר רץ):</label>
+            <input type="number" id="price-zip" class="w-16 border rounded px-1 text-center" value="950" onchange="updateModel()">
+        </div>
+        <div class="flex justify-between items-center">
+            <label>סגירת וטרינה (למטר רץ):</label>
+            <input type="number" id="price-vitrine" class="w-16 border rounded px-1 text-center" value="1800" onchange="updateModel()">
+        </div>
+    </div>
+    <button onclick="togglePricingPanel()" class="w-full mt-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-1.5 rounded-lg transition text-xs">סגור</button>
+</div>
+
+<div class="ui-overlay">
+    <div></div>
+
+    <div class="flex justify-between items-end">
+        <div class="controls-panel custom-scrollbar" id="controls-panel">
+            <div class="space-y-3">
+                <!-- Dimensions -->
+                <div>
+                    <div class="section-title">📏 מידות ופרופילים</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="control-group">
+                            <label class="control-label items-center">אורך (ס"מ): 
+                                <input type="number" id="input-num-L" class="w-14 text-center border border-slate-300 rounded text-[11px] p-0.5 pointer-events-auto bg-white font-bold text-slate-800" value="400" oninput="syncDimensions('num', 'L')">
+                            </label>
+                            <input type="range" id="input-L" min="200" max="1500" step="1" value="400" oninput="syncDimensions('range', 'L')">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label items-center">יציאה (ס"מ): 
+                                <input type="number" id="input-num-W" class="w-14 text-center border border-slate-300 rounded text-[11px] p-0.5 pointer-events-auto bg-white font-bold text-slate-800" value="300" oninput="syncDimensions('num', 'W')">
+                            </label>
+                            <input type="range" id="input-W" min="150" max="1000" step="1" value="300" oninput="syncDimensions('range', 'W')">
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <label class="control-label">סוג פרופיל מסגרת:</label>
+                        <select id="input-frame-type" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
+                            <option value="120">היקפי 120/40</option>
+                            <option value="140">דאבל טי 140/40</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Environment & Furniture -->
+                <div>
+                    <div class="section-title">🏡 סביבה וריהוט</div>
+                    <div class="grid grid-cols-2 gap-3 mb-2">
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                            <input type="checkbox" id="input-grass-toggle" checked onchange="updateModel()"> דשא סינטטי
+                        </label>
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                            <input type="checkbox" id="input-furniture-toggle" checked onchange="updateModel()"> פינת ישיבה
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mb-2 mt-2">
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                            <input type="checkbox" id="input-wall-toggle" checked onchange="updateModel()"> קיר אחורי לבן
+                        </label>
+                        <div class="pointer-events-auto relative">
+                            <input type="file" id="bg-upload" accept="image/*" class="hidden" onchange="handleBgUpload(event)">
+                            <button onclick="document.getElementById('bg-upload').click()" class="w-full bg-blue-100 text-blue-700 py-1 px-2 rounded-lg text-[11px] font-bold hover:bg-blue-200 transition">🖼️ תמונת חצר</button>
+                        </div>
+                    </div>
+                    
+                    <div id="image-adjust-controls" style="display: none;" class="mt-2 border-t border-slate-200 pt-2">
+                        <div class="section-title !mt-0 !mb-2 text-blue-600 !border-blue-300">🎯 מיקום על התמונה</div>
+                        <div class="control-group">
+                            <label class="control-label">לרוחב (ימינה/שמאלה):</label>
+                            <input type="range" id="input-pos-x" min="-15" max="15" step="0.1" value="0" oninput="updateModelPosition()">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">לגובה (למעלה/למטה):</label>
+                            <input type="range" id="input-pos-y" min="-10" max="15" step="0.1" value="0" oninput="updateModelPosition()">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">הגדלה / הקטנה:</label>
+                            <input type="range" id="input-scale" min="0.3" max="2.5" step="0.05" value="1" oninput="updateModelPosition()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Support -->
+                <div>
+                    <div class="section-title">🏗️ תמיכה ועמודים</div>
+                    <div class="grid grid-cols-2 gap-3 mb-2">
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                            <input type="checkbox" id="input-posts-toggle" checked onchange="updateModel()"> עמודי תמיכה
+                        </label>
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+                            <input type="checkbox" id="input-tensions-toggle" onchange="updateModel()"> מותחני קיר
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="control-group">
+                            <label class="control-label">כמות עמודים:</label>
+                            <div class="counter-ui">
+                                <button class="counter-btn" onclick="updateCounter('posts', -1)">-</button>
+                                <span id="cnt-posts" class="font-bold">2</span>
+                                <button class="counter-btn" onclick="updateCounter('posts', 1)">+</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">כמות מותחנים:</label>
+                            <div class="counter-ui">
+                                <button class="counter-btn" onclick="updateCounter('tension', -1)">-</button>
+                                <span id="cnt-tension" class="font-bold">2</span>
+                                <button class="counter-btn" onclick="updateCounter('tension', 1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Roof System -->
+                <div>
+                    <div class="section-title">☀️ מערכת קירוי גג</div>
+                    <div class="control-group mb-3 bg-blue-50/50 p-2 rounded-lg border border-blue-200" id="roof-type-box">
+                        <label class="control-label text-blue-800">סוג קירוי מרכזי:</label>
+                        <select id="input-roof-type" class="text-xs border-blue-300 p-2 rounded-lg bg-white w-full pointer-events-auto font-bold text-blue-700" onchange="toggleRoofControls(); updateModel()">
+                            <option value="slats">ביוקלימטית / שלבי אלומיניום</option>
+                            <option value="pvc">יריעת PVC חשמלית נאספת</option>
+                        </select>
+                    </div>
+
+                    <!-- Config for Slats (Bioclimatic) -->
+                    <div id="roof-slats-config">
+                        <div class="grid grid-cols-1 gap-2 mb-2">
+                            <div class="control-group">
+                                <label class="control-label">סוג שלב אלומיניום:</label>
+                                <select id="input-slat-type" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
+                                    <option value="40">פרופיל 20/40 סטנדרט</option>
+                                    <option value="70">פרופיל 20/70 רחב</option>
+                                    <option value="combo1">משולב 1: (x2) 20/40 + (x1) 20/70</option>
+                                    <option value="combo2">משולב 2: (x2) 20/20 + (x1) 20/70 + (x2) 20/40</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="control-group">
+                                <label class="control-label">כיוון השלבים:</label>
+                                <select id="input-orientation" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
+                                    <option value="horizontal" selected>אופקי</option>
+                                    <option value="vertical">אנכי</option>
+                                </select>
+                            </div>
+                            <div class="control-group">
+                                <label class="control-label">מרווח: <span id="val-gap">3</span> ס"מ</label>
+                                <input type="range" id="input-gap" min="0" max="10" step="0.5" value="3" oninput="updateModel()">
+                            </div>
+                        </div>
+                        <div class="control-group mt-2 bg-slate-100 p-2 rounded-lg" id="bioclimatic-box">
+                            <label class="control-label text-slate-700">פתיחה ביוקלימטית (זווית): <span id="val-slat-angle">0°</span></label>
+                            <input type="range" id="input-slat-angle" min="0" max="90" step="5" value="0" class="mt-1" oninput="updateModel()">
+                        </div>
+                    </div>
+
+                    <!-- Config for PVC -->
+                    <div id="roof-pvc-config" style="display: none;">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="control-group">
+                                <label class="control-label">גוון בד PVC:</label>
+                                <select id="input-pvc-color" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
+                                    <option value="0xffffff">לבן נקי</option>
+                                    <option value="0xf5f5dc">שמנת קלאסי</option>
+                                    <option value="0xdddddd">אפור בהיר</option>
+                                    <option value="0x3b3b3b">אפור פחם / שחור</option>
+                                </select>
+                            </div>
+                            <div class="control-group flex items-center mt-3">
+                                <label class="pointer-events-auto flex items-center gap-2 text-[10px] font-bold cursor-pointer text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-200">
+                                    <input type="checkbox" id="input-pvc-led" checked onchange="updateModel()"> נורות לד על הבד
+                                </label>
+                            </div>
+                        </div>
+                        <div class="control-group mt-3 bg-slate-100 p-2 rounded-lg">
+                            <label class="control-label text-blue-600">מצב סגירת גג (מנוע חשמלי): <span id="val-pvc-deploy">100%</span></label>
+                            <input type="range" id="input-pvc-deploy" min="0" max="100" step="1" value="100" class="mt-1" oninput="updateModel()">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Colors -->
+                <div>
+                    <div class="section-title">🎨 צבעי אלומיניום (RAL)</div>
+                    <div class="grid grid-cols-1 gap-3">
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-500 block mb-1">מסגרת ועמודים:</label>
+                            <div class="color-picker-container custom-scrollbar" id="frame-color-picker"></div>
+                        </div>
+                        <div id="slat-color-section">
+                            <label class="text-[10px] font-bold text-slate-500 block mb-1">שלבי אלומיניום (הצללה):</label>
+                            <div class="color-picker-container custom-scrollbar" id="slat-color-picker"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dividers -->
+                <div id="dividers-section">
+                    <div class="section-title">💡 חציצה ותוספות (לדים/מאוורר)</div>
+                    <div class="grid grid-cols-2 gap-2 mb-3">
+                        <div class="control-group" id="dividers-counter-group">
+                            <label class="control-label">מספר חציצים:</label>
+                            <div class="counter-ui">
+                                <button class="counter-btn" onclick="updateCounter('divider', -1)">-</button>
+                                <span id="cnt-divider" class="font-bold">2</span>
+                                <button class="counter-btn" onclick="updateCounter('divider', 1)">+</button>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">גוון תאורה כללי:</label>
+                            <select id="input-led-tone" class="text-[10px] border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
+                                <option value="white">לבן (6000K)</option>
+                                <option value="warm">צהוב (3000K)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="divider-configs" class="mt-2 space-y-1"></div>
+                </div>
+
+                <!-- Vitrines -->
+                <div>
+                    <div class="section-title">🪟 סגירת וטרינות זכוכית</div>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <div class="control-group">
+                            <label class="control-label">חזית:</label>
+                            <select id="input-vitrine-front" class="text-xs border p-2 rounded-lg bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="none">ללא</option>
+                                <option value="7000">דגם 7000</option>
+                                <option value="9000">דגם 9000</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">סוג זכוכית:</label>
+                            <select id="input-glass" class="text-xs border p-2 rounded-lg bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="clear">שקוף (Clear)</option>
+                                <option value="antisun">כהה (Anti-Sun)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="control-group">
+                            <label class="control-label">צד ימין:</label>
+                            <select id="input-vitrine-right" class="text-xs border p-2 rounded-lg bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="none">ללא</option>
+                                <option value="7000">דגם 7000</option>
+                                <option value="9000">דגם 9000</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">צד שמאל:</label>
+                            <select id="input-vitrine-left" class="text-xs border p-2 rounded-lg bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="none">ללא</option>
+                                <option value="7000">דגם 7000</option>
+                                <option value="9000">דגם 9000</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Zip Screens -->
+                <div>
+                    <div class="section-title">🔽 מסכי גלילה (Zip)</div>
+                    <div class="grid grid-cols-2 gap-2 mb-2">
+                        <div class="control-group">
+                            <label class="control-label">צבע בד:</label>
+                            <select id="input-screen-color" class="text-[10px] border p-1 rounded bg-white w-full pointer-events-auto" onchange="updateModel()">
+                                <option value="black">שחור (90% אטימות)</option>
+                                <option value="grey">אפור פחם</option>
+                                <option value="white">לבן</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="space-y-2">
+                        <div class="control-group">
+                            <label class="control-label">חזית (% פתוח): <span id="val-scr-front">0%</span></label>
+                            <input type="range" id="input-scr-front" min="0" max="100" value="0" oninput="updateModel()">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">צד ימין (% פתוח): <span id="val-scr-right">0%</span></label>
+                            <input type="range" id="input-scr-right" min="0" max="100" value="0" oninput="updateModel()">
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">צד שמאל (% פתוח): <span id="val-scr-left">0%</span></label>
+                            <input type="range" id="input-scr-left" min="0" max="100" value="0" oninput="updateModel()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 pt-2 pb-6">
+                    <button onclick="resetCamera()" class="bg-slate-700 text-white py-2.5 rounded-xl font-bold text-xs hover:bg-slate-800 transition pointer-events-auto">🎥 איפוס מבט</button>
+                    <button onclick="prepareAndPrint()" class="bg-blue-600 text-white py-2.5 rounded-xl font-bold text-xs hover:bg-blue-700 transition pointer-events-auto">🖨️ ייצא הצעת מחיר / הדפסה</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="pointer-events-auto bg-white/95 border border-slate-200 px-8 py-4 rounded-3xl shadow-2xl flex flex-col items-center ml-4 transition-all duration-300 relative group" id="logo-badge" style="margin-bottom: 60px;">
+            <button onclick="toggleLogoEdit()" class="absolute top-2 right-2 text-slate-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" title="ערוך פרטי עסק" id="edit-logo-btn">✏️</button>
+            
+            <div id="logo-display-mode" class="text-center">
+                <h1 class="text-xl font-black text-slate-800 tracking-tight" id="logo-text">ירחי אלומיניום</h1>
+                <p class="text-[10px] text-slate-500 font-bold mt-0.5" id="logo-sub">מפעל ייצור</p>
+                <p class="text-xs text-blue-600 font-bold uppercase tracking-widest mt-1" id="logo-address">הסולל 3, חולון</p>
+            </div>
+
+            <div id="logo-edit-mode" class="hidden flex-col gap-2 w-full mt-2">
+                <input type="text" id="edit-logo-name" value="ירחי אלומיניום" class="text-sm border p-1 rounded text-center w-full" placeholder="שם העסק">
+                <input type="text" id="edit-logo-sub" value="מפעל ייצור" class="text-xs border p-1 rounded text-center w-full" placeholder="תת כותרת / טלפון">
+                <input type="text" id="edit-logo-address" value="הסולל 3, חולון" class="text-xs border p-1 rounded text-center w-full" placeholder="כתובת">
+                <button onclick="saveLogoDetails()" class="bg-blue-600 text-white text-xs py-1 rounded hover:bg-blue-700">שמור</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let scene, camera, renderer, controls, pergolaGroup, floor;
+    let ambientLight, sun;
+    let fans = [];
+    let frameColor = 0x2c3e50;
+    let slatColor = 0xa67c52;
+    let counters = { divider: 2, tension: 2, posts: 2, slatsRight: 12, slatsLeft: 12 };
+    let dividerStates = [{ led: true, fan: false }, { led: true, fan: false }];
+    let labelPoints = [];
+    let isPanelVisible = true;
+    let isNightMode = false;
+    let hasCustomBg = false;
+
+    function toggleLogoEdit() {
+        const displayMode = document.getElementById('logo-display-mode');
+        const editMode = document.getElementById('logo-edit-mode');
+        const btn = document.getElementById('edit-logo-btn');
+
+        if (editMode.classList.contains('hidden')) {
+            displayMode.classList.add('hidden');
+            editMode.classList.remove('hidden');
+            editMode.classList.add('flex');
+            btn.style.display = 'none';
+        }
+    }
+
+    function saveLogoDetails() {
+        const name = document.getElementById('edit-logo-name').value;
+        const sub = document.getElementById('edit-logo-sub').value;
+        const address = document.getElementById('edit-logo-address').value;
+
+        document.getElementById('logo-text').innerText = name || 'שם העסק';
+        document.getElementById('logo-sub').innerText = sub;
+        document.getElementById('logo-address').innerText = address;
+
+        const displayMode = document.getElementById('logo-display-mode');
+        const editMode = document.getElementById('logo-edit-mode');
+        const btn = document.getElementById('edit-logo-btn');
+
+        editMode.classList.add('hidden');
+        editMode.classList.remove('flex');
+        displayMode.classList.remove('hidden');
+        btn.style.display = 'block';
+    }
+
+    function togglePricingPanel() {
+        const panel = document.getElementById('pricing-settings-panel');
+        if (panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+
+    function togglePanel() {
+        isPanelVisible = !isPanelVisible;
+        const panel = document.getElementById('controls-panel');
+        const btn = document.getElementById('toggle-panel-btn');
+        if (isPanelVisible) {
+            panel.style.display = 'block';
+            btn.innerHTML = '👁️ הסתר תפריט';
+        } else {
+            panel.style.display = 'none';
+            btn.innerHTML = '👁️ הצג תפריט';
+        }
+    }
+
+    function toggleNightMode() {
+        isNightMode = !isNightMode;
+        document.body.classList.toggle('night-mode', isNightMode);
+        const btn = document.getElementById('btn-night-mode');
+        const logo = document.getElementById('logo-badge');
+        const logoTxt = document.getElementById('logo-text');
+        const priceBdg = document.getElementById('price-badge');
+        const priceTxt = document.getElementById('price-title');
+
+        if (isNightMode) {
+            btn.innerHTML = '☀️ מצב יום';
+            btn.className = "bg-amber-500 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-amber-600 transition flex items-center border border-amber-400";
+            if (!hasCustomBg) scene.background = new THREE.Color(0x0b1120);
+            ambientLight.intensity = 0.05;
+            sun.intensity = 0.05;
+            if(logo) logo.className = "pointer-events-auto bg-slate-900/95 border border-slate-700 px-8 py-4 rounded-3xl shadow-2xl flex flex-col items-center ml-4 mb-2 transition-all duration-300";
+            if(logoTxt) logoTxt.className = "text-xl font-black text-white tracking-tight";
+            if(priceBdg) priceBdg.className = "absolute top-6 left-6 pointer-events-auto z-50 bg-slate-900/95 border border-slate-700 px-6 py-4 rounded-3xl shadow-2xl flex flex-col items-center transition-all duration-300";
+            if(priceTxt) priceTxt.className = "text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1";
+        } else {
+            btn.innerHTML = '🌙 מצב לילה';
+            btn.className = "bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-indigo-700 transition flex items-center border border-indigo-500";
+            if (!hasCustomBg) scene.background = new THREE.Color(0xf1f5f9);
+            ambientLight.intensity = 0.7;
+            sun.intensity = 0.8;
+            if(logo) logo.className = "pointer-events-auto bg-white/95 border border-slate-200 px-8 py-4 rounded-3xl shadow-2xl flex flex-col items-center ml-4 mb-2 transition-all duration-300";
+            if(logoTxt) logoTxt.className = "text-xl font-black text-slate-800 tracking-tight";
+            if(priceBdg) priceBdg.className = "absolute top-6 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-3xl shadow-2xl flex flex-col items-center transition-all duration-300";
+            if(priceTxt) priceTxt.className = "text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-1";
+        }
+        updateModel();
+    }
+
+    function toggleRoofControls() {
+        const roofType = document.getElementById('input-roof-type').value;
+        document.getElementById('roof-slats-config').style.display = roofType === 'slats' ? 'block' : 'none';
+        document.getElementById('roof-pvc-config').style.display = roofType === 'pvc' ? 'block' : 'none';
+        
+        document.getElementById('slat-color-section').style.opacity = roofType === 'slats' ? '1' : '0.4';
+        document.getElementById('slat-color-section').style.pointerEvents = roofType === 'slats' ? 'auto' : 'none';
+
+        const dividersCounter = document.getElementById('dividers-counter-group');
+        const dividerConfigs = document.getElementById('divider-configs');
+        if (roofType === 'pvc') {
+            if(dividersCounter) { dividersCounter.style.opacity = '0.3'; dividersCounter.style.pointerEvents = 'none'; }
+            if(dividerConfigs) dividerConfigs.style.display = 'none';
+        } else {
+            if(dividersCounter) { dividersCounter.style.opacity = '1'; dividersCounter.style.pointerEvents = 'auto'; }
+            if(dividerConfigs) dividerConfigs.style.display = 'block';
+        }
+    }
+
+    function syncDimensions(source, axis) {
+        const numEl = document.getElementById('input-num-' + axis);
+        const rangeEl = document.getElementById('input-' + axis);
+        if (source === 'num') rangeEl.value = numEl.value;
+        else numEl.value = rangeEl.value;
+        updateModel();
+    }
+
+    function updateModelPosition() {
+        if (!pergolaGroup) return;
+        const posX = parseFloat(document.getElementById('input-pos-x').value);
+        const posY = parseFloat(document.getElementById('input-pos-y').value);
+        const scale = parseFloat(document.getElementById('input-scale').value);
+        pergolaGroup.position.set(posX, posY, 0);
+        pergolaGroup.scale.set(scale, scale, scale);
+    }
+
+    function handleBgUpload(event) {
+        const file = event.target.files[0];
+        if (file) {
+            hasCustomBg = true;
+            scene.background = null; // מנקה את הרקע של התלת מימד כדי לראות את התמונה
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const container = document.getElementById('canvas-container');
+                container.style.backgroundImage = `url(${e.target.result})`;
+                container.style.backgroundSize = '100% 100%'; 
+                container.style.backgroundPosition = 'center';
+                
+                const wallToggle = document.getElementById('input-wall-toggle');
+                if (wallToggle) wallToggle.checked = false;
+                const grassToggle = document.getElementById('input-grass-toggle');
+                if (grassToggle) grassToggle.checked = false;
+                
+                document.getElementById('image-adjust-controls').style.display = 'block';
+                updateModel();
+            }
+            reader.readAsDataURL(file);
+        }
+    }
+
+    function init() {
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf1f5f9);
+
+        var container = document.getElementById('canvas-container');
+        camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        camera.position.set(12, 10, 12);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+        
+        sun = new THREE.DirectionalLight(0xffffff, 0.8);
+        sun.position.set(15, 25, 15);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 2048;
+        sun.shadow.mapSize.height = 2048;
+        scene.add(sun);
+
+        floor = new THREE.Mesh(
+            new THREE.PlaneGeometry(100, 100), 
+            new THREE.MeshStandardMaterial({ color: 0x4d7c0f, roughness: 0.9, metalness: 0.1 }) 
+        );
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        pergolaGroup = new THREE.Group();
+        scene.add(pergolaGroup);
+
+        setupColorPickers();
+        renderDividerControls();
+        toggleRoofControls();
+        updateModel();
+        animate();
+
+        window.addEventListener('resize', onWindowResize);
+    }
+
+    function setupColorPickers() {
+        const ralColors = [
+            { hex: '#2c3e50', name: 'אפור פחם' }, { hex: '#000000', name: 'שחור 9005' }, { hex: '#ffffff', name: 'לבן 9016' },
+            { hex: '#f5f5dc', name: 'שמנת 9001' }, { hex: '#383E42', name: 'אנתרציט 7016' }, { hex: '#2F3234', name: 'שחור גרפיט 7021' },
+            { hex: '#A5A5A5', name: 'אלומיניום 9006' }, { hex: '#8F8F8F', name: 'אפור כהה 9007' }, { hex: '#E3D9C6', name: 'פנינה 1013' },
+            { hex: '#4B3D35', name: 'חום 8014' }, { hex: '#4E3B31', name: 'חום טרה 8028' }, { hex: '#9DA1AA', name: 'אפור חלון 7040' },
+            { hex: '#114232', name: 'ירוק זית 6005' }
+        ];
+        const slatColors = [ { hex: '#a67c52', name: 'עץ אלון' }, ...ralColors ];
+
+        const frameContainer = document.getElementById('frame-color-picker');
+        const slatContainer = document.getElementById('slat-color-picker');
+
+        frameContainer.innerHTML = ralColors.map((c, i) => `<div class="color-option ${i===0 ? 'active' : ''}" style="background-color: ${c.hex};" data-color="${c.hex}" title="${c.name}"></div>`).join('');
+        slatContainer.innerHTML = slatColors.map((c, i) => `<div class="color-option ${i===0 ? 'active' : ''}" style="background-color: ${c.hex};" data-color="${c.hex}" title="${c.name}"></div>`).join('');
+
+        document.querySelectorAll('#frame-color-picker .color-option').forEach(opt => {
+            opt.onclick = () => { document.querySelectorAll('#frame-color-picker .color-option').forEach(el => el.classList.remove('active')); opt.classList.add('active'); frameColor = parseInt(opt.dataset.color.replace('#', '0x')); updateModel(); };
+        });
+        document.querySelectorAll('#slat-color-picker .color-option').forEach(opt => {
+            opt.onclick = () => { document.querySelectorAll('#slat-color-picker .color-option').forEach(el => el.classList.remove('active')); opt.classList.add('active'); slatColor = parseInt(opt.dataset.color.replace('#', '0x')); updateModel(); };
+        });
+    }
+
+    function renderDividerControls() {
+        const container = document.getElementById('divider-configs');
+        container.innerHTML = '';
+        dividerStates.forEach((state, idx) => {
+            const div = document.createElement('div');
+            div.className = 'divider-item';
+            div.innerHTML = `
+                <span class="font-bold">חציץ ${idx + 1}:</span>
+                <div class="flex gap-2">
+                    <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" ${state.led ? 'checked' : ''} onchange="toggleDividerPart(${idx}, 'led')"> לד</label>
+                    <label class="flex items-center gap-1 cursor-pointer"><input type="checkbox" ${state.fan ? 'checked' : ''} onchange="toggleDividerPart(${idx}, 'fan')"> מאוורר</label>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+    }
+
+    function toggleDividerPart(idx, part) {
+        if (part === 'fan') { dividerStates[idx].fan = !dividerStates[idx].fan; if (dividerStates[idx].fan) dividerStates[idx].led = false; }
+        else { dividerStates[idx].led = !dividerStates[idx].led; if (dividerStates[idx].led) dividerStates[idx].fan = false; }
+        renderDividerControls(); updateModel();
+    }
+
+    function updateCounter(key, delta) {
+        let maxVal = key === 'posts' ? 6 : (key === 'divider' ? 8 : 20);
+        counters[key] = Math.max(0, Math.min(maxVal, (counters[key] || 0) + delta));
+        const el = document.getElementById(`cnt-${key}`);
+        if(el) el.innerText = counters[key];
+        if (key === 'divider') {
+            if (delta > 0) dividerStates.push({ led: false, fan: false });
+            else if (dividerStates.length > 1) dividerStates.pop();
+            renderDividerControls();
+        }
+        updateModel();
+    }
+
+    function createBox(w, h, l, color, isLed = false, opacity = 1) {
+        const matOpts = { color: color, side: THREE.DoubleSide, transparent: opacity < 1, opacity: opacity };
+        if (!isLed) {
+            matOpts.roughness = 0.5;
+            matOpts.metalness = 0.3;
+        } else {
+            matOpts.emissive = new THREE.Color(color);
+            matOpts.emissiveIntensity = isNightMode ? 2.5 : 0.8;
+            matOpts.roughness = 1.0;
+            matOpts.metalness = 0.0;
+        }
+        const mat = new THREE.MeshStandardMaterial(matOpts);
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
+        if(!isLed) mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    function createFan() {
+        const fan = new THREE.Group();
+        const rod = createBox(0.03, 0.1, 0.03, 0x333333);
+        fan.add(rod);
+        const motor = createBox(0.15, 0.08, 0.15, 0x333333);
+        motor.position.y = -0.08;
+        fan.add(motor);
+        const blades = new THREE.Group();
+        blades.position.y = -0.1;
+        for(let i=0; i<3; i++) {
+            const b = createBox(0.5, 0.01, 0.1, 0x444444);
+            b.position.x = 0.25;
+            const pivot = new THREE.Group();
+            pivot.rotation.y = (Math.PI * 2 / 3) * i;
+            pivot.add(b);
+            blades.add(pivot);
+        }
+        fan.add(blades);
+        return { group: fan, blades: blades };
+    }
+
+    function createFurniture(L, W) {
+        const group = new THREE.Group();
+        const furnitureColor = 0x1a1a1a; 
+        const sofa = createBox(2, 0.4, 0.8, furnitureColor);
+        sofa.position.set(-L/4, 0.2, 0); group.add(sofa);
+        const back = createBox(2, 0.6, 0.2, furnitureColor);
+        back.position.set(-L/4, 0.3, -0.4); group.add(back);
+        const table = createBox(0.8, 0.4, 0.8, 0x333333);
+        table.position.set(0, 0.2, 0); group.add(table);
+        return group;
+    }
+
+    function drawSideWall(xPos, zPos, width, orientation, count, slatType, isLateral, frameH) {
+        const H = 2.7; const slatThickness = 0.02; const slatWidth = parseInt(slatType) / 1000; const gap = 0.05;
+        const totalStep = slatWidth + gap; const wallTopLimit = H - (frameH/2);
+        if (orientation === 'horizontal') {
+            for(let i=0; i<count; i++) {
+                const y = wallTopLimit - (slatWidth/2) - (i * totalStep);
+                if (y < 0.1) break;
+                const s = isLateral ? createBox(slatThickness, slatWidth, width, slatColor) : createBox(width, slatWidth, slatThickness, slatColor);
+                s.position.set(xPos, y, zPos); pergolaGroup.add(s);
+            }
+        } else {
+            const n = Math.floor(width / totalStep);
+            for(let i=0; i<n; i++) {
+                const offset = -width/2 + (slatWidth/2) + (i * totalStep);
+                const s = isLateral ? createBox(slatThickness, wallTopLimit, slatWidth, slatColor) : createBox(slatWidth, wallTopLimit, slatThickness, slatColor);
+                if (isLateral) s.position.set(xPos, wallTopLimit/2, zPos + offset);
+                else s.position.set(xPos + offset, wallTopLimit/2, zPos);
+                pergolaGroup.add(s);
+            }
+        }
+    }
+
+    function createVitrineSystem(length, height, vitrineModel, glassTypeStr) {
+        const group = new THREE.Group();
+        const trackHeight = 0.06; const trackDepth = 0.1;
+        const glassColor = glassTypeStr === 'clear' ? 0xe0f2fe : 0x1e293b; 
+        const glassOpacity = glassTypeStr === 'clear' ? 0.15 : 0.6;
+
+        const bottomTrack = createBox(length, trackHeight, trackDepth, frameColor);
+        bottomTrack.position.set(0, trackHeight/2, 0); group.add(bottomTrack);
+        const topTrack = createBox(length, trackHeight, trackDepth, frameColor);
+        topTrack.position.set(0, height - trackHeight/2, 0); group.add(topTrack);
+
+        const numPanels = Math.max(2, Math.ceil(length)); const overlap = 0.05;
+        const panelW = (length + (overlap * (numPanels - 1))) / numPanels; const panelH = height - (trackHeight * 2);
+        const pFrameW = vitrineModel === '7000' ? 0.04 : 0.07; 
+
+        const matGlass = new THREE.MeshStandardMaterial({ color: glassColor, transparent: true, opacity: glassOpacity, roughness: 0.05, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide });
+
+        for(let i=0; i<numPanels; i++) {
+            const panelGroup = new THREE.Group();
+            const pGlass = new THREE.Mesh(new THREE.BoxGeometry(panelW - pFrameW*2, panelH - pFrameW*2, 0.01), matGlass);
+            panelGroup.add(pGlass);
+
+            const fL = createBox(pFrameW, panelH, 0.03, frameColor); fL.position.set(-panelW/2 + pFrameW/2, 0, 0);
+            const fR = createBox(pFrameW, panelH, 0.03, frameColor); fR.position.set(panelW/2 - pFrameW/2, 0, 0);
+            const fT = createBox(panelW - pFrameW*2, pFrameW, 0.03, frameColor); fT.position.set(0, panelH/2 - pFrameW/2, 0);
+            const fB = createBox(panelW - pFrameW*2, pFrameW, 0.03, frameColor); fB.position.set(0, -panelH/2 + pFrameW/2, 0);
+            panelGroup.add(fL, fR, fT, fB);
+
+            const zOffset = (i%2 === 0) ? -0.02 : 0.02;
+            const xOffset = -length/2 + (panelW/2) + (i * (panelW - overlap));
+            panelGroup.position.set(xOffset, height/2, zOffset);
+            group.add(panelGroup);
+        }
+        return group;
+    }
+
+    function createRollerBlind(length, maxDrop, percent, fabricColorHex) {
+        const group = new THREE.Group();
+        if (percent === 0) return group;
+        const drop = maxDrop * (percent / 100); const cassetteSize = 0.12;
+        const cassette = createBox(length - 0.02, cassetteSize, cassetteSize, frameColor);
+        cassette.position.set(0, -cassetteSize/2, 0); group.add(cassette);
+
+        if (drop > 0) {
+            const matFabric = new THREE.MeshStandardMaterial({ color: fabricColorHex, transparent: true, opacity: 0.9, roughness: 0.9, side: THREE.DoubleSide });
+            const fabric = new THREE.Mesh(new THREE.BoxGeometry(length - 0.06, drop, 0.005), matFabric);
+            fabric.position.set(0, -cassetteSize - drop/2, 0); group.add(fabric);
+            const bottomBar = createBox(length - 0.04, 0.04, 0.02, frameColor);
+            bottomBar.position.set(0, -cassetteSize - drop, 0); group.add(bottomBar);
+        }
+        return group;
+    }
+
+    function calculatePrice(L, W, roofType, scrFront, scrRight, scrLeft, vitrineFront, vitrineRight, vitrineLeft, counters) {
+        let price = 0;
+        const area = (L || 0) * (W || 0);
+        
+        // Fetch prices from settings panel
+        const pBase = parseFloat(document.getElementById('price-base').value) || 0;
+        const pSlats = parseFloat(document.getElementById('price-slats').value) || 0;
+        const pPvc = parseFloat(document.getElementById('price-pvc').value) || 0;
+        const pDivider = parseFloat(document.getElementById('price-divider').value) || 0;
+        const pZip = parseFloat(document.getElementById('price-zip').value) || 0;
+        const pVitrine = parseFloat(document.getElementById('price-vitrine').value) || 0;
+
+        // Calculate
+        price += area * pBase; 
+        
+        if (roofType === 'pvc') price += area * pPvc; 
+        else price += area * pSlats; 
+
+        price += counters.divider * pDivider;
+        
+        if (scrFront > 0) price += L * pZip;
+        if (scrRight > 0) price += W * pZip;
+        if (scrLeft > 0) price += W * pZip;
+
+        if (vitrineFront !== 'none') price += L * pVitrine;
+        if (vitrineRight !== 'none') price += W * pVitrine;
+        if (vitrineLeft !== 'none') price += W * pVitrine;
+
+        document.getElementById('price-val').innerText = '₪' + Math.round(price).toLocaleString();
+    }
+
+    // פונקציית אופטימיזציה לניקוי זיכרון הדפדפן כדי למנוע קריסות
+    function clearGroup(group) {
+        for (let i = group.children.length - 1; i >= 0; i--) {
+            const child = group.children[i];
+            if (child.isGroup) {
+                clearGroup(child);
+            }
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+                if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+                else child.material.dispose();
+            }
+            group.remove(child);
+        }
+    }
+
+    function updateModel() {
+        const numLEl = document.getElementById('input-num-L');
+        const numWEl = document.getElementById('input-num-W');
+        
+        // הגנות קלט כדי שהמערכת לא תתקע ממספרים שגויים
+        let L_val = numLEl ? parseFloat(numLEl.value) : 400;
+        let L = (isNaN(L_val) || L_val === 0) ? 4 : L_val / 100;
+        
+        let W_val = numWEl ? parseFloat(numWEl.value) : 300;
+        let W = (isNaN(W_val) || W_val === 0) ? 3 : W_val / 100;
+
+        const roofType = document.getElementById('input-roof-type').value;
+        const gapVal = document.getElementById('input-gap') ? parseFloat(document.getElementById('input-gap').value) / 100 : 0.03;
+        const frameType = document.getElementById('input-frame-type').value;
+        const slatTypeTop = document.getElementById('input-slat-type').value;
+        const orientationTop = document.getElementById('input-orientation').value;
+        const slatAngle = document.getElementById('input-slat-angle') ? parseFloat(document.getElementById('input-slat-angle').value) * Math.PI / 180 : 0;
+        
+        const pvcDeploy = document.getElementById('input-pvc-deploy') ? parseFloat(document.getElementById('input-pvc-deploy').value) / 100 : 1;
+        const pvcColor = document.getElementById('input-pvc-color') ? parseInt(document.getElementById('input-pvc-color').value) : 0xffffff;
+        const hasPvcLed = document.getElementById('input-pvc-led') ? document.getElementById('input-pvc-led').checked : true;
+
+        const showPosts = document.getElementById('input-posts-toggle') ? document.getElementById('input-posts-toggle').checked : true;
+        const showTensions = document.getElementById('input-tensions-toggle') ? document.getElementById('input-tensions-toggle').checked : false;
+        const showGrass = document.getElementById('input-grass-toggle') ? document.getElementById('input-grass-toggle').checked : true;
+        const showFurniture = document.getElementById('input-furniture-toggle') ? document.getElementById('input-furniture-toggle').checked : true;
+        const showWall = document.getElementById('input-wall-toggle') ? document.getElementById('input-wall-toggle').checked : true;
+        
+        const vitrineFront = document.getElementById('input-vitrine-front') ? document.getElementById('input-vitrine-front').value : 'none';
+        const vitrineRight = document.getElementById('input-vitrine-right') ? document.getElementById('input-vitrine-right').value : 'none';
+        const vitrineLeft = document.getElementById('input-vitrine-left') ? document.getElementById('input-vitrine-left').value : 'none';
+        const glassType = document.getElementById('input-glass') ? document.getElementById('input-glass').value : 'clear';
+        const ledTone = document.getElementById('input-led-tone') ? document.getElementById('input-led-tone').value : 'white';
+        
+        const scrFront = document.getElementById('input-scr-front') ? parseFloat(document.getElementById('input-scr-front').value) : 0;
+        const scrRight = document.getElementById('input-scr-right') ? parseFloat(document.getElementById('input-scr-right').value) : 0;
+        const scrLeft = document.getElementById('input-scr-left') ? parseFloat(document.getElementById('input-scr-left').value) : 0;
+        const scrColorStr = document.getElementById('input-screen-color') ? document.getElementById('input-screen-color').value : 'black';
+        const scrColorHex = scrColorStr === 'black' ? 0x222222 : (scrColorStr === 'grey' ? 0x555555 : 0xdddddd);
+        const ledColor = ledTone === 'warm' ? 0xfff4d6 : 0xffffff;
+
+        if(document.getElementById('val-gap')) document.getElementById('val-gap').innerText = (gapVal * 100).toFixed(1);
+        if(document.getElementById('val-slat-angle')) document.getElementById('val-slat-angle').innerText = Math.round(slatAngle * 180 / Math.PI) + '°';
+        if(document.getElementById('val-scr-front')) document.getElementById('val-scr-front').innerText = scrFront + '%';
+        if(document.getElementById('val-scr-right')) document.getElementById('val-scr-right').innerText = scrRight + '%';
+        if(document.getElementById('val-scr-left')) document.getElementById('val-scr-left').innerText = scrLeft + '%';
+        if(document.getElementById('val-pvc-deploy')) document.getElementById('val-pvc-deploy').innerText = Math.round(pvcDeploy * 100) + '%';
+
+        calculatePrice(L, W, roofType, scrFront, scrRight, scrLeft, vitrineFront, vitrineRight, vitrineLeft, counters);
+
+        // ניקוי מלא למניעת זליגת זיכרון וקריסה
+        clearGroup(pergolaGroup);
+        fans = []; labelPoints = [];
+        floor.visible = showGrass;
+
+        const H = 2.7; const frameHeight = frameType === '140' ? 0.14 : 0.12; const frameWidth = 0.04;
+
+        if (showWall) {
+            const wall = createBox(L + 6, 6, 0.4, 0xffffff);
+            wall.position.set(0, 3, -W/2 - 0.21); pergolaGroup.add(wall);
+        }
+
+        [W/2, -W/2].forEach(z => { const b = createBox(L, frameHeight, frameWidth, frameColor); b.position.set(0, H, z); pergolaGroup.add(b); });
+        [L/2, -L/2].forEach(x => { const b = createBox(frameWidth, frameHeight, W, frameColor); b.position.set(x, H, 0); pergolaGroup.add(b); });
+
+        if (showPosts) {
+            const nPosts = counters.posts;
+            for(let i=0; i<nPosts; i++) {
+                const xPos = (nPosts > 1) ? -L/2 + 0.05 + (i * (L - 0.1) / (nPosts - 1)) : 0;
+                const p = createBox(0.1, H, 0.1, frameColor); p.position.set(xPos, H/2, W/2 - 0.05); pergolaGroup.add(p);
+            }
+        }
+
+        if (showTensions) {
+            const nTen = counters.tension; const dH = 1.0; const rodLen = Math.sqrt(W * W + dH * dH); const angle = Math.atan2(dH, W);
+            for(let i=0; i<nTen; i++) {
+                const xPos = (nTen > 1) ? -L/2 + (i * (L / (nTen-1))) : 0;
+                const rod = createBox(0.04, 0.04, rodLen, frameColor);
+                rod.position.set(xPos, H + frameHeight / 2 + dH / 2, 0); rod.rotation.x = angle; pergolaGroup.add(rod);
+            }
+        }
+
+        if (roofType === 'slats') {
+            let pattern = [];
+            if (slatTypeTop === '40') pattern = [0.04];
+            else if (slatTypeTop === '70') pattern = [0.07];
+            else if (slatTypeTop === 'combo1') pattern = [0.04, 0.04, 0.07]; 
+            else if (slatTypeTop === 'combo2') pattern = [0.02, 0.02, 0.07, 0.04, 0.04]; 
+
+            if (orientationTop === 'vertical') {
+                let currentPos = -L/2 + 0.02; let pIndex = 0;
+                while(currentPos < L/2 - 0.02) {
+                    let sw = pattern[pIndex % pattern.length];
+                    if (currentPos + sw > L/2) break; 
+                    const s = createBox(sw, 0.02, W - 0.08, slatColor);
+                    s.position.set(currentPos + sw/2, H, 0);
+                    s.rotation.z = slatAngle; 
+                    pergolaGroup.add(s);
+                    currentPos += sw + gapVal; pIndex++;
+                }
+            } else {
+                let currentPos = -W/2 + 0.02; let pIndex = 0;
+                while(currentPos < W/2 - 0.02) {
+                    let sw = pattern[pIndex % pattern.length];
+                    if (currentPos + sw > W/2) break;
+                    const s = createBox(L - 0.08, 0.02, sw, slatColor);
+                    s.position.set(0, H, currentPos + sw/2);
+                    s.rotation.x = -slatAngle; 
+                    pergolaGroup.add(s);
+                    currentPos += sw + gapVal; pIndex++;
+                }
+            }
+            
+            const nDiv = counters.divider;
+            for(let i=0; i<nDiv; i++) {
+                const xPos = -L/2 + (i + 1) * (L / (nDiv + 1));
+                const div = createBox(0.06, frameHeight - 0.02, W - 0.08, frameColor);
+                div.position.set(xPos, H, 0); pergolaGroup.add(div);
+                if (dividerStates[i]?.led) {
+                    const led = createBox(0.02, 0.02, W - 0.1, ledColor, true);
+                    led.position.set(xPos, H - 0.06, 0); pergolaGroup.add(led);
+                }
+                if (dividerStates[i]?.fan) {
+                    const f = createFan(); f.group.position.set(xPos, H - 0.08, 0);
+                    pergolaGroup.add(f.group); fans.push(f.blades);
+                }
+            }
+            
+        } else if (roofType === 'pvc') {
+            const maxSpacing = 0.5; const numBars = Math.max(2, Math.ceil(W / maxSpacing));
+            const gatheredSizePerBar = 0.08; const totalDeployLen = W * pvcDeploy;
+
+            for (let i = 0; i < numBars; i++) {
+                let zPos;
+                if (pvcDeploy === 1) zPos = -W/2 + (i * (W / (numBars - 1)));
+                else {
+                    const gatheredZ = -W/2 + (i * gatheredSizePerBar); const stretchedZ = -W/2 + (i * (totalDeployLen / (numBars - 1)));
+                    zPos = Math.max(gatheredZ, stretchedZ); 
+                }
+
+                const barHeight = 0.02; const barDepth = 0.04;
+                const bar = createBox(L - 0.08, barHeight, barDepth, frameColor);
+                bar.position.set(0, H - barHeight/2, zPos); pergolaGroup.add(bar);
+
+                if (hasPvcLed) {
+                    const led = createBox(L - 0.08, 0.005, 0.02, ledColor, true);
+                    led.position.set(0, H - barHeight - 0.0025, zPos); pergolaGroup.add(led);
+                }
+
+                if (i > 0) {
+                    let prevZ;
+                    if (pvcDeploy === 1) prevZ = -W/2 + ((i-1) * (W / (numBars - 1)));
+                    else {
+                        const prevGatheredZ = -W/2 + ((i-1) * gatheredSizePerBar); const prevStretchedZ = -W/2 + ((i-1) * (totalDeployLen / (numBars - 1)));
+                        prevZ = Math.max(prevGatheredZ, prevStretchedZ);
+                    }
+                    const gap = zPos - prevZ;
+                    if (gap > 0.01) {
+                        const halfGap = gap / 2; const fabricLen = (W / (numBars - 1)) * 1.05; const halfFab = fabricLen / 2;
+                        let droop = 0; if (halfFab > halfGap) droop = Math.sqrt(halfFab*halfFab - halfGap*halfGap);
+                        droop = Math.min(droop, 0.35); const segLen = Math.hypot(halfGap, droop);
+                        
+                        const f1 = createBox(L - 0.08, 0.005, segLen, pvcColor); f1.position.set(0, H - droop/2, prevZ + halfGap/2);
+                        f1.rotation.x = Math.atan2(droop, halfGap); pergolaGroup.add(f1);
+                        const f2 = createBox(L - 0.08, 0.005, segLen, pvcColor); f2.position.set(0, H - droop/2, zPos - halfGap/2);
+                        f2.rotation.x = -Math.atan2(droop, halfGap); pergolaGroup.add(f2);
+                    }
+                }
+            }
+        }
+
+        if (showFurniture) { const furn = createFurniture(L, W); pergolaGroup.add(furn); }
+
+        if (vitrineFront !== 'none') { const vFront = createVitrineSystem(L, H, vitrineFront, glassType); vFront.position.set(0, 0, W/2); pergolaGroup.add(vFront); }
+        if (vitrineRight !== 'none') { const vRight = createVitrineSystem(W, H, vitrineRight, glassType); vRight.rotation.y = Math.PI / 2; vRight.position.set(L/2, 0, 0); pergolaGroup.add(vRight); }
+        if (vitrineLeft !== 'none') { const vLeft = createVitrineSystem(W, H, vitrineLeft, glassType); vLeft.rotation.y = Math.PI / 2; vLeft.position.set(-L/2, 0, 0); pergolaGroup.add(vLeft); }
+
+        const maxDrop = H - frameHeight;
+        if (scrFront > 0) { const blind = createRollerBlind(L, maxDrop, scrFront, scrColorHex); blind.position.set(0, H - frameHeight/2, W/2 - frameWidth/2 - 0.06); pergolaGroup.add(blind); }
+        if (scrRight > 0) { const blind = createRollerBlind(W, maxDrop, scrRight, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(L/2 - frameWidth/2 - 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
+        if (scrLeft > 0) { const blind = createRollerBlind(W, maxDrop, scrLeft, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(-L/2 + frameWidth/2 + 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
+
+        if(document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked) drawSideWall(L/2, 0, W, document.getElementById('side-right-orient').value, counters.slatsRight, document.getElementById('side-right-type').value, true, frameHeight);
+        if(document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked) drawSideWall(-L/2, 0, W, document.getElementById('side-left-orient').value, counters.slatsLeft, document.getElementById('side-left-type').value, true, frameHeight);
+
+        // מקור אור יחיד למצב לילה שמאיר את כל הסביבה (יעיל יותר)
+        if (isNightMode) {
+            const centralLight = new THREE.PointLight(ledColor, 1.5, Math.max(L, W) * 2);
+            centralLight.position.set(0, H - 0.5, 0);
+            pergolaGroup.add(centralLight);
+        }
+
+        labelPoints.push({ pos: new THREE.Vector3(0, H + 0.8, W/2), text: `${Math.round(L * 100)} ס"מ אורך` });
+        labelPoints.push({ pos: new THREE.Vector3(L/2 + 0.5, H + 0.8, 0), text: `${Math.round(W * 100)} ס"מ יציאה` });
+        updateLabels();
+        
+        if(document.getElementById('image-adjust-controls') && document.getElementById('image-adjust-controls').style.display === 'block') updateModelPosition();
+    }
+
+    function updateLabels() {
+        const overlay = document.getElementById('labels-overlay');
+        overlay.innerHTML = '';
+        labelPoints.forEach(lp => {
+            const div = document.createElement('div'); div.className = 'dimension-label'; div.innerText = lp.text;
+            lp.element = div; overlay.appendChild(div);
+        });
+    }
+
+    function onWindowResize() {
+        var container = document.getElementById('canvas-container');
+        if (!container) return;
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    function resetCamera() {
+        camera.position.set(12, 10, 12);
+        controls.target.set(0, 1.5, 0); controls.update();
+    }
+
+    var CAPTION_BAR_HEIGHT = 56;
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        fans.forEach(f => f.rotation.y += 0.15);
+
+        const canvas = renderer.domElement; const currentScale = pergolaGroup.scale.x;
+        labelPoints.forEach(lp => {
+            if (!lp.element) return;
+            const worldPos = lp.pos.clone().multiplyScalar(currentScale).add(pergolaGroup.position);
+            const vector = worldPos.project(camera);
+            const x = (vector.x * 0.5 + 0.5) * canvas.clientWidth; const y = (vector.y * -0.5 + 0.5) * canvas.clientHeight;
+            lp.element.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+            lp.element.style.display = vector.z > 1 ? 'none' : 'block';
+        });
+
+        renderer.render(scene, camera);
+
+        if (window._simRecording && window._simCompositeCtx && window._simCompositeCanvas && window._simCaptionText !== undefined) {
+            var c = renderer.domElement;
+            var w = c.width, h = c.height;
+            var ctx = window._simCompositeCtx;
+            var comp = window._simCompositeCanvas;
+            if (comp.width !== w || comp.height !== h + CAPTION_BAR_HEIGHT) {
+                comp.width = w;
+                comp.height = h + CAPTION_BAR_HEIGHT;
+            }
+            ctx.drawImage(c, 0, 0);
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0, h, w, CAPTION_BAR_HEIGHT);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 22px "Assistant", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(window._simCaptionText || '', w / 2, h + CAPTION_BAR_HEIGHT / 2);
+        }
+    }
+
+    function prepareAndPrint() {
+        if (renderer && scene && camera) renderer.render(scene, camera);
+        setTimeout(() => { window.print(); }, 150);
+    }
+
+    // --- הקלטת וידאו ישירה מה-canvas (ללא בחירת חלון) ---
+    let simRecorder = null;
+    let simRecChunks = [];
+
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'startSimRecord') {
+            if (!renderer || !renderer.domElement) {
+                if (event.source) event.source.postMessage({ type: 'simRecordError', msg: 'ההדמיה עדיין נטענת' }, '*');
+                return;
+            }
+            if (simRecorder && simRecorder.state === 'recording') return;
+            try {
+                var c = renderer.domElement;
+                var w = c.width, h = c.height;
+                window._simCaptionText = event.data.captionText || 'ירחי אלומיניום מפעל ייצור הסולל 3 חולון';
+                var composite = document.createElement('canvas');
+                composite.width = w;
+                composite.height = h + CAPTION_BAR_HEIGHT;
+                window._simCompositeCanvas = composite;
+                window._simCompositeCtx = composite.getContext('2d');
+                window._simRecording = true;
+                var stream = composite.captureStream(30);
+                var mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+                simRecChunks = [];
+                var evSource = event.source;
+                simRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4000000 });
+                simRecorder.ondataavailable = function(e) { if (e.data.size) simRecChunks.push(e.data); };
+                simRecorder.onstop = function() {
+                    window._simRecording = false;
+                    window._simCompositeCanvas = null;
+                    window._simCompositeCtx = null;
+                    if (simRecChunks.length) {
+                        var blob = new Blob(simRecChunks, { type: 'video/webm' });
+                        var a = document.createElement('a');
+                        a.href = URL.createObjectURL(blob);
+                        a.download = 'הדמיה-ירחי-אלומיניום-' + (new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')) + '.webm';
+                        a.click();
+                        URL.revokeObjectURL(a.href);
+                        if (evSource) evSource.postMessage({ type: 'simRecordSaved' }, '*');
+                    }
+                    simRecorder = null;
+                    simRecChunks = [];
+                };
+                simRecorder.start(200);
+                if (evSource) evSource.postMessage({ type: 'simRecordStarted' }, '*');
+            } catch (err) {
+                window._simRecording = false;
+                window._simCompositeCanvas = null;
+                window._simCompositeCtx = null;
+                if (event.source) event.source.postMessage({ type: 'simRecordError', msg: String(err.message || err) }, '*');
+            }
+        } else if (event.data && event.data.type === 'stopSimRecord') {
+            if (simRecorder && simRecorder.state === 'recording') simRecorder.stop();
+        } else if (event.data && event.data.type === 'setSimCaption') {
+            var el = document.getElementById('sim-caption-overlay');
+            if (el) el.textContent = event.data.text || 'ירחי אלומיניום מפעל ייצור הסולל 3 חולון';
+        }
+    });
+
+    window.onload = init;
+</script>
+
+</body>
+</html>

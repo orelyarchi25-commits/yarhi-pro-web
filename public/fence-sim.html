@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>הדמיית גדרות 3D</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@400;700;800&display=swap');
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: 'Assistant', sans-serif;
+        background-color: #f1f5f9;
+      }
+      #canvas-container {
+        position: absolute;
+        inset: 0;
+      }
+      .hint {
+        position: absolute;
+        top: 12px;
+        left: 12px;
+        z-index: 10;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid #e2e8f0;
+        padding: 10px 12px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+        max-width: 320px;
+        font-size: 12px;
+        color: #0f172a;
+      }
+      .hint b { font-weight: 800; }
+      .record-btn {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 20;
+        border: 1px solid #be123c;
+        background: #e11d48;
+        color: #fff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 800;
+        font-size: 12px;
+        cursor: pointer;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+      }
+      .record-btn.recording {
+        border-color: #047857;
+        background: #059669;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="canvas-container"></div>
+    <button id="btn-record-fence" class="record-btn">⏺️ התחל הקלטה</button>
+    <div class="hint">
+      <b>הדמיית גדר</b><br />
+      מוצגת לפי העמודים והשלבים (ללא “מסגרת”) + מרווח ספייר.
+    </div>
+    <script>
+      let scene, camera, renderer, controls;
+      let fenceGroup = null;
+      let fenceRecorder = null;
+      let fenceRecChunks = [];
+
+      const CM_TO_M = 0.01;
+
+      // Visual post width: want "thicker" like 60/40.
+      // This is only an approximation for the 3D preview.
+      const postWm = 0.06;
+      const postDepth = 0.08; // visual depth
+      // Make the fill depth close to the post depth so posts appear "embedded in the profile"
+      const stepDepth = 0.07;
+      const rosetteWm = postWm * 1.45;
+      const rosetteDepth = postDepth * 1.05;
+      const rosetteThkM = 0.03;
+
+      const postGeom = new THREE.BoxGeometry(postWm, 1, postDepth);
+      const stepGeom = new THREE.BoxGeometry(1, 0.1, stepDepth);
+      const spacerGeom = new THREE.BoxGeometry(0.03, 1, 0.015);
+
+      function clearFence() {
+        if (fenceGroup) {
+          scene.remove(fenceGroup);
+          while (fenceGroup.children.length) fenceGroup.remove(fenceGroup.children[0]);
+          fenceGroup = null;
+        }
+      }
+
+      function getSlatPattern(slatProfile) {
+        // Heights in CM (mapped to getPatFence() in app/page.tsx)
+        // getPatFence uses:
+        //  - 100 => [{ w: 10, ... }, ...] meaning slat block height ~10cm
+        //  - 70  => w: 7
+        //  - 40  => w: 4
+        //  - 20  => w: 2
+        // and mixes include 20/40/70 blocks in the same order.
+        // We simulate the same by returning the W sequence in cm.
+        // In app/page.tsx getPatFence():
+        // 100/20 -> block height uses w=10 (single block)
+        // 70/20  -> uses w=7  (single block)
+        // 40/20  -> uses w=4  (single block)
+        // 20/20  -> uses w=2  (single block)
+        // mixes are sequences of these blocks (no implicit extra 20 block)
+        if (slatProfile === "100") return [10];
+        if (slatProfile === "70") return [7];
+        if (slatProfile === "40") return [4];
+        if (slatProfile === "20") return [2];
+        if (slatProfile === "mix1") return [4, 4, 7];
+        if (slatProfile === "mix2") return [4, 4, 2, 2, 7];
+        return [1.0];
+      }
+
+      function hexToInt(hex) {
+        // Accept #RRGGBB or any css-like; postMessage will send #ffffff etc.
+        try {
+          if (!hex) return 0x777777;
+          const h = String(hex).trim().replace('#', '');
+          return parseInt(h.length ? h : "777777", 16);
+        } catch (e) {
+          return 0x777777;
+        }
+      }
+
+      function createBox(w, h, d, colorHex, opacity = 1) {
+        const geom = new THREE.BoxGeometry(w, h, d);
+        const mat = new THREE.MeshStandardMaterial({
+          color: hexToInt(colorHex),
+          transparent: opacity < 1,
+          opacity: opacity,
+          roughness: 0.6,
+          metalness: 0.05,
+        });
+        return new THREE.Mesh(geom, mat);
+      }
+
+      function buildFence(config) {
+        const segments = Array.isArray(config?.segments) ? config.segments : [];
+        const gapCm = Number(config?.gapCm ?? 0);
+        const slatProfile = config?.slatProfile ?? "100";
+        const frameHex = config?.frameHex ?? "#555555";
+        const slatHex = config?.slatHex ?? "#ffffff";
+        const spacerHex = config?.spacerHex ?? frameHex;
+        const inGround = !!config?.inGround;
+
+        clearFence();
+        fenceGroup = new THREE.Group();
+
+        scene.add(fenceGroup);
+
+        const patternCm = getSlatPattern(slatProfile);
+
+        let totalLengthM = 0;
+        let maxHeightM = 0;
+        segments.forEach((s) => {
+          const Lm = Math.max(0, Number(s.L || 0)) * CM_TO_M;
+          const Hm = Math.max(0, Number(s.H || 0)) * CM_TO_M;
+          totalLengthM += Lm;
+          const extra = inGround ? 0.4 : 0; // 40 cm visualization into ground
+          maxHeightM = Math.max(maxHeightM, Hm + extra);
+        });
+
+        let xCursorM = -totalLengthM / 2;
+
+        segments.forEach((seg) => {
+          const segmentStartX = xCursorM;
+          const Lcm = Math.max(0, Number(seg.L || 0));
+          const Hcm = Math.max(0, Number(seg.H || 0));
+          const posts = Math.max(0, Math.floor(Number(seg.P || 0)));
+
+          const Lm = Lcm * CM_TO_M;
+          const Hm = Hcm * CM_TO_M;
+
+          const fields = Math.max(0, posts - 1);
+          const fieldLenM = fields > 0 ? ((Lcm - posts * (postWm / CM_TO_M)) / fields) * CM_TO_M : 0;
+
+          const postExtra = inGround ? 0.4 : 0;
+          const postHeightM = Hm + postExtra;
+
+          // Posts
+          for (let i = 0; i < posts; i++) {
+            const xCenter = segmentStartX + postWm / 2 + i * (fieldLenM + postWm);
+            const post = createBox(postWm, postHeightM, postDepth, frameHex);
+            // Put posts in the middle depth so fill looks like it sits between them.
+            post.position.set(xCenter, postHeightM / 2, 0);
+            fenceGroup.add(post);
+
+            // Rosette (base plate) under each post
+            const rosette = createBox(rosetteWm, rosetteThkM, rosetteDepth, frameHex, 1);
+            rosette.position.set(xCenter, rosetteThkM / 2, 0);
+            fenceGroup.add(rosette);
+          }
+
+          // Steps + spacers (only between posts)
+          if (fields > 0) {
+            // Same “net height” logic used in page.tsx instructions (approx).
+            const netHcm = Math.max(0, Hcm - 1.5);
+            const bottomOffsetCm = 0.75; // split the 1.5 cm deduction into bottom/top
+            const bottomOffsetM = bottomOffsetCm * CM_TO_M;
+
+            for (let f = 0; f < fields; f++) {
+              const leftPostCenter = segmentStartX + postWm / 2 + f * (fieldLenM + postWm);
+              const rightPostCenter = leftPostCenter + (fieldLenM + postWm);
+              const xFieldCenter = (leftPostCenter + rightPostCenter) / 2;
+
+              let cumulativeCm = 0;
+              let stepIndex = 0;
+              const steps = [];
+
+              while (true) {
+                const tCm = patternCm[stepIndex % patternCm.length];
+                if (cumulativeCm + tCm > netHcm) break;
+
+                const centerCm = bottomOffsetCm + cumulativeCm + tCm / 2;
+                steps.push({ tCm, centerCm });
+
+                cumulativeCm += tCm + Math.max(0, gapCm);
+                stepIndex++;
+              }
+
+              // Draw steps
+              steps.forEach((st) => {
+                // Ensure steps are strictly between posts (no overlap)
+                const leftOuterEdge = leftPostCenter + postWm / 2;
+                const rightOuterEdge = rightPostCenter - postWm / 2;
+                const clearWidthM = Math.max(0, rightOuterEdge - leftOuterEdge);
+                const w = Math.max(0.001, clearWidthM - 0.002); // tiny inset for visual clarity
+                const h = st.tCm * CM_TO_M;
+                const y = st.centerCm * CM_TO_M;
+                const x = leftOuterEdge + clearWidthM / 2;
+                const step = createBox(w, h, stepDepth, slatHex, 1);
+                // Align steps to the middle depth so posts appear centered within the profile.
+                step.position.set(x, y, 0);
+                fenceGroup.add(step);
+              });
+
+              // Draw spacers (“ספייר” color) between steps
+              if (steps.length >= 2 && gapCm > 0) {
+                for (let i = 0; i < steps.length - 1; i++) {
+                  const prev = steps[i];
+                  const next = steps[i + 1];
+
+                  const spacerCenterCm = (prev.centerCm + next.centerCm) / 2;
+                  const spacerH = gapCm * CM_TO_M;
+                  const spacerW = 0.03;
+                  const spacerD = 0.04;
+                  const spacer = (x) => createBox(spacerW, Math.max(0.005, spacerH), spacerD, spacerHex, 1);
+                  const leftOuterEdge = leftPostCenter + postWm / 2;
+                  const rightOuterEdge = rightPostCenter - postWm / 2;
+
+                  // Place spacers at the two inner edges of the posts (not in the center)
+                  const z = 0;
+                  const leftX = leftOuterEdge + spacerW / 2;
+                  const rightX = rightOuterEdge - spacerW / 2;
+
+                  const s1 = spacer(leftX);
+                  s1.position.set(leftX, spacerCenterCm * CM_TO_M, z);
+                  fenceGroup.add(s1);
+
+                  const s2 = spacer(rightX);
+                  s2.position.set(rightX, spacerCenterCm * CM_TO_M, z);
+                  fenceGroup.add(s2);
+                }
+              }
+            }
+          }
+
+          xCursorM += Lm;
+        });
+
+        // Center camera + render scale
+        const camDist = Math.max(6, totalLengthM * 1.2, maxHeightM * 1.0);
+        camera.position.set(camDist, maxHeightM * 0.6 + 2.5, camDist);
+        controls.target.set(0, maxHeightM * 0.3 + 1, 0);
+        controls.update();
+      }
+
+      function init() {
+        scene = new THREE.Scene();
+
+        const container = document.getElementById("canvas-container");
+        const w = container.clientWidth || window.innerWidth;
+        const h = container.clientHeight || window.innerHeight;
+
+        camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 2000);
+        camera.position.set(12, 8, 12);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+        renderer.setPixelRatio(Math.max(1, window.devicePixelRatio || 1));
+        renderer.setSize(w, h);
+        renderer.setClearColor(0xf1f5f9, 1);
+        container.appendChild(renderer.domElement);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+
+        // Lights
+        const amb = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(amb);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+        sun.position.set(20, 30, 10);
+        scene.add(sun);
+
+        // Ground grid plane (visual)
+        const floor = createBox(50, 0.02, 50, "#e2e8f0", 0.25);
+        floor.position.set(0, 0, 0);
+        scene.add(floor);
+
+        buildFence({ segments: [], gapCm: 2, slatProfile: "100", frameHex: "#555555", slatHex: "#ffffff", spacerHex: "#555555", inGround: false });
+        wireRecordButton();
+      }
+
+      function setFenceRecordButton(isRecording) {
+        const btn = document.getElementById("btn-record-fence");
+        if (!btn) return;
+        btn.textContent = isRecording ? "⏹️ עצור הקלטה" : "⏺️ התחל הקלטה";
+        btn.classList.toggle("recording", !!isRecording);
+      }
+
+      function wireRecordButton() {
+        const btn = document.getElementById("btn-record-fence");
+        if (!btn) return;
+        btn.addEventListener("click", () => {
+          if (!renderer || !renderer.domElement) return;
+          if (fenceRecorder && fenceRecorder.state === "recording") {
+            fenceRecorder.stop();
+            return;
+          }
+          try {
+            const stream = renderer.domElement.captureStream(30);
+            const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
+            fenceRecChunks = [];
+            fenceRecorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4000000 });
+            fenceRecorder.ondataavailable = (e) => { if (e.data && e.data.size) fenceRecChunks.push(e.data); };
+            fenceRecorder.onstop = () => {
+              setFenceRecordButton(false);
+              if (fenceRecChunks.length) {
+                const blob = new Blob(fenceRecChunks, { type: "video/webm" });
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = "fence-sim-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".webm";
+                a.click();
+                URL.revokeObjectURL(a.href);
+              }
+              fenceRecorder = null;
+              fenceRecChunks = [];
+            };
+            fenceRecorder.start(200);
+            setFenceRecordButton(true);
+          } catch (err) {
+            setFenceRecordButton(false);
+          }
+        });
+      }
+
+      window.addEventListener("resize", () => {
+        if (!renderer || !camera) return;
+        const container = document.getElementById("canvas-container");
+        const w = container.clientWidth || window.innerWidth;
+        const h = container.clientHeight || window.innerHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+      window.addEventListener("message", function (event) {
+        if (!event?.data) return;
+        if (event.data.type === "applyExternalConfig") {
+          try {
+            buildFence(event.data.config || {});
+          } catch (e) {}
+        }
+      });
+
+      function animate() {
+        requestAnimationFrame(animate);
+        if (controls) controls.update();
+        if (renderer && scene && camera) renderer.render(scene, camera);
+      }
+
+      window.onload = () => {
+        init();
+        animate();
+      };
+    </script>
+  </body>
+</html>
+

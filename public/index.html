@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>כניסה | Yarhi Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --gold: #c9a227;
+      --gold-hover: #d4af37;
+      --emerald: #10b981;
+      --radius: 1rem;
+      --shadow: 0 25px 50px -12px rgba(0,0,0,0.4);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Heebo', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid rgba(148,163,184,0.15);
+      border-radius: 1.25rem;
+      padding: 2.5rem;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: var(--shadow);
+    }
+    .logo {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .logo h1 { font-size: 1.75rem; font-weight: 900; color: var(--text); }
+    .logo span { color: var(--gold); font-size: 0.9rem; font-weight: 700; }
+    .form-group { margin-bottom: 1.25rem; }
+    .form-group label {
+      display: block;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 0.85rem 1rem;
+      border: 2px solid rgba(148,163,184,0.2);
+      border-radius: var(--radius);
+      background: rgba(15,23,42,0.5);
+      color: var(--text);
+      font-size: 1rem;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus {
+      outline: none;
+      border-color: var(--gold);
+    }
+    .form-group input::placeholder { color: var(--muted); opacity: 0.8; }
+    .btn {
+      width: 100%;
+      padding: 1rem;
+      background: var(--gold);
+      color: #0f172a;
+      font-weight: 800;
+      font-size: 1rem;
+      border: none;
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-family: inherit;
+      margin-top: 0.5rem;
+      transition: background 0.2s, transform 0.05s;
+    }
+    .btn:hover { background: var(--gold-hover); }
+    .btn:active { transform: scale(0.98); }
+    .error {
+      background: rgba(239,68,68,0.15);
+      color: #fca5a5;
+      padding: 0.75rem;
+      border-radius: 0.5rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    .error.show { display: block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">
+      <h1>Yarhi Pro</h1>
+      <span>מערכת הדמיה וחישובים לקבלני אלומיניום</span>
+    </div>
+    <div id="err" class="error"></div>
+    <form id="login" method="post" autocomplete="off">
+      <div class="form-group">
+        <label for="user">שם משתמש</label>
+        <input type="text" id="user" name="user" placeholder="הזן שם משתמש" required autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label for="code">קוד גישה</label>
+        <input type="password" id="code" name="code" placeholder="הזן קוד" required autocomplete="off" />
+      </div>
+      <button type="submit" class="btn">כניסה</button>
+    </form>
+  </div>
+  <script>
+    (function() {
+      // —— עדכן כאן את פרטי הכניסה (משתמש + קוד) ——
+      var VALID_USER = 'yarhi';
+      var VALID_CODE = 'pro2024';
+      var STORAGE_KEY = 'yp_session';
+
+      var form = document.getElementById('login');
+      var errEl = document.getElementById('err');
+
+      function showError(msg) {
+        errEl.textContent = msg || 'פרטים שגויים. נסה שוב.';
+        errEl.classList.add('show');
+      }
+
+      function hideError() {
+        errEl.classList.remove('show');
+      }
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        hideError();
+        var user = (document.getElementById('user').value || '').trim();
+        var code = (document.getElementById('code').value || '').trim();
+        if (user === VALID_USER && code === VALID_CODE) {
+          try { sessionStorage.setItem(STORAGE_KEY, '1'); } catch (_) {}
+          window.location.href = 'landing.html';
+        } else {
+          showError();
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
