@@ -10,8 +10,6 @@ import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from "@/lib/fire
 import { TERMS_VERSION } from "@/lib/terms";
 import { firebaseAuthErrorMessageHe, getFirebaseErrorCode } from "@/lib/auth-errors-he";
 import { normalizeLoginEmail } from "@/lib/normalize-email";
-import { FirebaseConnectionHint } from "@/components/FirebaseConnectionHint";
-
 const REGISTER_TIMEOUT_MS = 45_000;
 
 export default function RegisterPage() {
@@ -82,6 +80,7 @@ export default function RegisterPage() {
     try {
       const doRegister = async () => {
         const cred = await createUserWithEmailAndPassword(auth, emailNorm, password);
+        let notifySuffix = "";
         try {
           await setDoc(doc(db, "users", cred.user.uid), {
             businessName: businessName.trim(),
@@ -96,14 +95,29 @@ export default function RegisterPage() {
             updatedAt: serverTimestamp(),
           });
 
-          const idToken = await cred.user.getIdToken();
-          void fetch("/api/notify-new-registration", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken }),
-          }).catch((notifyErr) => {
+          const idToken = await cred.user.getIdToken(true);
+          try {
+            const notifyRes = await fetch("/api/notify-new-registration", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken }),
+            });
+            const nj = (await notifyRes.json()) as {
+              skipped?: boolean;
+              missing?: string[];
+              error?: string;
+            };
+            if (notifyRes.ok && nj.skipped && nj.missing?.length) {
+              notifySuffix =
+                " שימו לב: לא נשלח מייל התראה — חסרים משתני סביבה בשרת: " + nj.missing.join(", ") + ".";
+            } else if (!notifyRes.ok) {
+              notifySuffix =
+                " שימו לב: מייל התראה למנהל לא נשלח (בדוק Resend, כתובת שולח מאומתת, ולוג Vercel).";
+            }
+          } catch (notifyErr) {
             console.error("[Yarhi Pro] הודעת מנהל אחרי הרשמה:", notifyErr);
-          });
+            notifySuffix = " שימו לב: לא ניתן היה לוודא שליחת מייל התראה.";
+          }
         } catch (fsErr) {
           console.error("[Yarhi Pro] הרשמה – שמירת Firestore נכשלה:", fsErr);
           try {
@@ -119,7 +133,9 @@ export default function RegisterPage() {
           );
           return;
         }
-        setOkMsg("ההרשמה נשמרה. החשבון ממתין לאישור מנהל — מעביר לדף הבית…");
+        setOkMsg(
+          "ההרשמה נשמרה. החשבון ממתין לאישור מנהל — מעביר לדף הבית…" + notifySuffix
+        );
         router.push("/");
       };
 
@@ -162,9 +178,6 @@ export default function RegisterPage() {
           </p>
         </div>
 
-        <div className="mb-6">
-          <FirebaseConnectionHint />
-        </div>
         <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
             <p className="text-xs font-black text-amber-900">מסלול חודשי</p>

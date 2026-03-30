@@ -1,20 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { Resend } from "resend";
-import { getFirebaseAdminApp, hasFirebaseAdminCredentials } from "@/lib/firebase-admin";
+import { getFirebaseAdminApp } from "@/lib/firebase-admin";
+import {
+  canSendRegistrationNotify,
+  getNotifyRegistrationMissing,
+  getNotifyResendApiKey,
+  parseAdminNotifyEmails,
+} from "@/lib/notify-registration";
 
-function isConfigured(): boolean {
-  return Boolean(
-    hasFirebaseAdminCredentials() &&
-      process.env.RESEND_API_KEY?.trim() &&
-      process.env.ADMIN_NOTIFY_EMAIL?.trim()
-  );
+function publicBaseUrl(): string {
+  const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, "");
+  const vercel = process.env.VERCEL_URL?.trim();
+  if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
+  return "";
+}
+
+async function getUserDocWithRetry(
+  db: Firestore,
+  uid: string,
+  attempts = 4,
+  delayMs = 350
+): Promise<Record<string, unknown> | undefined> {
+  for (let i = 0; i < attempts; i++) {
+    const snap = await db.doc(`users/${uid}`).get();
+    const d = snap.data();
+    if (d && (d.email != null || d.businessName != null || d.contractorName != null)) {
+      return d;
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  const last = await db.doc(`users/${uid}`).get();
+  return last.data();
 }
 
 export async function POST(request: NextRequest) {
-  if (!isConfigured()) {
-    return NextResponse.json({ ok: true, skipped: true }, { status: 200 });
+  const missing = getNotifyRegistrationMissing();
+  if (!canSendRegistrationNotify()) {
+    console.warn("[notify-new-registration] skipped — missing env:", missing.join(", "));
+    return NextResponse.json({ ok: true, skipped: true, missing }, { status: 200 });
   }
 
   let body: unknown;
@@ -42,22 +70,27 @@ export async function POST(request: NextRequest) {
     const uid = decoded.uid;
 
     const db = getFirestore(app);
-    const snap = await db.doc(`users/${uid}`).get();
-    const data = snap.data() ?? {};
+    const raw = await getUserDocWithRetry(db, uid);
+    const data = (raw ?? {}) as Record<string, unknown>;
 
     const businessName = String(data.businessName ?? "");
     const contractorName = String(data.contractorName ?? "");
     const phone = String(data.phone ?? "");
-    const email = String(data.email ?? "");
+    const email = String(data.email ?? decoded.email ?? "");
 
     const subject = `רישום קבלן חדש — ${businessName || email || uid}`;
+
+    const base = publicBaseUrl();
+    const approveLink = base ? `${base}/admin/approve` : "";
 
     const text = [
       "נרשם קבלן חדש במערכת Yarhi Pro",
       "",
-      "סטטוס: ממתין לאישור — ב-Firestore שדה accountApproved=false עד שתאשר (הגדר true במסמך users/" +
-        uid +
-        ").",
+      "סטטוס: ממתין לאישור.",
+      "לאישור + הקצאת תוקף (שבוע / חודש / שנה / תאריך / ללא הגבלה) השתמש בדף המנהל (סיסמה מהשרת):",
+      approveLink || "(הגדר NEXT_PUBLIC_APP_URL ב-Vercel כדי שיופיע קישור ישיר)",
+      "",
+      "או ידנית ב-Firestore: users/" + uid + " — accountApproved=true ו-accessValidUntil (Timestamp) אופציונלי.",
       "",
       `שם עסק: ${businessName || "—"}`,
       `שם קבלן: ${contractorName || "—"}`,
@@ -71,10 +104,23 @@ export async function POST(request: NextRequest) {
       "&lt;"
     )}</pre>`;
 
-    const resend = new Resend(process.env.RESEND_API_KEY!);
+    const resendApiKey = getNotifyResendApiKey();
+    if (!resendApiKey) {
+      return NextResponse.json(
+        { ok: true, skipped: true, missing: ["resend"] as ("resend")[] },
+        { status: 200 }
+      );
+    }
+    const resend = new Resend(resendApiKey);
     const from =
       process.env.EMAIL_FROM?.trim() || "Yarhi Pro <onboarding@resend.dev>";
-    const to = process.env.ADMIN_NOTIFY_EMAIL!.trim();
+    const to = parseAdminNotifyEmails();
+    if (to.length === 0) {
+      return NextResponse.json(
+        { ok: true, skipped: true, missing: ["admin_email"] as ("admin_email")[] },
+        { status: 200 }
+      );
+    }
 
     const { error } = await resend.emails.send({
       from,

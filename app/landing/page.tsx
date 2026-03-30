@@ -91,7 +91,9 @@ export default function LandingPage() {
               <li>הטבה משתלמת במיוחד להיקפי עבודה</li>
             </ul>
             <a
-              href="https://wa.me/?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%90%D7%A0%D7%99%20%D7%A8%D7%95%D7%A6%D7%94%20%D7%94%D7%96%D7%9E%D7%A0%D7%94%20%D7%9E%D7%94%D7%99%D7%A8%D7%94%20%D7%A9%D7%9C%20%D7%A7%D7%99%D7%98%D7%99%D7%9D%20%D7%9E%D7%99%D7%A8%D7%97%D7%99%20%D7%90%D7%9C%D7%95%D7%9E%D7%99%D7%A0%D7%99%D7%95%D7%9D"
+              href={`https://wa.me/${
+                (process.env.NEXT_PUBLIC_WHATSAPP_PHONE ?? "").replace(/[^\d]/g, "")
+              }?text=%D7%A9%D7%9C%D7%95%D7%9D%2C%20%D7%90%D7%A0%D7%99%20%D7%A8%D7%95%D7%A6%D7%94%20%D7%94%D7%96%D7%9E%D7%A0%D7%94%20%D7%9E%D7%94%D7%99%D7%A8%D7%94%20%D7%A9%D7%9C%20%D7%A7%D7%99%D7%98%D7%99%D7%9D%20%D7%9E%D7%99%D7%A8%D7%97%D7%99%20%D7%90%D7%9C%D7%95%D7%9E%D7%99%D7%A0%D7%99%D7%95%D7%9D`}
               className="mt-5 block text-center py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black transition"
             >
               ⚡ הזמנה מהירה לירחי אלומיניום

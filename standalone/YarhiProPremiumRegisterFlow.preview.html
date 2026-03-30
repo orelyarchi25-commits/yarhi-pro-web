@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>תצוגה מקדימה — Yarhi Pro (טיוטה)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"Heebo"', "Segoe UI", "system-ui", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      .step-panel {
+        display: none;
+      }
+      .step-panel.is-active {
+        display: block;
+      }
+      .progress-step.done::after {
+        content: "✓";
+        font-size: 0.9rem;
+      }
+      body {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
+  </head>
+  <body
+    class="min-h-screen bg-[#060910] text-slate-200 font-sans text-base leading-relaxed antialiased p-6 md:p-12 flex flex-col items-center justify-center"
+  >
+    <div class="mb-10 text-center max-w-lg">
+      <div class="flex items-center justify-center gap-3 mb-4">
+        <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black italic text-white text-2xl shadow-lg shadow-blue-600/30">Y</div>
+        <h1 class="text-3xl font-black italic text-white tracking-tighter">YARHI <span class="text-blue-500">PRO</span></h1>
+      </div>
+      <h2 class="text-xl md:text-2xl font-bold text-white mb-2 tracking-tight">הרשמה למערכת Yarhi Pro</h2>
+      <p class="text-slate-400 font-medium text-base md:text-lg leading-relaxed max-w-md mx-auto">
+        חשבון קבלן מקצועי עם תנאי שימוש מחייבים ואבטחה מוגברת.
+      </p>
+      <p class="mt-3 text-xs text-amber-200/80 font-bold">קובץ HTML מקומי לתצוגה בלבד — אינו מחובר לאתר.</p>
+    </div>
+
+    <div id="progress" class="flex items-center justify-center gap-2 sm:gap-4 mb-10 w-full max-w-xl px-2">
+      <div class="progress-dot w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm bg-blue-600 text-white" data-p="1">1</div>
+      <div class="flex-1 h-1 min-w-[16px] rounded-full bg-[#0b0f1a] border border-white/5 prog-line" data-line="1"></div>
+      <div class="progress-dot w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm bg-[#0b0f1a] border border-white/10 text-slate-500" data-p="2">2</div>
+      <div class="flex-1 h-1 min-w-[16px] rounded-full bg-[#0b0f1a] border border-white/5 prog-line" data-line="2"></div>
+      <div class="progress-dot w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm bg-[#0b0f1a] border border-white/10 text-slate-500" data-p="3">3</div>
+    </div>
+
+    <div id="panel-wrap" class="w-full flex flex-col items-center">
+      <!-- שלב 1 -->
+      <section class="step-panel is-active w-full max-w-2xl space-y-6" data-step="1">
+        <p class="text-center text-slate-500 text-base font-medium">בחרו מסלול — ניתן לשנות לפני המשך</p>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <button type="button" class="plan-btn rounded-[1.5rem] border p-6 text-right transition-all bg-amber-500/[0.07] border-amber-500/40 ring-2 ring-amber-400/70" data-plan="monthly">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">מסלול חודשי</p>
+            <p class="text-3xl font-bold text-white tracking-tight">399 ₪ + מע״מ</p>
+            <p class="text-sm text-slate-400 mt-2 font-medium leading-relaxed">ללא התחייבות שנתית.</p>
+            <p class="plan-picked mt-3 text-sm font-semibold text-blue-400" aria-hidden="false">נבחר ✓</p>
+          </button>
+          <button type="button" class="plan-btn rounded-[1.5rem] border p-6 text-right transition-all bg-emerald-500/[0.07] border-emerald-500/20 hover:border-emerald-500/35" data-plan="annual">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">מסלול שנתי משתלם</p>
+            <p class="text-3xl font-bold text-white tracking-tight">3,990 ₪ + מע״מ</p>
+            <p class="text-sm text-slate-400 mt-2 font-medium leading-relaxed">משלמים על 10 חודשים ומקבלים 12 חודשים מלאים.</p>
+            <p class="plan-picked mt-3 text-sm font-semibold text-blue-400 hidden" aria-hidden="true">נבחר ✓</p>
+          </button>
+          <button type="button" class="plan-btn rounded-[1.5rem] border p-6 text-right transition-all bg-sky-500/[0.07] border-sky-500/20 hover:border-sky-500/35" data-plan="trial_7d">
+            <p class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">מסלול ניסיון</p>
+            <p class="text-3xl font-bold text-white tracking-tight">7 ימים חינם</p>
+            <p class="text-sm text-slate-400 mt-2 font-medium leading-relaxed">לאחר אישור ירחי — גישה למערכת לשבוע, בלי תשלום.</p>
+            <p class="plan-picked mt-3 text-sm font-semibold text-blue-400 hidden" aria-hidden="true">נבחר ✓</p>
+          </button>
+        </div>
+        <button type="button" class="next-1 w-full max-w-md mx-auto block bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl text-lg font-bold shadow-xl shadow-blue-600/20 transition-all">המשך לפרטים ←</button>
+      </section>
+
+      <!-- שלב 2 -->
+      <section class="step-panel w-full max-w-2xl bg-[#0b0f1a] border border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl" data-step="2">
+        <h3 class="text-2xl font-bold text-white mb-6 text-center tracking-tight">פרטי החשבון</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-semibold text-slate-400 mb-2 tracking-wide">שם העסק</label>
+            <input id="businessName" type="text" class="w-full bg-[#060910] border border-white/5 rounded-2xl py-3.5 px-4 text-base focus:ring-2 ring-blue-600 outline-none text-white placeholder:text-slate-500" placeholder="ירחי אלומיניום בע״מ" autocomplete="organization" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-400 mb-2 tracking-wide">שם קבלן / איש קשר</label>
+            <input id="contractorName" type="text" class="w-full bg-[#060910] border border-white/5 rounded-2xl py-3.5 px-4 text-base focus:ring-2 ring-blue-600 outline-none text-white placeholder:text-slate-500" placeholder="ישראל ישראלי" autocomplete="name" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-400 mb-2 tracking-wide">מספר טלפון</label>
+            <input id="phone" type="tel" class="w-full bg-[#060910] border border-white/5 rounded-2xl py-3.5 px-4 text-base focus:ring-2 ring-blue-600 outline-none text-white placeholder:text-slate-500" placeholder="05X-XXXXXXX" autocomplete="tel" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-400 mb-2 tracking-wide">אימייל</label>
+            <input id="email" type="email" class="w-full bg-[#060910] border border-white/5 rounded-2xl py-3.5 px-4 text-base focus:ring-2 ring-blue-600 outline-none text-white placeholder:text-slate-500" placeholder="name@company.co.il" autocomplete="email" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-400 mb-2 tracking-wide">סיסמה</label>
+            <input id="password" type="password" class="w-full bg-[#060910] border border-white/5 rounded-2xl py-3.5 px-4 text-base focus:ring-2 ring-blue-600 outline-none text-white placeholder:text-slate-500" placeholder="לפחות 8 תווים" autocomplete="new-password" />
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-slate-400 mb-2 tracking-wide">אימות סיסמה</label>
+            <input id="confirmPassword" type="password" class="w-full bg-[#060910] border border-white/5 rounded-2xl py-3.5 px-4 text-base focus:ring-2 ring-blue-600 outline-none text-white placeholder:text-slate-500" placeholder="הקלד שוב" autocomplete="new-password" />
+          </div>
+        </div>
+        <div class="mt-6 rounded-2xl border border-amber-500/25 bg-amber-500/[0.08] p-4">
+          <p class="font-bold text-amber-200/90 text-base mb-2">דרישות סיסמה:</p>
+          <ul class="space-y-2 text-base text-slate-300 font-medium" id="pwdHints">
+            <li id="h-len">⬜ לפחות 8 תווים</li>
+            <li id="h-up">⬜ אות גדולה באנגלית</li>
+            <li id="h-lo">⬜ אות קטנה באנגלית</li>
+            <li id="h-dig">⬜ לפחות ספרה אחת</li>
+          </ul>
+        </div>
+        <label class="mt-6 flex items-start gap-3 cursor-pointer rounded-2xl border border-white/10 p-4 bg-[#060910]/80">
+          <input id="agreeTerms" type="checkbox" class="mt-1 rounded accent-blue-600 shrink-0" />
+          <span class="text-sm text-slate-400 leading-relaxed font-medium">קראתי והבנתי את תקנון השימוש (באינטגרציה יהיה קישור ל־/terms), ואני מאשר את התנאים.</span>
+        </label>
+        <p id="formErr" class="mt-4 text-red-400 text-sm font-bold hidden" role="alert"></p>
+        <div class="mt-8 flex flex-col-reverse sm:flex-row gap-3">
+          <button type="button" class="back-2 px-6 py-4 rounded-2xl font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition-all">חזור</button>
+          <button type="button" class="next-2 flex-1 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl text-lg font-bold shadow-xl shadow-blue-600/20 transition-all">המשך לתשלום ←</button>
+        </div>
+      </section>
+
+      <!-- שלב 3 -->
+      <section class="step-panel w-full max-w-md bg-[#0b0f1a] border border-white/10 p-6 md:p-8 rounded-[2rem] shadow-2xl" data-step="3">
+        <div class="text-center mb-6">
+          <h3 id="step3Title" class="text-2xl font-bold text-white mb-2 tracking-tight">תשלום והוכחה</h3>
+          <p class="text-base text-slate-400 font-medium">
+            מסלול: <span id="planLabel" class="text-white font-semibold">מסלול חודשי</span> —
+            <span id="planPrice" class="text-white font-semibold">399 ₪ + מע״מ</span>
+          </p>
+        </div>
+        <div id="trialPaymentInfo" class="hidden mb-6 rounded-2xl border border-sky-500/30 bg-sky-500/[0.08] p-5 text-center text-base text-sky-100 leading-relaxed">
+          <p class="text-sky-200 font-bold mb-2">מסלול ניסיון — ללא תשלום</p>
+          <p class="text-slate-400 font-medium">
+            שלחו בווטסאפ את הפרטים. לאחר אישור ירחי תיפתח גישה ל־7 ימים. צילום מסך אופציונלי.
+          </p>
+        </div>
+        <div id="paidPaymentBlock">
+        <div class="flex gap-2 mb-6 bg-[#060910] p-1.5 rounded-2xl border border-white/5">
+          <button type="button" id="payBit" class="flex-1 py-3 rounded-xl font-semibold text-sm bg-[#0b0f1a] text-white border border-white/10">ביט (Bit)</button>
+          <button type="button" id="payBank" class="flex-1 py-3 rounded-xl font-semibold text-sm text-slate-500 hover:text-slate-300">העברה בנקאית</button>
+        </div>
+        <div id="bitBox" class="mb-6 flex flex-col items-center text-center p-6 border border-white/5 bg-[#060910] rounded-2xl">
+          <p class="text-sm font-bold text-slate-300 mb-2">העבר באמצעות אפליקציית ביט למספר:</p>
+          <p class="text-2xl font-bold text-white mb-4 tracking-wide" id="bitPhone">052-2288798</p>
+          <p class="text-sm text-slate-400 bg-white/5 p-3 rounded-xl leading-snug">
+            בהערה בביט: <span id="bitNote" class="text-white font-semibold">שם העסק</span>
+          </p>
+        </div>
+        <div id="bankBox" class="mb-6 hidden p-6 border border-white/5 bg-[#060910] rounded-2xl text-right text-sm space-y-2">
+          <p class="font-bold text-white mb-2">פרטי חשבון להעברה</p>
+          <p><span class="text-slate-500 font-medium">בנק:</span> <span class="text-white font-semibold">הפועלים (12)</span></p>
+          <p><span class="text-slate-500 font-medium">סניף:</span> <span class="text-white font-semibold">604 קריית שלום ת״א</span></p>
+          <p><span class="text-slate-500 font-medium">מספר חשבון:</span> <span class="text-white font-semibold text-lg">140924</span></p>
+          <p><span class="text-slate-500 font-medium">מוטב:</span> <span class="text-white font-semibold">ירחי אוראל</span></p>
+        </div>
+        </div>
+        <label class="block text-sm font-semibold text-slate-400 mb-3" id="proofLabel">העלאת צילום מסך של אישור התשלום</label>
+        <input id="proofFile" type="file" accept="image/*" class="hidden" />
+        <label for="proofFile" id="proofDrop" class="border-2 border-dashed border-white/10 hover:border-blue-500/50 bg-[#060910] rounded-2xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all mb-2">
+          <span class="text-sm font-bold text-slate-300">לחץ לבחירת קובץ</span>
+          <span class="text-xs text-slate-500 mt-1">JPG, PNG (עד 5MB)</span>
+        </label>
+        <p id="fileErr" class="text-red-400 text-xs font-bold hidden"></p>
+        <p id="fileOk" class="text-emerald-400 text-xs font-bold hidden"></p>
+        <div class="flex items-center gap-2 justify-center my-4 text-emerald-400/90" id="waHint">
+          <span class="text-xs font-medium leading-snug">נפתח ווטסאפ עם טקסט — צרף את התמונה מהגלריה אם צריך</span>
+        </div>
+        <button type="button" id="waBtn" disabled class="w-full py-4 rounded-2xl text-lg font-bold bg-white/5 text-slate-500 cursor-not-allowed">שליחה לווטסאפ</button>
+        <button type="button" class="back-3 w-full mt-3 py-3 rounded-2xl font-semibold text-slate-400 hover:text-white text-sm">חזור לפרטים</button>
+      </section>
+
+      <!-- שלב 4 -->
+      <section class="step-panel w-full max-w-md bg-[#0b0f1a] border border-white/10 p-8 text-center rounded-[2rem] shadow-2xl" data-step="4">
+        <h3 class="text-2xl font-bold text-white mb-3 tracking-tight">הבקשה נשלחה</h3>
+        <p class="text-slate-400 text-base mb-5 font-medium leading-relaxed">
+          נפתח ווטסאפ — וודאו שההודעה יצאה, ושצירפתם צילום אישור תשלום אם ביקשתם מסלול בתשלום.
+        </p>
+        <div class="mb-6 rounded-2xl border border-emerald-500/25 bg-emerald-500/[0.06] p-5 text-right">
+          <p class="text-emerald-200 font-bold text-sm mb-3">איך קבלן יודע מתי להתחבר?</p>
+          <p id="step4When" class="text-slate-300 text-sm font-medium leading-relaxed mb-3">
+            לאחר בדיקת התשלום / הבקשה אצל ירחי, החשבון יופעל <span class="text-white font-semibold">באופן ידני</span>. תקבלו עדכון בווטסאפ כשאפשר להיכנס. רק אז נסו להתחבר עם <span class="text-white font-semibold">אותו אימייל וסיסמה</span> שהזנתם בשלב הפרטים.
+          </p>
+          <ul class="text-slate-400 text-xs font-medium leading-relaxed space-y-2 list-none">
+            <li class="flex gap-2"><span class="text-emerald-400 shrink-0">1.</span><span>אין גישה מיידית אוטומטית מקובץ תצוגה זה — זה תואם גם לאתר בשיבוץ ידני.</span></li>
+            <li class="flex gap-2"><span class="text-emerald-400 shrink-0">2.</span><span>אם משהו נתקע — השיבו באותו צ’אט ווטסאפ או חזרו לכפתור למטה.</span></li>
+          </ul>
+        </div>
+        <div class="flex flex-col gap-3">
+          <a
+            id="loginAfterAppLink"
+            href="#"
+            class="inline-flex items-center justify-center w-full py-4 rounded-2xl text-base font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-600/20 transition-all"
+          >מעבר לדף הכניסה למערכת</a>
+          <button type="button" id="waAgain" class="text-blue-400 font-semibold text-sm hover:text-blue-300 underline-offset-2 hover:underline py-1">
+            נסה שוב לפתוח ווטסאפ
+          </button>
+        </div>
+        <p class="text-xs text-slate-500 mt-6 font-medium leading-relaxed">
+          תצוגה מקדימה — ווטסאפ: <span class="text-slate-400">972522288798</span> · כתובת כניסה: עריכה ב־CONFIG.loginUrl
+        </p>
+      </section>
+    </div>
+
+    <script>
+      /* CONFIG — ערוך כאן בלבד לפני שמירה */
+      var CONFIG = {
+        whatsappE164: "972522288798",
+        bitDisplayPhone: "052-2288798",
+        /* דף כניסה למערכת (החלף לכתובת האמיתית כשמעלים לאינטרנט) */
+        loginUrl: "http://localhost:3000/",
+      };
+
+      var state = { step: 1, plan: "monthly", payment: "bit", proofName: null };
+
+      function syncWaButton() {
+        var trial = state.plan === "trial_7d";
+        var ok = trial || (document.getElementById("proofFile").files && document.getElementById("proofFile").files[0]);
+        $("#waBtn").disabled = !ok;
+        $("#waBtn").className =
+          "w-full py-4 rounded-2xl text-lg font-bold " +
+          (ok
+            ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-600/20"
+            : "bg-white/5 text-slate-500 cursor-not-allowed");
+      }
+
+      function $(s) {
+        return document.querySelector(s);
+      }
+      function $all(s) {
+        return document.querySelectorAll(s);
+      }
+
+      function showStep(n) {
+        state.step = n;
+        $all(".step-panel").forEach(function (el) {
+          el.classList.toggle("is-active", el.getAttribute("data-step") === String(n));
+        });
+        var prog = $("#progress");
+        prog.style.display = n < 4 ? "flex" : "none";
+        $all(".progress-dot").forEach(function (dot) {
+          var num = +dot.getAttribute("data-p");
+          var on = n >= num;
+          dot.className =
+            "progress-dot w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-full flex items-center justify-center font-bold text-sm transition-all " +
+            (on ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "bg-[#0b0f1a] border border-white/10 text-slate-500");
+          if (on && n > num) dot.textContent = "✓";
+          else dot.textContent = String(num);
+        });
+        $all(".prog-line").forEach(function (line, i) {
+          var idx = i + 1;
+          var on = n > idx;
+          line.className =
+            "flex-1 h-1 min-w-[16px] rounded-full transition-all " +
+            (on ? "bg-blue-600" : "bg-[#0b0f1a] border border-white/5");
+        });
+      }
+
+      function planBtnClass(planKey, selected) {
+        if (planKey === "monthly") {
+          return (
+            "plan-btn rounded-[1.5rem] border p-6 text-right transition-all bg-amber-500/[0.07] " +
+            (selected ? "border-amber-500/40 ring-2 ring-amber-400/70" : "border-amber-500/20")
+          );
+        }
+        if (planKey === "annual") {
+          return (
+            "plan-btn rounded-[1.5rem] border p-6 text-right transition-all bg-emerald-500/[0.07] " +
+            (selected ? "border-emerald-500/40 ring-2 ring-emerald-400/70" : "border-emerald-500/20")
+          );
+        }
+        return (
+          "plan-btn rounded-[1.5rem] border p-6 text-right transition-all bg-sky-500/[0.07] " +
+          (selected ? "border-sky-500/40 ring-2 ring-sky-400/70" : "border-sky-500/20")
+        );
+      }
+
+      function updatePlanPickedLabels(selectedPlan) {
+        $all(".plan-btn").forEach(function (b) {
+          var key = b.getAttribute("data-plan");
+          var note = b.querySelector(".plan-picked");
+          if (!note) return;
+          var on = key === selectedPlan;
+          note.classList.toggle("hidden", !on);
+          note.setAttribute("aria-hidden", on ? "false" : "true");
+        });
+      }
+
+      $all(".plan-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var p = btn.getAttribute("data-plan");
+          state.plan = p;
+          $all(".plan-btn").forEach(function (b) {
+            var key = b.getAttribute("data-plan");
+            b.className = planBtnClass(key, key === p);
+          });
+          updatePlanPickedLabels(p);
+        });
+      });
+
+      $(".next-1").addEventListener("click", function () {
+        showStep(2);
+      });
+      $(".back-2").addEventListener("click", function () {
+        showStep(1);
+      });
+      $(".back-3").addEventListener("click", function () {
+        showStep(2);
+      });
+
+      function pwdOk() {
+        var pw = $("#password").value;
+        var min = pw.length >= 8;
+        var up = /[A-Z]/.test(pw);
+        var lo = /[a-z]/.test(pw);
+        var dig = /\d/.test(pw);
+        $("#h-len").textContent = (min ? "✅" : "⬜") + " לפחות 8 תווים";
+        $("#h-up").textContent = (up ? "✅" : "⬜") + " אות גדולה באנגלית";
+        $("#h-lo").textContent = (lo ? "✅" : "⬜") + " אות קטנה באנגלית";
+        $("#h-dig").textContent = (dig ? "✅" : "⬜") + " לפחות ספרה אחת";
+        return min && up && lo && dig;
+      }
+      $("#password").addEventListener("input", pwdOk);
+
+      $(".next-2").addEventListener("click", function () {
+        $("#formErr").classList.add("hidden");
+        var b = $("#businessName").value.trim();
+        var c = $("#contractorName").value.trim();
+        var em = $("#email").value.trim();
+        var emOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em);
+        if (!b || !c) {
+          $("#formErr").textContent = "נא למלא שם עסק ושם קבלן.";
+          $("#formErr").classList.remove("hidden");
+          return;
+        }
+        if (!emOk) {
+          $("#formErr").textContent = "נא להזין אימייל תקין.";
+          $("#formErr").classList.remove("hidden");
+          return;
+        }
+        if (!$("#agreeTerms").checked) {
+          $("#formErr").textContent = "יש לאשר את התקנון.";
+          $("#formErr").classList.remove("hidden");
+          return;
+        }
+        if (!pwdOk()) {
+          $("#formErr").textContent = "הסיסמה לא עומדת בדרישות.";
+          $("#formErr").classList.remove("hidden");
+          return;
+        }
+        if ($("#password").value !== $("#confirmPassword").value) {
+          $("#formErr").textContent = "אימות הסיסמה אינו תואם.";
+          $("#formErr").classList.remove("hidden");
+          return;
+        }
+        var trial = state.plan === "trial_7d";
+        $("#step3Title").textContent = trial ? "ניסיון ושליחת פרטים" : "תשלום והוכחה";
+        $("#trialPaymentInfo").classList.toggle("hidden", !trial);
+        $("#paidPaymentBlock").classList.toggle("hidden", trial);
+        $("#proofLabel").textContent = trial
+          ? "צילום מסך (אופציונלי)"
+          : "העלאת צילום מסך של אישור התשלום";
+        $("#waHint").querySelector("span").textContent = trial
+          ? "בניסיון אין חובת תשלום — אפשר לשלוח רק את הטקסט או לצרף תמונה."
+          : "נפתח ווטסאפ עם טקסט — צרף את התמונה מהגלריה אם צריך";
+        if (state.plan === "monthly") {
+          $("#planLabel").textContent = "מסלול חודשי";
+          $("#planPrice").textContent = "399 ₪ + מע״מ";
+        } else if (state.plan === "annual") {
+          $("#planLabel").textContent = "מסלול שנתי משתלם";
+          $("#planPrice").textContent = "3,990 ₪ + מע״מ";
+        } else {
+          $("#planLabel").textContent = "מסלול ניסיון";
+          $("#planPrice").textContent = "7 ימים חינם — לאחר אישור";
+        }
+        $("#bitNote").textContent = b || "שם העסק";
+        $("#bitPhone").textContent = CONFIG.bitDisplayPhone;
+        syncWaButton();
+        showStep(3);
+      });
+
+      function setPayment(mode) {
+        state.payment = mode;
+        var bitOn = mode === "bit";
+        $("#payBit").className =
+          "flex-1 py-3 rounded-xl font-semibold text-sm " +
+          (bitOn ? "bg-[#0b0f1a] text-white border border-white/10" : "text-slate-500 hover:text-slate-300");
+        $("#payBank").className =
+          "flex-1 py-3 rounded-xl font-semibold text-sm " +
+          (!bitOn ? "bg-[#0b0f1a] text-white border border-white/10" : "text-slate-500 hover:text-slate-300");
+        $("#bitBox").classList.toggle("hidden", !bitOn);
+        $("#bankBox").classList.toggle("hidden", bitOn);
+      }
+      $("#payBit").addEventListener("click", function () {
+        setPayment("bit");
+      });
+      $("#payBank").addEventListener("click", function () {
+        setPayment("bank");
+      });
+
+      $("#proofFile").addEventListener("change", function () {
+        $("#fileErr").classList.add("hidden");
+        $("#fileOk").classList.add("hidden");
+        var f = this.files && this.files[0];
+        if (!f) {
+          state.proofName = null;
+          syncWaButton();
+          return;
+        }
+        if (!f.type.startsWith("image/")) {
+          $("#fileErr").textContent = "רק קובץ תמונה.";
+          $("#fileErr").classList.remove("hidden");
+          this.value = "";
+          syncWaButton();
+          return;
+        }
+        if (f.size > 5 * 1024 * 1024) {
+          $("#fileErr").textContent = "עד 5MB.";
+          $("#fileErr").classList.remove("hidden");
+          this.value = "";
+          syncWaButton();
+          return;
+        }
+        state.proofName = f.name;
+        $("#fileOk").textContent = "נבחר: " + f.name;
+        $("#fileOk").classList.remove("hidden");
+        syncWaButton();
+      });
+
+      function buildMessage() {
+        var trial = state.plan === "trial_7d";
+        var planLine;
+        var lines;
+        if (trial) {
+          planLine = "מסלול ניסיון — 7 ימים חינם (ממתין לאישור מנהל)";
+          lines = [
+            "הרשמה ל־Yarhi Pro — בקשה למסלול ניסיון 7 ימים (ללא תשלום).",
+            "",
+            planLine,
+            "",
+            "פרטים:",
+            "• שם העסק: " + ($("#businessName").value.trim() || "—"),
+            "• שם קבלן: " + ($("#contractorName").value.trim() || "—"),
+            "• טלפון: " + ($("#phone").value.trim() || "—"),
+            "• אימייל: " + ($("#email").value.trim() || "—"),
+            "",
+            "(בתצוגה מקדימה לא נשלחת סיסמה.)",
+            "",
+            "אשמח לאישור ולפתיחת הגישה לשבוע ניסיון.",
+          ];
+        } else {
+          planLine =
+            state.plan === "monthly"
+              ? "מסלול חודשי — 399 ₪ + מע״מ"
+              : "מסלול שנתי — 3,990 ₪ + מע״מ";
+          var pay = state.payment === "bit" ? "ביט (Bit)" : "העברה בנקאית";
+          lines = [
+            "הרשמה ל־Yarhi Pro — בקשה לפתיחת חשבון אחרי תשלום.",
+            "",
+            planLine,
+            "אמצעי תשלום: " + pay,
+            "",
+            "פרטים:",
+            "• שם העסק: " + ($("#businessName").value.trim() || "—"),
+            "• שם קבלן: " + ($("#contractorName").value.trim() || "—"),
+            "• טלפון: " + ($("#phone").value.trim() || "—"),
+            "• אימייל: " + ($("#email").value.trim() || "—"),
+            "",
+            "(בתצוגה מקדימה לא נשלחת סיסמה.)",
+            "",
+            "מצורף צילום מסך של אישור התשלום.",
+          ];
+        }
+        return lines.join("\n");
+      }
+
+      function openWa() {
+        var url = "https://wa.me/" + CONFIG.whatsappE164 + "?text=" + encodeURIComponent(buildMessage());
+        window.open(url, "_blank", "noopener,noreferrer");
+        var trial = state.plan === "trial_7d";
+        var when = $("#step4When");
+        if (when) {
+          when.textContent = trial
+            ? "במסלול ניסיון: ירחי מאשר את הבקשה ידנית. כשהחשבון לשבעת הימים מוכן — תקבלו הודעה בווטסאפ. רק אז התחברו עם אותו אימייל וסיסמה מהטופס."
+            : "אחרי אימות התשלום מול אסמכתא בווטסאפ, החשבון יופעל. תקבלו עדכון בווטסאפ כשאפשר להתחבר. התחברות עם אותו אימייל וסיסמה שהזנתם בשלב הפרטים.";
+        }
+        showStep(4);
+      }
+
+      $("#waBtn").addEventListener("click", openWa);
+      $("#waAgain").addEventListener("click", openWa);
+
+      $("#bitPhone").textContent = CONFIG.bitDisplayPhone;
+      var loginLink = $("#loginAfterAppLink");
+      if (loginLink && CONFIG.loginUrl) loginLink.setAttribute("href", CONFIG.loginUrl);
+    </script>
+  </body>
+</html>

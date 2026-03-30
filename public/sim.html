@@ -9,10 +9,11 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;700;800;900&display=swap');
-        body { font-family: 'Assistant', sans-serif; margin: 0; overflow: hidden; background-color: #f1f5f9; transition: background-color 0.5s ease; }
+        html, body { height: 100%; width: 100%; margin: 0; padding: 0; }
+        body { font-family: 'Assistant', sans-serif; overflow: hidden; background-color: #f1f5f9; transition: background-color 0.5s ease; }
         body.night-mode { background-color: #0b1120; }
         #canvas-container { position: absolute; top: 0; left: 0; right: 0; bottom: 56px; z-index: 1; outline: none; }
-        .ui-overlay { position: relative; z-index: 10; pointer-events: none; height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; }
+        .ui-overlay { position: relative; z-index: 10; pointer-events: none; height: 100%; min-height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box; }
         .controls-panel { pointer-events: auto; width: 360px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(15px); border-radius: 24px; box-shadow: 0 10px 50px rgba(0,0,0,0.15); padding: 20px; border: 1px solid #e2e8f0; max-height: 85vh; overflow-y: auto; transition: all 0.3s ease; }
         .night-mode .controls-panel { background: rgba(15, 23, 42, 0.9); border-color: #334155; color: #f8fafc; box-shadow: 0 10px 50px rgba(0,0,0,0.5); }
         .section-title { font-weight: 800; color: #0f172a; font-size: 0.85rem; margin-bottom: 10px; border-bottom: 2px solid #3b82f6; padding-bottom: 5px; display: flex; align-items: center; gap: 8px; margin-top: 15px; }
@@ -69,7 +70,7 @@
 </div>
 
 <!-- Price Calculator Badge -->
-<div id="price-badge" class="absolute top-6 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-3xl shadow-2xl flex flex-col items-center transition-all duration-300">
+<div id="price-badge" style="display:none !important;" class="absolute top-6 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-3xl shadow-2xl flex flex-col items-center transition-all duration-300">
     <div class="flex items-center justify-between w-full mb-1">
         <p class="text-[10px] text-slate-500 font-bold uppercase tracking-widest" id="price-title">הערכת מחיר למערכת</p>
         <button onclick="togglePricingPanel()" class="text-slate-400 hover:text-slate-600 transition" title="הגדרות תמחור">⚙️</button>
@@ -79,7 +80,7 @@
 </div>
 
 <!-- Pricing Settings Panel (Hidden by default) -->
-<div id="pricing-settings-panel" class="absolute top-32 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-2xl shadow-xl hidden" style="width: 300px;">
+<div id="pricing-settings-panel" class="absolute top-32 left-6 pointer-events-auto z-50 bg-white/95 border border-slate-200 px-6 py-4 rounded-2xl shadow-xl hidden" style="display:none !important; width: 300px;">
     <h3 class="font-bold text-slate-800 mb-3 border-b pb-2 text-sm">הגדרות מחירון (₪)</h3>
     <div class="space-y-2 text-xs">
         <div class="flex justify-between items-center">
@@ -135,9 +136,11 @@
                     </div>
                     <div class="control-group">
                         <label class="control-label">סוג פרופיל מסגרת:</label>
-                        <select id="input-frame-type" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
-                            <option value="120">היקפי 120/40</option>
+                        <select id="input-frame-type" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="window._extFrameType=null;updateModel()">
+                            <option value="120">פרופיל חלק 120/40</option>
                             <option value="140">דאבל טי 140/40</option>
+                            <option value="hitech120">דאבל טי הייטק 120/40</option>
+                            <option value="hitech140">דאבל טי הייטק 140/40</option>
                         </select>
                     </div>
                 </div>
@@ -470,6 +473,77 @@
     let isPanelVisible = true;
     let isNightMode = false;
     let hasCustomBg = false;
+    // External config for L-shape pergola sync
+    window._extIsLShape = false;
+    window._extLWallWidth = 0;
+    window._extLWallDepth = 0;
+    window._extLShapeSide = 'right';
+    /** מסונכרן מ־Yarhi Pro: smooth | doubleT | doubleTHiTech140 | doubleTHiTech120 */
+    window._extFrameType = null;
+
+    function resolveFrameProfileVisual() {
+        const ext = window._extFrameType;
+        if (ext === 'doubleTHiTech140') return { mode: 'hitech', heightM: 0.14 };
+        if (ext === 'doubleTHiTech120') return { mode: 'hitech', heightM: 0.12 };
+        if (ext === 'doubleT') return { mode: 'doubleT', heightM: 0.14 };
+        if (ext === 'smooth') return { mode: 'smooth', heightM: 0.12 };
+        const ft = document.getElementById('input-frame-type') && document.getElementById('input-frame-type').value;
+        if (ft === '140') return { mode: 'doubleT', heightM: 0.14 };
+        if (ft === 'hitech140') return { mode: 'hitech', heightM: 0.14 };
+        if (ft === 'hitech120') return { mode: 'hitech', heightM: 0.12 };
+        return { mode: 'smooth', heightM: 0.12 };
+    }
+
+    function addFrameProfileRibsAlongX(group, color, xMin, xMax, zBeamCenter, beamY, fh, fw, outwardZ, visualMode) {
+        if (visualMode === 'smooth') return;
+        const ribZ = visualMode === 'hitech' ? 0.006 : 0.007;
+        const ribY = visualMode === 'hitech' ? Math.min(0.014, fh * 0.155) : Math.min(0.016, fh * 0.18);
+        const yB = beamY - fh / 2;
+        const yT = beamY + fh / 2;
+        const ys =
+            visualMode === 'hitech'
+                ? [yB + fh * 0.23, beamY, yT - fh * 0.23]
+                : [yB + fh * 0.27, yT - fh * 0.27];
+        const zFace = zBeamCenter + outwardZ * (fw / 2 + ribZ / 2);
+        const len = xMax - xMin;
+        const cx = (xMin + xMax) / 2;
+        ys.forEach((yc) => {
+            const rib = createBox(len, ribY, ribZ, color);
+            rib.position.set(cx, yc, zFace);
+            group.add(rib);
+        });
+    }
+
+    /** קורות מקבילות ל־Z: פסי פרופיל על הפאה החיצונית (זרות מהמרכז) — כמו חזית/אחור. */
+    function addFrameProfileRibsAlongZ(group, color, zMin, zMax, xBeamCenter, beamY, fh, fw, visualMode) {
+        if (visualMode === 'smooth') return;
+        const nRibs = visualMode === 'hitech' ? 4 : 2;
+        const ribX = 0.007;
+        const ribY = Math.min(0.016, fh * 0.18);
+        const yB = beamY - fh / 2;
+        const yT = beamY + fh / 2;
+        const ys = [];
+        if (nRibs === 2) {
+            ys.push(yB + fh * 0.27, yT - fh * 0.27);
+        } else {
+            for (let i = 1; i <= 4; i++) ys.push(yB + (fh * i) / 5);
+        }
+        const outwardSign = xBeamCenter > 0 ? 1 : xBeamCenter < 0 ? -1 : 1;
+        const xFace = xBeamCenter + outwardSign * (fw / 2 + ribX / 2);
+        const len = zMax - zMin;
+        const cz = (zMin + zMax) / 2;
+        ys.forEach((yc) => {
+            const rib = createBox(ribX, ribY, len, color);
+            rib.position.set(xFace, yc, cz);
+            rib.renderOrder = 2;
+            if (rib.material) {
+                rib.material.polygonOffset = true;
+                rib.material.polygonOffsetFactor = -4;
+                rib.material.polygonOffsetUnits = -4;
+            }
+            group.add(rib);
+        });
+    }
 
     function _setRangeAndNumber(idRange, idNum, value) {
         const r = document.getElementById(idRange);
@@ -481,17 +555,16 @@
     function _activateColorOption(containerSel, hex) {
         if (!hex) return;
         const opts = document.querySelectorAll(containerSel + ' .color-option');
+        const hexNorm = String(hex).trim().toLowerCase();
         let best = null;
         opts.forEach(o => {
-            const c = (o.dataset && o.dataset.color) ? o.dataset.color.toLowerCase() : '';
-            if (c === String(hex).toLowerCase()) best = o;
+            const c = (o.dataset && o.dataset.color) ? String(o.dataset.color).trim().toLowerCase() : '';
+            if (c === hexNorm) best = o;
         });
-        if (!best && opts.length) best = opts[0];
+        opts.forEach(el => el.classList.remove('active'));
         if (best) {
-            opts.forEach(el => el.classList.remove('active'));
             best.classList.add('active');
-            const v = best.dataset.color || hex;
-            return v;
+            return best.dataset.color || hex;
         }
         return hex;
     }
@@ -501,6 +574,13 @@
         // Dimensions
         if (cfg.L) _setRangeAndNumber('input-L', 'input-num-L', cfg.L);
         if (cfg.W) _setRangeAndNumber('input-W', 'input-num-W', cfg.W);
+        if (cfg.isLShape !== undefined) window._extIsLShape = !!cfg.isLShape;
+        if (cfg.lWallWidth !== undefined) window._extLWallWidth = Math.max(0, Number(cfg.lWallWidth) || 0);
+        if (cfg.lWallDepth !== undefined) window._extLWallDepth = Math.max(0, Number(cfg.lWallDepth) || 0);
+        if (cfg.lShapeSide) window._extLShapeSide = String(cfg.lShapeSide) === 'left' ? 'left' : 'right';
+        if (cfg.frameType !== undefined && cfg.frameType !== null && String(cfg.frameType).trim() !== '') {
+            window._extFrameType = String(cfg.frameType);
+        }
 
         // Divider count
         if (typeof cfg.dividers === 'number') {
@@ -575,11 +655,17 @@
                 postsRight: p.get('postsRight') ? Number(p.get('postsRight')) : undefined,
                 postsLeft: p.get('postsLeft') ? Number(p.get('postsLeft')) : undefined,
                 postsBack: p.get('postsBack') ? Number(p.get('postsBack')) : undefined,
+                isLShape: p.get('isLShape') === '1' || p.get('isLShape') === 'true',
+                lWallWidth: p.get('lWallWidth') ? Number(p.get('lWallWidth')) : undefined,
+                lWallDepth: p.get('lWallDepth') ? Number(p.get('lWallDepth')) : undefined,
+                lShapeSide: p.get('lShapeSide') || undefined,
                 frameHex: p.get('frameHex') || undefined,
                 slatHex: p.get('slatHex') || undefined,
                 roofType: p.get('roofType') || undefined,
                 santafHex: p.get('santafHex') || undefined,
+                hasSantaf: p.get('hasSantaf') === '1' || p.get('hasSantaf') === 'true',
                 captionText: p.get('captionText') ? decodeURIComponent(p.get('captionText')) : undefined,
+                frameType: p.get('frameType') || undefined,
             };
             applyExternalConfig(cfg);
         } catch (e) {}
@@ -786,6 +872,7 @@
         const ralColors = [
             { hex: '#2c3e50', name: 'אפור פחם' }, { hex: '#000000', name: 'שחור 9005' }, { hex: '#ffffff', name: 'לבן 9016' },
             { hex: '#f5f5dc', name: 'שמנת 9001' }, { hex: '#383E42', name: 'אנתרציט 7016' }, { hex: '#2F3234', name: 'שחור גרפיט 7021' },
+            { hex: '#474a51', name: 'אפור גרפיט 7024' },
             { hex: '#A5A5A5', name: 'אלומיניום 9006' }, { hex: '#8F8F8F', name: 'אפור כהה 9007' }, { hex: '#E3D9C6', name: 'פנינה 1013' },
             { hex: '#4B3D35', name: 'חום 8014' }, { hex: '#4E3B31', name: 'חום טרה 8028' }, { hex: '#9DA1AA', name: 'אפור חלון 7040' },
             { hex: '#114232', name: 'ירוק זית 6005' }
@@ -860,6 +947,79 @@
         if(!isLed) mesh.castShadow = true;
         mesh.receiveShadow = true;
         return mesh;
+    }
+
+    /** פריזמה משולשת (מיטר 45°) — שלוש נקודות ב־XZ, גובה בין y0 ל־y1 */
+    function addMiterWedgePrism(group, xa, za, xb, zb, xc, zc, y0, y1, color) {
+        const geom = new THREE.BufferGeometry();
+        const v = new Float32Array([
+            xa, y0, za, xb, y0, zb, xc, y0, zc,
+            xa, y1, za, xb, y1, zb, xc, y1, zc,
+        ]);
+        geom.setAttribute('position', new THREE.BufferAttribute(v, 3));
+        geom.setIndex([0, 1, 2, 3, 5, 4, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0]);
+        geom.computeVertexNormals();
+        const matOpts = { color: color, side: THREE.DoubleSide, roughness: 0.5, metalness: 0.3 };
+        const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial(matOpts));
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+    }
+
+    /** קו חיתוך אלכסוני (45°) — לוח דק על ההיפוטנוזה, כמו תפר המיטר בפועל */
+    function addMiterDiagonalSeamPlate(group, ax, az, bx, bz, y0, y1, baseColor) {
+        const dx = bx - ax;
+        const dz = bz - az;
+        const len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 1e-6) return;
+        const cx = (ax + bx) / 2;
+        const cz = (az + bz) / 2;
+        const cy = (y0 + y1) / 2;
+        const h = y1 - y0;
+        const thick = 0.0035;
+        const seamCol = new THREE.Color(baseColor).multiplyScalar(0.86);
+        const mat = new THREE.MeshStandardMaterial({ color: seamCol, side: THREE.DoubleSide, roughness: 0.42, metalness: 0.38 });
+        const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, h, thick), mat);
+        mesh.position.set(cx, cy, cz);
+        mesh.rotation.y = Math.atan2(dz, dx);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+    }
+
+    /**
+     * פינה אחת: xi,zi = פינה פנימית ישרה; (xo1,zo1)(xo2,zo2) = שתי נקודות חוץ על רגלי המשולש — התפר על הקו ביניהן.
+     */
+    function addMiterCornerMiterVisual(group, xi, zi, xo1, zo1, xo2, zo2, H, fh, color) {
+        const eps = 0.0018;
+        const y0 = H - fh / 2 + eps;
+        const y1 = H + fh / 2 - eps;
+        addMiterWedgePrism(group, xi, zi, xo1, zo1, xo2, zo2, y0, y1, color);
+        addMiterDiagonalSeamPlate(group, xo1, zo1, xo2, zo2, y0, y1, color);
+    }
+
+    /** ארבע פינות חיצוניות — מסגרת מלבנית */
+    function addMiterCornerWedges(group, L, W, H, fh, fw, color) {
+        const q = [
+            [L / 2 - fw / 2, W / 2 - fw / 2, L / 2 + fw / 2, W / 2 - fw / 2, L / 2 - fw / 2, W / 2 + fw / 2],
+            [-L / 2 + fw / 2, W / 2 - fw / 2, -L / 2 - fw / 2, W / 2 - fw / 2, -L / 2 + fw / 2, W / 2 + fw / 2],
+            [L / 2 - fw / 2, -W / 2 + fw / 2, L / 2 + fw / 2, -W / 2 + fw / 2, L / 2 - fw / 2, -W / 2 - fw / 2],
+            [-L / 2 + fw / 2, -W / 2 + fw / 2, -L / 2 - fw / 2, -W / 2 + fw / 2, -L / 2 + fw / 2, -W / 2 - fw / 2],
+        ];
+        q.forEach(([xi, zi, xo1, zo1, xo2, zo2]) => addMiterCornerMiterVisual(group, xi, zi, xo1, zo1, xo2, zo2, H, fh, color));
+    }
+
+    /** שלוש פינות חיצוניות "רגילות" במסגרת ר' — הצד הארוך + קדמי + אחורי/צד קצר */
+    function addMiterCornerWedgesLShape(group, L, W, H, fh, fw, color, isLLeft) {
+        if (isLLeft) {
+            addMiterCornerMiterVisual(group, L / 2 - fw / 2, W / 2 - fw / 2, L / 2 + fw / 2, W / 2 - fw / 2, L / 2 - fw / 2, W / 2 + fw / 2, H, fh, color);
+            addMiterCornerMiterVisual(group, L / 2 - fw / 2, -W / 2 + fw / 2, L / 2 + fw / 2, -W / 2 + fw / 2, L / 2 - fw / 2, -W / 2 - fw / 2, H, fh, color);
+            addMiterCornerMiterVisual(group, -L / 2 + fw / 2, W / 2 - fw / 2, -L / 2 - fw / 2, W / 2 - fw / 2, -L / 2 + fw / 2, W / 2 + fw / 2, H, fh, color);
+        } else {
+            addMiterCornerMiterVisual(group, -L / 2 + fw / 2, W / 2 - fw / 2, -L / 2 - fw / 2, W / 2 - fw / 2, -L / 2 + fw / 2, W / 2 + fw / 2, H, fh, color);
+            addMiterCornerMiterVisual(group, -L / 2 + fw / 2, -W / 2 + fw / 2, -L / 2 - fw / 2, -W / 2 + fw / 2, -L / 2 + fw / 2, -W / 2 - fw / 2, H, fh, color);
+            addMiterCornerMiterVisual(group, L / 2 - fw / 2, W / 2 - fw / 2, L / 2 + fw / 2, W / 2 - fw / 2, L / 2 - fw / 2, W / 2 + fw / 2, H, fh, color);
+        }
     }
 
     function createFan() {
@@ -1017,6 +1177,39 @@
         }
     }
 
+    /**
+     * קורות חלוקה בפרגולת ר': קורה אחת בדיוק על קו הבליטה (כמו בסקיצת הייצור),
+     * השאר מחולקים יחסית לאורך כל מקטע (מגרעת / ראשי), לא על כל האורך L.
+     */
+    function dividerPositionsForPergola(L, nDiv, hasLNotch, isLLeft, notchW) {
+        if (nDiv <= 0) return [];
+        if (!hasLNotch || notchW <= 0.001) {
+            const xs = [];
+            for (let i = 0; i < nDiv; i++) {
+                xs.push(-L / 2 + (i + 1) * (L / (nDiv + 1)));
+            }
+            return xs;
+        }
+        const xNotch = isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW);
+        const lenSegA = isLLeft ? notchW : (L - notchW);
+        const lenSegB = isLLeft ? (L - notchW) : notchW;
+        const interior = nDiv - 1;
+        // floor — השארית למקטע הארוך (כמו 255/500 מול 755: קורה אחת בצד המגרעת, ארבע בצד הראשי)
+        let nA = Math.floor((interior * lenSegA) / L);
+        nA = Math.max(0, Math.min(interior, nA));
+        const nB = interior - nA;
+        const xs = [];
+        for (let k = 1; k <= nA; k++) {
+            xs.push(-L / 2 + k * (lenSegA / (nA + 1)));
+        }
+        xs.push(xNotch);
+        for (let k = 1; k <= nB; k++) {
+            xs.push(xNotch + k * (lenSegB / (nB + 1)));
+        }
+        xs.sort((a, b) => a - b);
+        return xs;
+    }
+
     function updateModel() {
         const numLEl = document.getElementById('input-num-L');
         const numWEl = document.getElementById('input-num-W');
@@ -1027,10 +1220,13 @@
         
         let W_val = numWEl ? parseFloat(numWEl.value) : 300;
         let W = (isNaN(W_val) || W_val === 0) ? 3 : W_val / 100;
+        const isLShapeExt = !!window._extIsLShape;
+        const lW = isLShapeExt ? Math.max(0, (Number(window._extLWallWidth) || 0) / 100) : 0;
+        const lD = isLShapeExt ? Math.max(0, (Number(window._extLWallDepth) || 0) / 100) : 0;
+        const isLLeft = String(window._extLShapeSide || 'right') === 'left';
 
         const roofType = document.getElementById('input-roof-type').value;
         const gapVal = document.getElementById('input-gap') ? parseFloat(document.getElementById('input-gap').value) / 100 : 0.03;
-        const frameType = document.getElementById('input-frame-type').value;
         const slatTypeTop = document.getElementById('input-slat-type').value;
         const orientationTop = document.getElementById('input-orientation').value;
         const slatAngle = document.getElementById('input-slat-angle') ? parseFloat(document.getElementById('input-slat-angle').value) * Math.PI / 180 : 0;
@@ -1077,15 +1273,130 @@
         fans = []; labelPoints = [];
         floor.visible = showGrass;
 
-        const H = 2.7; const frameHeight = frameType === '140' ? 0.14 : 0.12; const frameWidth = 0.04;
+        const notchW = isLShapeExt ? Math.min(Math.max(0, lW), Math.max(0, L - 0.2)) : 0;
+        const notchD = isLShapeExt ? Math.min(Math.max(0, lD), Math.max(0, W - 0.2)) : 0;
+        const fpVis = resolveFrameProfileVisual();
+        const frameHeight = fpVis.heightM;
+        const frameVisualMode = fpVis.mode;
+        const H = 2.7;
+        const frameWidth = 0.04;
 
-        if (showWall) {
-            const wall = createBox(L + 6, 6, 0.4, 0xffffff);
-            wall.position.set(0, 3, -W/2 - 0.21); pergolaGroup.add(wall);
+        const hasLNotch = isLShapeExt && notchW > 0.05 && notchD > 0.05;
+        let cxMain = 0;
+        let cxProt = 0;
+        if (hasLNotch) {
+            if (isLLeft) {
+                cxProt = -L / 2 + notchW / 2;
+                cxMain = notchW / 2;
+            } else {
+                cxMain = -notchW / 2;
+                cxProt = L / 2 - notchW / 2;
+            }
         }
 
-        [W/2, -W/2].forEach(z => { const b = createBox(L, frameHeight, frameWidth, frameColor); b.position.set(0, H, z); pergolaGroup.add(b); });
-        [L/2, -L/2].forEach(x => { const b = createBox(frameWidth, frameHeight, W, frameColor); b.position.set(x, H, 0); pergolaGroup.add(b); });
+        if (!hasLNotch) {
+            if (showWall) {
+                const wall = createBox(L + 6, 6, 0.4, 0xffffff);
+                wall.position.set(0, 3, -W / 2 - 0.21);
+                pergolaGroup.add(wall);
+            }
+            const miterTrim = frameWidth;
+            const beamLenX = Math.max(0.2, L - 2 * miterTrim);
+            const beamLenZ = Math.max(0.2, W - 2 * miterTrim);
+            [W / 2, -W / 2].forEach((z) => {
+                const b = createBox(beamLenX, frameHeight, frameWidth, frameColor);
+                b.position.set(0, H, z);
+                pergolaGroup.add(b);
+            });
+            [L / 2, -L / 2].forEach((x) => {
+                const b = createBox(frameWidth, frameHeight, beamLenZ, frameColor);
+                b.position.set(x, H, 0);
+                pergolaGroup.add(b);
+            });
+            addMiterCornerWedges(pergolaGroup, L, W, H, frameHeight, frameWidth, frameColor);
+            if (frameVisualMode !== 'smooth') {
+                const x0 = -L / 2 + miterTrim;
+                const x1 = L / 2 - miterTrim;
+                const z0 = -W / 2 + miterTrim;
+                const z1 = W / 2 - miterTrim;
+                addFrameProfileRibsAlongX(pergolaGroup, frameColor, x0, x1, W / 2, H, frameHeight, frameWidth, +1, frameVisualMode);
+                addFrameProfileRibsAlongX(pergolaGroup, frameColor, x0, x1, -W / 2, H, frameHeight, frameWidth, -1, frameVisualMode);
+                addFrameProfileRibsAlongZ(pergolaGroup, frameColor, z0, z1, L / 2, H, frameHeight, frameWidth, frameVisualMode);
+                addFrameProfileRibsAlongZ(pergolaGroup, frameColor, z0, z1, -L / 2, H, frameHeight, frameWidth, frameVisualMode);
+            }
+        } else {
+            if (showWall) {
+                // בלי הרחבות ±6 / ±0.4 בציר X — כך קו פינת הבליטה בקיר תואם ל־depthX ולקורת החלוקה על קו המגרעת
+                const wallMain = createBox(Math.max(0.2, L - notchW), 6, 0.4, 0xffffff);
+                wallMain.position.set(cxMain, 3, -W / 2 - 0.21);
+                pergolaGroup.add(wallMain);
+
+                const wallProt = createBox(notchW, 6, notchD + 0.4, 0xffffff);
+                wallProt.position.set(cxProt, 3, -W / 2 + notchD / 2 - 0.21);
+                pergolaGroup.add(wallProt);
+            }
+
+            const mT = frameWidth;
+            const backSpan = L - notchW;
+            const bBackLen = Math.max(0.15, backSpan - 2 * mT);
+            const bBackMain = createBox(bBackLen, frameHeight, frameWidth, frameColor);
+            bBackMain.position.set(cxMain, H, -W / 2);
+            pergolaGroup.add(bBackMain);
+
+            const depthX = isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW);
+            const depthLenZ = Math.max(0.15, notchD + frameWidth - 2 * mT);
+            const depthZCenter = -W / 2 + notchD / 2;
+            const bDepth = createBox(frameWidth, frameHeight, depthLenZ, frameColor);
+            bDepth.position.set(depthX, H, depthZCenter);
+            pergolaGroup.add(bDepth);
+
+            const innerLenX = Math.max(0.15, notchW - 2 * mT);
+            const bInnerWidth = createBox(innerLenX, frameHeight, frameWidth, frameColor);
+            bInnerWidth.position.set(cxProt, H, -W / 2 + notchD);
+            pergolaGroup.add(bInnerWidth);
+
+            const beamLenXL = Math.max(0.15, L - 2 * mT);
+            const bFront = createBox(beamLenXL, frameHeight, frameWidth, frameColor);
+            bFront.position.set(0, H, W / 2);
+            pergolaGroup.add(bFront);
+
+            const sideMainX = isLLeft ? L / 2 : -L / 2;
+            const beamLenZL = Math.max(0.15, W - 2 * mT);
+            const bSideMain = createBox(frameWidth, frameHeight, beamLenZL, frameColor);
+            bSideMain.position.set(sideMainX, H, 0);
+            pergolaGroup.add(bSideMain);
+
+            const sideShortX = isLLeft ? -L / 2 : L / 2;
+            const shortSideLen = Math.max(0.2, W - notchD + frameWidth);
+            const shortLenTrim = Math.max(0.15, shortSideLen - 2 * mT);
+            const zShortC = notchD / 2 + frameWidth / 2;
+            const bSideShort = createBox(frameWidth, frameHeight, shortLenTrim, frameColor);
+            bSideShort.position.set(sideShortX, H, zShortC);
+            pergolaGroup.add(bSideShort);
+
+            addMiterCornerWedgesLShape(pergolaGroup, L, W, H, frameHeight, frameWidth, frameColor, isLLeft);
+
+            if (frameVisualMode !== 'smooth') {
+                const xBackMin = cxMain - backSpan / 2 + mT;
+                const xBackMax = cxMain + backSpan / 2 - mT;
+                addFrameProfileRibsAlongX(pergolaGroup, frameColor, xBackMin, xBackMax, -W / 2, H, frameHeight, frameWidth, -1, frameVisualMode);
+                const xf0 = -L / 2 + mT;
+                const xf1 = L / 2 - mT;
+                addFrameProfileRibsAlongX(pergolaGroup, frameColor, xf0, xf1, W / 2, H, frameHeight, frameWidth, +1, frameVisualMode);
+                const zsm0 = -W / 2 + mT;
+                const zsm1 = W / 2 - mT;
+                addFrameProfileRibsAlongZ(pergolaGroup, frameColor, zsm0, zsm1, sideMainX, H, frameHeight, frameWidth, frameVisualMode);
+                const zShortMin = zShortC - shortSideLen / 2 + mT;
+                const zShortMax = zShortC + shortSideLen / 2 - mT;
+                addFrameProfileRibsAlongZ(pergolaGroup, frameColor, zShortMin, zShortMax, sideShortX, H, frameHeight, frameWidth, frameVisualMode);
+                const zDepthMin = depthZCenter - (notchD + frameWidth) / 2 + mT;
+                const zDepthMax = depthZCenter + (notchD + frameWidth) / 2 - mT;
+                addFrameProfileRibsAlongZ(pergolaGroup, frameColor, zDepthMin, zDepthMax, depthX, H, frameHeight, frameWidth, frameVisualMode);
+                const xInnerMin = cxProt - notchW / 2 + mT;
+                const xInnerMax = cxProt + notchW / 2 - mT;
+                addFrameProfileRibsAlongX(pergolaGroup, frameColor, xInnerMin, xInnerMax, -W / 2 + notchD, H, frameHeight, frameWidth, +1, frameVisualMode);
+            }
+        }
 
         if (showPosts) {
             const postSize = 0.1;
@@ -1144,14 +1455,31 @@
             else if (slatTypeTop === 'combo2') pattern = [0.02, 0.02, 0.07, 0.04, 0.04]; 
 
             if (orientationTop === 'vertical') {
+                const xNotchSl = hasLNotch ? (isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW)) : 0;
                 let currentPos = -L/2 + 0.02; let pIndex = 0;
+                const emitVertSlat = (l, r) => {
+                    const segW = r - l;
+                    if (segW < 0.0005) return;
+                    const cx = (l + r) / 2;
+                    const notchZ = hasLNotch && (isLLeft ? (cx < xNotchSl) : (cx > xNotchSl));
+                    const slatDepth = notchZ ? Math.max(0.2, (W - notchD) - 0.08) : (W - 0.08);
+                    const zOff = notchZ ? (notchD / 2) : 0;
+                    const s = createBox(segW, 0.02, slatDepth, slatColor);
+                    s.position.set(cx, H, zOff);
+                    s.rotation.z = slatAngle;
+                    pergolaGroup.add(s);
+                };
                 while(currentPos < L/2 - 0.02) {
                     let sw = pattern[pIndex % pattern.length];
-                    if (currentPos + sw > L/2) break; 
-                    const s = createBox(sw, 0.02, W - 0.08, slatColor);
-                    s.position.set(currentPos + sw/2, H, 0);
-                    s.rotation.z = slatAngle; 
-                    pergolaGroup.add(s);
+                    if (currentPos + sw > L/2) break;
+                    const left = currentPos;
+                    const right = currentPos + sw;
+                    if (!hasLNotch || !(left < xNotchSl && right > xNotchSl)) {
+                        emitVertSlat(left, right);
+                    } else {
+                        emitVertSlat(left, xNotchSl);
+                        emitVertSlat(xNotchSl, right);
+                    }
                     currentPos += sw + gapVal; pIndex++;
                 }
             } else {
@@ -1168,16 +1496,23 @@
             }
             
             const nDiv = counters.divider;
+            const divXs = dividerPositionsForPergola(L, nDiv, hasLNotch, isLLeft, notchW);
+            const xNotchDiv = hasLNotch ? (isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW)) : 0;
             for(let i=0; i<nDiv; i++) {
-                const xPos = -L/2 + (i + 1) * (L / (nDiv + 1));
-                const div = createBox(0.06, frameHeight - 0.02, W - 0.08, frameColor);
-                div.position.set(xPos, H, 0); pergolaGroup.add(div);
+                const xPos = divXs[i];
+                const atJunction = hasLNotch && Math.abs(xPos - xNotchDiv) < 1e-4;
+                const notchZone = hasLNotch && !atJunction && (isLLeft ? (xPos < xNotchDiv) : (xPos > xNotchDiv));
+                const divDepth = notchZone ? Math.max(0.2, (W - notchD) - 0.08) : (W - 0.08);
+                const divZ = notchZone ? (notchD / 2) : 0;
+
+                const div = createBox(0.06, frameHeight - 0.02, divDepth, frameColor);
+                div.position.set(xPos, H, divZ); pergolaGroup.add(div);
                 if (dividerStates[i]?.led) {
-                    const led = createBox(0.02, 0.02, W - 0.1, ledColor, true);
-                    led.position.set(xPos, H - 0.06, 0); pergolaGroup.add(led);
+                    const led = createBox(0.02, 0.02, Math.max(0.2, divDepth - 0.02), ledColor, true);
+                    led.position.set(xPos, H - 0.06, divZ); pergolaGroup.add(led);
                 }
                 if (dividerStates[i]?.fan) {
-                    const f = createFan(); f.group.position.set(xPos, H - 0.08, 0);
+                    const f = createFan(); f.group.position.set(xPos, H - 0.08, divZ);
                     pergolaGroup.add(f.group); fans.push(f.blades);
                 }
             }
@@ -1227,8 +1562,15 @@
 
         const shouldDrawSantafBH = (roofType === 'santafBH') || !!window._extHasSantaf;
         if (shouldDrawSantafBH) {
-            const roofW = Math.max(0.2, L - 0.08);
-            const roofD = Math.max(0.2, W + 0.15); // 15cm front overhang
+            // סנטף מונח מעל קו המסגרת; רוחב/עומך לפי מפתח פנימי מלא (+ אוברהנג קדמי) — מכסה את כל הפרגולה
+            const topY = H + frameHeight / 2;
+            const roofW = Math.max(0.2, L - 2 * frameWidth);
+            const frontOverhang = 0.15;
+            const roofD = Math.max(0.2, W - 2 * frameWidth + frontOverhang);
+            const roofZ = -W / 2 + frameWidth / 2 + roofD / 2;
+            const maxRipple = bhWave * 1.28;
+            const airAboveFrame = 0.01;
+            const santafPlaneY = topY + airAboveFrame + maxRipple;
             const segX = 120;
             const segZ = 28;
             const geom = new THREE.PlaneGeometry(roofW, roofD, segX, segZ);
@@ -1256,20 +1598,37 @@
             });
             const roof = new THREE.Mesh(geom, roofMat);
             roof.rotation.x = -Math.PI / 2;
-            roof.position.set(0, H + 0.045, 0.075); // push forward for 15cm front overhang
+            roof.position.set(0, santafPlaneY, roofZ);
             roof.castShadow = false;
             roof.receiveShadow = true;
             pergolaGroup.add(roof);
-
-            // Front/back caps for "thick BH" look
-            const capTh = 0.012;
-            const capH = Math.max(0.012, bhWave * 1.6);
-            const capFront = createBox(roofW, capH, capTh, frameColor, false, 0.9);
-            capFront.position.set(0, H + capH / 2, roofD / 2);
-            pergolaGroup.add(capFront);
-            const capBack = createBox(roofW, capH, capTh, frameColor, false, 0.9);
-            capBack.position.set(0, H + capH / 2, -roofD / 2);
-            pergolaGroup.add(capBack);
+            // פסי סנטף מעל קורות הצד (ימין/שמאל) — יושבים על הפרופיל מהצד; המישור המרכזי (חזית/אחור) לא משתנה
+            if (!hasLNotch) {
+                const sideSegW = 6;
+                const sideSegD = 28;
+                const wavesSide = Math.max(6, Math.round(roofD / 0.16));
+                const addSideStrip = (centerX) => {
+                    const sg = new THREE.PlaneGeometry(frameWidth, roofD, sideSegW, sideSegD);
+                    const sp = sg.attributes.position;
+                    for (let i = 0; i < sp.count; i++) {
+                        const y0 = sp.getY(i);
+                        const yNorm = y0 / (roofD / 2);
+                        const ripple = Math.sin(yNorm * Math.PI * wavesSide) * bhWave;
+                        const micro = Math.sin(yNorm * Math.PI * wavesSide * 2) * (bhWave * 0.22);
+                        sp.setZ(i, ripple + micro);
+                    }
+                    sp.needsUpdate = true;
+                    sg.computeVertexNormals();
+                    const sideRoof = new THREE.Mesh(sg, roofMat);
+                    sideRoof.rotation.x = -Math.PI / 2;
+                    sideRoof.position.set(centerX, santafPlaneY, roofZ);
+                    sideRoof.castShadow = false;
+                    sideRoof.receiveShadow = true;
+                    pergolaGroup.add(sideRoof);
+                };
+                addSideStrip(L / 2 - frameWidth / 2);
+                addSideStrip(-L / 2 + frameWidth / 2);
+            }
         }
 
         if (showFurniture) { const furn = createFurniture(L, W); pergolaGroup.add(furn); }

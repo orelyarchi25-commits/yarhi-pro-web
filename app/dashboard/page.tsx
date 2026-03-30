@@ -14,7 +14,7 @@ type TabId = "simulation" | "pergolas";
 
 export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<TabId>("simulation");
-  const { isLoggedIn, hasAppAccess } = useAuth();
+  const { isLoggedIn, hasAppAccess, accountBlockReason } = useAuth();
 
   if (!isLoggedIn) {
     return (
@@ -39,12 +39,21 @@ export default function DashboardPage() {
   }
 
   if (!hasAppAccess) {
+    const expired = accountBlockReason === "expired";
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-6 px-4 pt-20" dir="rtl">
-        <div className="max-w-lg rounded-2xl border border-sky-600/50 bg-navy-900/80 p-10 text-center text-white">
-          <h1 className="text-2xl font-black text-sky-300">החשבון ממתין לאישור</h1>
+        <div
+          className={`max-w-lg rounded-2xl border bg-navy-900/80 p-10 text-center text-white ${
+            expired ? "border-amber-600/50" : "border-sky-600/50"
+          }`}
+        >
+          <h1 className={`text-2xl font-black ${expired ? "text-amber-300" : "text-sky-300"}`}>
+            {expired ? "פג תוקף הגישה" : "החשבון ממתין לאישור"}
+          </h1>
           <p className="mt-3 text-metallic-300 text-sm leading-relaxed">
-            אין גישה ללוח הבקרה עד שמנהל מאשר את החשבון. חזור לדף הבית או התנתק.
+            {expired
+              ? "תוקף הגישה במערכת הסתיים. פנה למנהל לחידוש (ב-Firestore: עדכון accessValidUntil). אחר כך רענן או התחבר מחדש."
+              : "אין גישה ללוח הבקרה עד שמנהל מאשר את החשבון. חזור לדף הבית או התנתק."}
           </p>
           <Link
             href="/"
@@ -58,8 +67,8 @@ export default function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen pt-24" dir="rtl">
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <main className="min-h-dvh pt-24" dir="rtl">
+      <div className="mx-auto w-full max-w-[min(100%,1920px)] px-4 sm:px-6 lg:px-8 xl:px-10">
         {/* Dashboard Header */}
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-white">לוח בקרה</h1>

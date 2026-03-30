@@ -12,46 +12,47 @@ const RAL_OPTIONS = [
 function getColorHex(colorStr: string): string {
   if (!colorStr) return "#555555";
   const h = colorStr.trim();
+  // קודי RAL ספציפיים קודם — כדי שלא ייבלעו ב"אפור" / "חום" מתוך תווית עברית (למשל "RAL 7024 - אפור גרפיט")
+  if (h.includes("9016")) return "#ffffff";
+  if (h.includes("9010")) return "#f8f8f2";
+  if (h.includes("1013")) return "#eaddc5";
+  if (h.includes("1015")) return "#e6d690";
+  if (h.includes("9006")) return "#a5a9ab";
+  if (h.includes("9007")) return "#808080";
+  if (h.includes("7035")) return "#c5c7c4";
+  if (h.includes("7037")) return "#7a7b7a";
+  if (h.includes("7040")) return "#9da1aa";
+  if (h.includes("7016")) return "#383e42";
+  if (h.includes("7021")) return "#2f3234";
+  if (h.includes("7024")) return "#474a51";
+  if (h.includes("9005")) return "#000000";
+  if (h.includes("8011")) return "#5a3d31";
+  if (h.includes("8014")) return "#4e3b31";
+  if (h.includes("8017")) return "#45322e";
+  if (h.includes("8028")) return "#593b22";
+  if (h.includes("6005")) return "#2f4f4f";
+  if (h.includes("6009")) return "#213529";
+  if (h.includes("5010")) return "#004f7c";
+  if (h.includes("5014")) return "#6c7c98";
+  if (h.includes("5024")) return "#5d9b9b";
+  if (h.includes("3005")) return "#5e2129";
+  if (h.includes("3020")) return "#cc0605";
+  if (h.includes("1001")) return "#d1b272";
+  if (h.includes("1019")) return "#a48f7a";
+  if (h.includes("4005")) return "#7e7389";
+  if (h.includes("6019")) return "#b7d9b1";
+  if (h.includes("7006")) return "#7a6a53";
+  if (h.includes("7032")) return "#b8b4a1";
+  if (h.includes("7039")) return "#6c6960";
+  if (h.includes("9001")) return "#fdf4e3";
+  if (h.includes("9002")) return "#e7ebda";
+  if (h.includes("בלגי")) return "#2b2b2b";
   if (h.includes("שחור")) return "#1a1a1a";
   if (h.includes("לבן") && !h.includes("צדף") && !h.includes("שנהב")) return "#f8fafc";
   if (h.includes("קרם")) return "#fef3c7";
   if (h.includes("אפור")) return "#475569";
   if (h.includes("חום")) return "#78350f";
   if (h.includes("דמוי עץ") || h.includes("עץ")) return "#b45309";
-  if (colorStr.includes("9016")) return "#ffffff";
-  if (colorStr.includes("9010")) return "#f8f8f2";
-  if (colorStr.includes("1013")) return "#eaddc5";
-  if (colorStr.includes("1015")) return "#e6d690";
-  if (colorStr.includes("9006")) return "#a5a9ab";
-  if (colorStr.includes("9007")) return "#808080";
-  if (colorStr.includes("7035")) return "#c5c7c4";
-  if (colorStr.includes("7037")) return "#7a7b7a";
-  if (colorStr.includes("7040")) return "#9da1aa";
-  if (colorStr.includes("7016")) return "#383e42";
-  if (colorStr.includes("7021")) return "#2f3234";
-  if (colorStr.includes("7024")) return "#474a51";
-  if (colorStr.includes("9005")) return "#000000";
-  if (colorStr.includes("8011")) return "#5a3d31";
-  if (colorStr.includes("8014")) return "#4e3b31";
-  if (colorStr.includes("8017")) return "#45322e";
-  if (colorStr.includes("8028")) return "#593b22";
-  if (colorStr.includes("6005")) return "#2f4f4f";
-  if (colorStr.includes("6009")) return "#213529";
-  if (colorStr.includes("5010")) return "#004f7c";
-  if (colorStr.includes("5014")) return "#6c7c98";
-  if (colorStr.includes("5024")) return "#5d9b9b";
-  if (colorStr.includes("3005")) return "#5e2129";
-  if (colorStr.includes("3020")) return "#cc0605";
-  if (colorStr.includes("1001")) return "#d1b272";
-  if (colorStr.includes("1019")) return "#a48f7a";
-  if (colorStr.includes("4005")) return "#7e7389";
-  if (colorStr.includes("6019")) return "#b7d9b1";
-  if (colorStr.includes("7006")) return "#7a6a53";
-  if (colorStr.includes("7032")) return "#b8b4a1";
-  if (colorStr.includes("7039")) return "#6c6960";
-  if (colorStr.includes("9001")) return "#fdf4e3";
-  if (colorStr.includes("9002")) return "#e7ebda";
-  if (colorStr.includes("בלגי")) return "#2b2b2b";
   return "#888888";
 }
 
@@ -105,6 +106,28 @@ function getPatFence(v: string): { w: number; wt: number; n: string }[] {
 
 type FieldWidth = { name: string; net: number; isShort: boolean; count: number; totalW: number; nShadeSets?: number; shadeCutLen?: number };
 
+/** אגד חזותי ליד התרשים — חתך פאה חיצונית לפי סוג מסגרת (כמו בהדמיה) */
+function frameProfileLegendSvg(frameType: string, strokeHex: string, L: number, _W: number): string {
+  const x = L + 14;
+  const y = 12;
+  const bw = 16;
+  const bh = 44;
+  let ribs = "";
+  if (frameType === "doubleT") {
+    ribs = `<line x1="${x + 2.5}" y1="${y + 13}" x2="${x + bw - 2.5}" y2="${y + 13}" stroke="${strokeHex}" stroke-width="1.4" stroke-linecap="round" opacity="0.95"/>
+<line x1="${x + 2.5}" y1="${y + 31}" x2="${x + bw - 2.5}" y2="${y + 31}" stroke="${strokeHex}" stroke-width="1.4" stroke-linecap="round" opacity="0.95"/>`;
+  } else if (frameType === "doubleTHiTech140" || frameType === "doubleTHiTech120") {
+    ribs = `<line x1="${x + 2.5}" y1="${y + 10}" x2="${x + bw - 2.5}" y2="${y + 10}" stroke="${strokeHex}" stroke-width="1.2" stroke-linecap="round" opacity="0.95"/>
+<line x1="${x + 2.5}" y1="${y + 22}" x2="${x + bw - 2.5}" y2="${y + 22}" stroke="${strokeHex}" stroke-width="1.2" stroke-linecap="round" opacity="0.95"/>
+<line x1="${x + 2.5}" y1="${y + 34}" x2="${x + bw - 2.5}" y2="${y + 34}" stroke="${strokeHex}" stroke-width="1.2" stroke-linecap="round" opacity="0.95"/>`;
+  }
+  return `<g aria-label="frame-profile-legend">
+<text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="#475569" font-weight="bold">חתך מסגרת</text>
+<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="#f8fafc" stroke="${strokeHex}" stroke-width="2" rx="1.5"/>
+${ribs}
+</g>`;
+}
+
 function generateSketch(
   L: number,
   W: number,
@@ -118,7 +141,8 @@ function generateSketch(
   shadingP: string,
   spacingCm: number,
   frameColorHex: string,
-  shadeColorHex: string
+  shadeColorHex: string,
+  frameType: string
 ): string {
   const lW_val = isL ? lW : 0;
   const lD_val = isL ? lD : 0;
@@ -164,7 +188,9 @@ function generateSketch(
     if (isLLeft) labelsSvg = `<text x="-5" y="${lD_val + (W - lD_val) / 2}" transform="rotate(-90 -5,${lD_val + (W - lD_val) / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155" dy="-5">יציאה קצרה: ${W - lD_val} ס"מ</text><text x="${L + 5}" y="${W / 2}" transform="rotate(90 ${L + 5},${W / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155" dy="-5">יציאה ארוכה: ${W} ס"מ</text><text x="${lW_val + (L - lW_val) / 2}" y="-10" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155">קיר ראשי: ${L - lW_val} ס"מ</text><text x="${lW_val - 5}" y="${lD_val / 2}" transform="rotate(-90 ${lW_val - 5},${lD_val / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#ea580c" dy="-5">עומק: ${lD_val}</text><text x="${lW_val / 2}" y="${lD_val - 5}" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#ea580c">רוחב: ${lW_val}</text><text x="${L / 2}" y="${W + fSize * 1.2}" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155">חזית שלמה: ${L} ס"מ</text>`;
     else labelsSvg = `<text x="-5" y="${W / 2}" transform="rotate(-90 -5,${W / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155" dy="-5">יציאה ארוכה: ${W} ס"מ</text><text x="${L + 5}" y="${lD_val + (W - lD_val) / 2}" transform="rotate(90 ${L + 5},${lD_val + (W - lD_val) / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155" dy="-5">יציאה קצרה: ${W - lD_val} ס"מ</text><text x="${(L - lW_val) / 2}" y="-10" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155">קיר ראשי: ${L - lW_val} ס"מ</text><text x="${L - lW_val + 5}" y="${lD_val / 2}" transform="rotate(90 ${L - lW_val + 5},${lD_val / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#ea580c" dy="-5">עומק: ${lD_val}</text><text x="${L - lW_val / 2}" y="${lD_val - 5}" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#ea580c">רוחב: ${lW_val}</text><text x="${L / 2}" y="${W + fSize * 1.2}" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155">חזית שלמה: ${L} ס"מ</text>`;
   } else labelsSvg = `<text x="-5" y="${W / 2}" transform="rotate(-90 -5,${W / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155" dy="-5">יציאה: ${W} ס"מ</text><text x="${L + 5}" y="${W / 2}" transform="rotate(90 ${L + 5},${W / 2})" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155" dy="-5">יציאה: ${W} ס"מ</text><text x="${L / 2}" y="-10" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155">קיר אחורי: ${L} ס"מ</text><text x="${L / 2}" y="${W + fSize * 1.2}" text-anchor="middle" font-size="${fSize}" font-weight="bold" fill="#334155">חזית שלמה: ${L} ס"מ</text>`;
-  return `<div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center relative" style="direction: ltr;"><div class="relative w-full max-w-2xl mx-auto flex justify-center mt-4 mb-2"><svg viewBox="-40 -30 ${L + 80} ${W + 60}" style="max-height: 320px; width: 100%; overflow: visible;">${shadingPattern}<polygon points="${pts}" fill="${fillAttr}" stroke="${frameColorHex}" stroke-width="${Math.max(L / 100, 2)}" stroke-linejoin="round" />${dividersSvg}${innerTextSvg}${labelsSvg}</svg></div></div>`;
+  const vbW = L + 115;
+  const legendSvg = frameProfileLegendSvg(frameType, frameColorHex, L, W);
+  return `<div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center justify-center relative" style="direction: ltr;"><div class="relative w-full max-w-2xl mx-auto flex justify-center mt-4 mb-2"><svg viewBox="-40 -30 ${vbW} ${W + 60}" style="max-height: 320px; width: 100%; overflow: visible;">${shadingPattern}<polygon points="${pts}" fill="${fillAttr}" stroke="${frameColorHex}" stroke-width="${Math.max(L / 100, 2)}" stroke-linejoin="round" />${dividersSvg}${innerTextSvg}${labelsSvg}${legendSvg}</svg></div></div>`;
 }
 
 const weightsMap: Record<string, { [k: number]: number }> = {
@@ -364,8 +390,12 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
     const nFieldsRight = isLLeft ? nFieldsMain : nFieldsProt;
     const netLeft = (widthLeft - frameDedHalf - divThickness - (nFieldsLeft - 1) * divThickness) / nFieldsLeft;
     const netRight = (widthRight - frameDedHalf - divThickness - (nFieldsRight - 1) * divThickness) / nFieldsRight;
-    fieldWidths.push({ name: isLLeft ? "בליטה" : "קיר ראשי", net: netLeft, isShort: true, count: nFieldsLeft, totalW: widthLeft });
-    fieldWidths.push({ name: isLLeft ? "קיר ראשי" : "בליטה", net: netRight, isShort: false, count: nFieldsRight, totalW: widthRight });
+    // isShort חייב להתאים לאזור המגרעת בפועל:
+    // בליטה שמאלית => האזור השמאלי קצר; בליטה ימנית => האזור הימני קצר.
+    const leftIsShort = isLLeft;
+    const rightIsShort = !isLLeft;
+    fieldWidths.push({ name: isLLeft ? "בליטה" : "קיר ראשי", net: netLeft, isShort: leftIsShort, count: nFieldsLeft, totalW: widthLeft });
+    fieldWidths.push({ name: isLLeft ? "קיר ראשי" : "בליטה", net: netRight, isShort: rightIsShort, count: nFieldsRight, totalW: widthRight });
     for (let i = 1; i < nFieldsLeft; i++) dividerPositions.push(i * (widthLeft / nFieldsLeft));
     dividerPositions.push(junctionX);
     for (let i = 1; i < nFieldsRight; i++) dividerPositions.push(junctionX + i * (widthRight / nFieldsRight));
@@ -387,17 +417,31 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
       if (fullDividers > 0) cuttingHtml += `<tr><td class="p-2 border font-bold">${divSizeName}</td><td class="p-2 border">חציצים (אורך מלא)</td><td class="p-2 border text-center font-bold">X ${fullDividers}</td><td class="p-2 border text-center highlight">${cutDivider.toFixed(1)}</td></tr>`;
       if (shortDividers > 0) cuttingHtml += `<tr><td class="p-2 border font-bold">${divSizeName}</td><td class="p-2 border">חציצים (אזור מגרעת)</td><td class="p-2 border text-center font-bold">X ${shortDividers}</td><td class="p-2 border text-center highlight text-orange-600">${(cutDivider - lD).toFixed(1)}</td></tr>`;
     }
-    cuttingHtml += `<tr><td class="p-2 border font-bold">זווית 30/30</td><td class="p-2 border">תמיכה</td><td class="p-2 border text-center font-bold">X ${nFieldsTotal * 2}</td><td class="p-2 border text-center highlight">${(cutDivider - 1.5).toFixed(1)}</td></tr>`;
+    if (fieldWidths.length > 0) {
+      fieldWidths.forEach((fw) => {
+        const divCutLen = isLShape ? (fw.isShort ? cutDivider - lD : cutDivider) : cutDivider;
+        const angleLen = divCutLen - 1.5;
+        const nAng = fw.count * 2;
+        const sub = isLShape ? ` — ${fw.name}` : "";
+        cuttingHtml += `<tr><td class="p-2 border font-bold">זווית 30/30</td><td class="p-2 border">תמיכה${sub}</td><td class="p-2 border text-center font-bold">X ${nAng}</td><td class="p-2 border text-center highlight">${angleLen.toFixed(1)}</td></tr>`;
+      });
+    } else {
+      cuttingHtml += `<tr><td class="p-2 border font-bold">זווית 30/30</td><td class="p-2 border">תמיכה</td><td class="p-2 border text-center font-bold">X ${nFieldsTotal * 2}</td><td class="p-2 border text-center highlight">${(cutDivider - 1.5).toFixed(1)}</td></tr>`;
+    }
     if (hasSantaf) {
       const prepDeduction = isDoubleT ? 10 : 4;
       if (isLShape) {
-        const countFull = Math.ceil((W - lD) / 50);
+        // סנטף תמיד יוצא 15 ס"מ מעבר ליציאה
+        const depthLong = (W - lD) + 15;
+        const depthNotch = lD + 15;
+        const countFull = Math.ceil(depthLong / 50);
         const cutFull = L - prepDeduction;
-        const countShort = Math.ceil(lD / 50);
+        const countShort = Math.ceil(depthNotch / 50);
         const cutShort = (L - lW) - prepDeduction;
         cuttingHtml += `<tr class="bg-green-50"><td class="p-2 border font-bold text-green-800">20/40 (הכנה לסנטף - ארוך)</td><td class="p-2 border text-green-700 text-xs">תשתית לאזור חזית מלא</td><td class="p-2 border text-center font-bold">X ${countFull}</td><td class="p-2 border text-center highlight">${cutFull.toFixed(1)}</td></tr><tr class="bg-green-50"><td class="p-2 border font-bold text-green-800">20/40 (הכנה לסנטף - קצר)</td><td class="p-2 border text-green-700 text-xs">תשתית לאזור המגרעת</td><td class="p-2 border text-center font-bold">X ${countShort}</td><td class="p-2 border text-center highlight">${cutShort.toFixed(1)}</td></tr>`;
       } else {
-        const prepCount = Math.ceil(W / 50);
+        // סנטף תמיד יוצא 15 ס"מ מעבר ליציאה
+        const prepCount = Math.ceil((W + 15) / 50);
         const cutSantafPrep = L - prepDeduction;
         cuttingHtml += `<tr class="bg-green-50"><td class="p-2 border font-bold text-green-800">20/40 (הכנה לסנטף)</td><td class="p-2 border text-green-700 text-xs">תשתית לסנטף</td><td class="p-2 border text-center font-bold">X ${prepCount}</td><td class="p-2 border text-center highlight">${cutSantafPrep.toFixed(1)}</td></tr>`;
       }
@@ -462,7 +506,23 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
       if (countSmooth > 0) rawItems.push({ name: `חציצים ${divSizeName} חלק`, color: frameColorText, ...optimizeCutting(totalDivLength / nDividersTotal, countSmooth, divWeightKey) });
       if (countLed > 0) rawItems.push({ name: `חציצים ${divSizeName} לד`, color: frameColorText, ...optimizeCutting(totalDivLength / nDividersTotal, countLed, divWeightKey) });
     }
-    rawItems.push({ name: "זווית 30/30", color: frameColorText, ...optimizeCutting(cutDivider - 1.5, anglesCount, weightsMap.angle) });
+    if (fieldWidths.length > 0) {
+      fieldWidths.forEach((fw) => {
+        const divCutLen = isLShape ? (fw.isShort ? cutDivider - lD : cutDivider) : cutDivider;
+        const angleLen = divCutLen - 1.5;
+        const nAng = fw.count * 2;
+        const piece = optimizeCutting(angleLen, nAng, weightsMap.angle);
+        if (piece.qty > 0) {
+          rawItems.push({
+            name: isLShape ? `זווית 30/30 (${fw.name})` : "זווית 30/30",
+            color: frameColorText,
+            ...piece,
+          });
+        }
+      });
+    } else {
+      rawItems.push({ name: "זווית 30/30", color: frameColorText, ...optimizeCutting(cutDivider - 1.5, anglesCount, weightsMap.angle) });
+    }
     if (hasSantaf && L > 0) {
       const prepDeduction = isDoubleT ? 10 : 4;
       if (isLShape) {
@@ -531,9 +591,36 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
   const dripUnits = Math.ceil((L / 100 + 1) / dripLength);
   const santafColor = str(pergola.santafColor, "שקוף");
   if (hasSantaf && L > 0 && W > 0) {
-    const numBoards = Math.ceil((L / 100) / 1.045) + 1;
-    bomTotalCost += numBoards * 1.045 * ((W + 15) / 100) * sysSantaf + dripUnits * sysDrip;
-    bomHtml += `<tr class="bg-green-50"><td class="font-bold text-green-800">סנטף BH פלרם <span class="text-[11px] text-green-600 bg-green-100 px-1 py-0.5 rounded font-normal mr-1 border border-green-200">${santafColor}</span></td><td class="text-center font-bold text-blue-700">${numBoards}</td><td class="text-center">${((W + 15) / 100).toFixed(2)} מ'</td></tr><tr class="bg-green-50"><td class="font-bold text-green-800">אף מים</td><td class="text-center font-bold text-blue-700">${dripUnits}</td><td class="text-center">${dripLength} מ' ליח'</td></tr>`;
+    // אורך לוח סנטף = יציאה (עומק) + 15 ס"מ. בצורת ר׳ יש שני עומקים (ארוך וקצר).
+    if (isLShape) {
+      const depthLongCm = W + 15;
+      const depthShortCm = (W - lD) + 15;
+      // כמות לוחות נקבעת לפי רוחב האזור:
+      // קיר ראשי = inputL, מגרעת = lW (לפי הבקשה העסקית).
+      const mainWidthCm = Math.max(0, inputL);
+      const notchWidthCm = Math.max(0, lW);
+
+      // כמות לוחות לפי אורך מקטע בס"מ (360 => 4, 530 => 6)
+      const longBoards = mainWidthCm > 0 ? Math.ceil(mainWidthCm / 100) : 0;
+      const shortBoards = notchWidthCm > 0 ? Math.ceil(notchWidthCm / 100) : 0;
+
+      bomTotalCost +=
+        longBoards * 1.045 * (depthLongCm / 100) * sysSantaf +
+        shortBoards * 1.045 * (depthShortCm / 100) * sysSantaf +
+        dripUnits * sysDrip;
+
+      if (longBoards > 0) {
+        bomHtml += `<tr class="bg-green-50"><td class="font-bold text-green-800">סנטף BH פלרם (קיר ראשי) <span class="text-[11px] text-green-600 bg-green-100 px-1 py-0.5 rounded font-normal mr-1 border border-green-200">${santafColor}</span></td><td class="text-center font-bold text-blue-700">${longBoards}</td><td class="text-center">${(depthLongCm / 100).toFixed(2)} מ'</td></tr>`;
+      }
+      if (shortBoards > 0) {
+        bomHtml += `<tr class="bg-green-50"><td class="font-bold text-green-800">סנטף BH פלרם (מגרעת) <span class="text-[11px] text-green-600 bg-green-100 px-1 py-0.5 rounded font-normal mr-1 border border-green-200">${santafColor}</span></td><td class="text-center font-bold text-blue-700">${shortBoards}</td><td class="text-center">${(depthShortCm / 100).toFixed(2)} מ'</td></tr>`;
+      }
+      bomHtml += `<tr class="bg-green-50"><td class="font-bold text-green-800">אף מים</td><td class="text-center font-bold text-blue-700">${dripUnits}</td><td class="text-center">${dripLength} מ' ליח'</td></tr>`;
+    } else {
+      const numBoards = Math.ceil((L / 100) / 1.045) + 1;
+      bomTotalCost += numBoards * 1.045 * ((W + 15) / 100) * sysSantaf + dripUnits * sysDrip;
+      bomHtml += `<tr class="bg-green-50"><td class="font-bold text-green-800">סנטף BH פלרם <span class="text-[11px] text-green-600 bg-green-100 px-1 py-0.5 rounded font-normal mr-1 border border-green-200">${santafColor}</span></td><td class="text-center font-bold text-blue-700">${numBoards}</td><td class="text-center">${((W + 15) / 100).toFixed(2)} מ'</td></tr><tr class="bg-green-50"><td class="font-bold text-green-800">אף מים</td><td class="text-center font-bold text-blue-700">${dripUnits}</td><td class="text-center">${dripLength} מ' ליח'</td></tr>`;
+    }
   }
   if (wasteHtml === "") wasteHtml = "<tr><td colspan=\"3\" class=\"text-center text-slate-400 py-4\">אין שאריות נפל משמעותיות</td></tr>";
   const wasteWeight = bomTotalWeight - bomTotalUsedWeight;
@@ -550,8 +637,16 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
     if (countSmooth > 0) instructions += `<div class="instruction-item">חיתוך והתקנת <strong>${countSmooth} חציצים חלקים</strong> (${divSizeName}).</div>`;
     if (countLed > 0) instructions += `<div class="instruction-item text-yellow-700 font-bold">חיתוך והתקנת <strong>${countLed} חציצי לד</strong> (${divSizeName}).</div>`;
     if (hasSantaf) {
-      if (isLShape) { const countFull = Math.ceil((W - lD) / 50); const countShort = Math.ceil(lD / 50); instructions += `<div class="instruction-item text-green-800 font-bold">הכנה לסנטף: יש לחתוך <strong>${countFull} פרופילי 20/40 ארוכים</strong> ועוד <strong>${countShort} קצרים</strong>, ולהניח כל 50 ס"מ.</div>`; }
-      else { const prepCount = Math.ceil(W / 50); instructions += `<div class="instruction-item text-green-800 font-bold">הכנה לסנטף: יש לחתוך <strong>${prepCount} פרופילי 20/40</strong>, ולהניח מעל השדות כל 50 ס"מ.</div>`; }
+      if (isLShape) {
+        const depthLong = (W - lD) + 15;
+        const depthNotch = lD + 15;
+        const countFull = Math.ceil(depthLong / 50);
+        const countShort = Math.ceil(depthNotch / 50);
+        instructions += `<div class="instruction-item text-green-800 font-bold">הכנה לסנטף: יש לחתוך <strong>${countFull} פרופילי 20/40 ארוכים</strong> ועוד <strong>${countShort} קצרים</strong>, ולהניח כל 50 ס"מ.</div>`;
+      } else {
+        const prepCount = Math.ceil((W + 15) / 50);
+        instructions += `<div class="instruction-item text-green-800 font-bold">הכנה לסנטף: יש לחתוך <strong>${prepCount} פרופילי 20/40</strong>, ולהניח מעל השדות כל 50 ס"מ.</div>`;
+      }
     }
   }
   const ledColor = str(pergola.ledColor, "לבן חם");
@@ -563,11 +658,23 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
   if (L > 0 && W > 0) {
     const sketchFrameHex = "#000000";
     const sketchShadeHex = "#94a3b8";
-    instructions += generateSketch(L, W, isLShape, lW, lD, str(pergola.lShapeSide, "right"), cutDivider, dividerPositions, fieldWidths, shadingP, space, sketchFrameHex, sketchShadeHex);
+    instructions += generateSketch(L, W, isLShape, lW, lD, str(pergola.lShapeSide, "right"), cutDivider, dividerPositions, fieldWidths, shadingP, space, sketchFrameHex, sketchShadeHex, frameType);
   }
   const viewDimensions = isLShape ? `חזית כוללת ${L}x${W} (מגרעת ${isLLeft ? "שמאלית" : "ימין"} ${lW}x${lD})` : `${L} x ${W} ס"מ`;
   const viewColorDisplay = `מסגרת: ${frameColorText} | הצללה: ${shadeColorText}`;
-  const santafInfoHtml = hasSantaf && L > 0 ? `<strong class="text-base">מפרט טכני קירוי:</strong><br>• לוחות סנטף (${santafColor}): ${Math.ceil((L / 100) / 1.045) + 1} יח'<br>• אף מים: ${dripUnits} יח'` : "";
+  const santafInfoHtml =
+    hasSantaf && L > 0
+      ? (() => {
+          if (!isLShape) {
+            return `<strong class="text-base">מפרט טכני קירוי:</strong><br>• לוחות סנטף (${santafColor}): ${Math.ceil((L / 100) / 1.045) + 1} יח'<br>• אף מים: ${dripUnits} יח'`;
+          }
+          const mainWidthCm = Math.max(0, inputL);
+          const notchWidthCm = Math.max(0, lW);
+          const longBoards = mainWidthCm > 0 ? Math.ceil(mainWidthCm / 100) : 0;
+          const shortBoards = notchWidthCm > 0 ? Math.ceil(notchWidthCm / 100) : 0;
+          return `<strong class="text-base">מפרט טכני קירוי:</strong><br>• לוחות סנטף (${santafColor}) קיר ראשי: ${longBoards} יח'<br>• לוחות סנטף (${santafColor}) מגרעת: ${shortBoards} יח'<br>• אף מים: ${dripUnits} יח'`;
+        })()
+      : "";
   const frameHex = getColorHex(frameColorText);
   const shadeHex = getColorHex(shadeColorText);
   const santafHex = getColorHex(santafColor);

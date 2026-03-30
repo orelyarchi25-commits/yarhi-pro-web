@@ -4,7 +4,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from "@/lib/firebase";
-import { isAccountApprovedFromUserDoc } from "@/lib/account-approval";
+import {
+  accessValidUntilMillis,
+  getAccountAccessState,
+  type AccountAccessBlockReason,
+} from "@/lib/account-approval";
 
 type AuthContextType = {
   /** מצב Firebase או מצב לוקאלי (ללא .env) נטען */
@@ -13,8 +17,10 @@ type AuthContextType = {
   profileLoading: boolean;
   isLoggedIn: boolean;
   hasAcceptedTerms: boolean;
-  /** אושר על ידי מנהל (Firestore accountApproved). במצב לוקאלי תמיד true */
+  /** גישה פעילה (אישור + תוקף). במצב לוקאלי תמיד true */
   accountApproved: boolean;
+  /** כשאין גישה: ממתין לאישור או שפג תוקף (accessValidUntil) */
+  accountBlockReason: AccountAccessBlockReason | null;
   /** גישה מלאה לתוכנה: מחובר + תקנון + אישור מנהל */
   hasAppAccess: boolean;
   firebaseUser: User | null;
@@ -30,10 +36,18 @@ function userDocHasTerms(data: Record<string, unknown> | undefined): boolean {
   return data.termsAcceptedAt != null;
 }
 
-function applyUserDoc(data: Record<string, unknown> | undefined): { terms: boolean; approved: boolean } {
+function applyUserDoc(data: Record<string, unknown> | undefined): {
+  terms: boolean;
+  approved: boolean;
+  blockReason: AccountAccessBlockReason | null;
+  accessUntilMillis: number | null;
+} {
+  const access = getAccountAccessState(data);
   return {
     terms: userDocHasTerms(data),
-    approved: isAccountApprovedFromUserDoc(data),
+    approved: access.allowed,
+    blockReason: access.blockReason,
+    accessUntilMillis: accessValidUntilMillis(data),
   };
 }
 
@@ -46,6 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [termsFromProfile, setTermsFromProfile] = useState(false);
   const [accountApprovedFromProfile, setAccountApprovedFromProfile] = useState(true);
+  const [accountBlockReasonFromProfile, setAccountBlockReasonFromProfile] = useState<AccountAccessBlockReason | null>(null);
+  const [accessUntilMillisFromProfile, setAccessUntilMillisFromProfile] = useState<number | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [authReady, setAuthReady] = useState(!useFirebase);
 
@@ -93,6 +109,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!user) {
             setTermsFromProfile(false);
             setAccountApprovedFromProfile(true);
+            setAccountBlockReasonFromProfile(null);
+            setAccessUntilMillisFromProfile(null);
             setProfileLoading(false);
             setAuthReady(true);
             clearSafety();
@@ -110,12 +128,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const d = applyUserDoc(snap.data() as Record<string, unknown> | undefined);
               setTermsFromProfile(d.terms);
               setAccountApprovedFromProfile(d.approved);
+              setAccountBlockReasonFromProfile(d.blockReason);
+              setAccessUntilMillisFromProfile(d.accessUntilMillis);
               setProfileLoading(false);
             })
             .catch((err) => {
               console.error("[Yarhi Pro] getDoc users/{uid}:", err);
               setTermsFromProfile(false);
               setAccountApprovedFromProfile(false);
+              setAccountBlockReasonFromProfile("pending");
+              setAccessUntilMillisFromProfile(null);
               setProfileLoading(false);
             });
 
@@ -125,11 +147,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const d = applyUserDoc(snap.data() as Record<string, unknown> | undefined);
               setTermsFromProfile(d.terms);
               setAccountApprovedFromProfile(d.approved);
+              setAccountBlockReasonFromProfile(d.blockReason);
             },
             (err) => {
               console.error("[Yarhi Pro] שגיאת Firestore ב-users/{uid}:", err);
               setTermsFromProfile(false);
               setAccountApprovedFromProfile(false);
+              setAccountBlockReasonFromProfile("pending");
               setProfileLoading(false);
             }
           );
@@ -180,7 +204,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isLoggedIn = useFirebase ? !!firebaseUser : localLoggedIn;
   const hasAcceptedTerms = useFirebase ? termsFromProfile : localTerms;
   const accountApproved = useFirebase ? accountApprovedFromProfile : true;
+  const accountBlockReason = useFirebase ? accountBlockReasonFromProfile : null;
   const hasAppAccess = isLoggedIn && hasAcceptedTerms && accountApproved;
+
+  /** כשהתוקף נגמר בלי עדכון מ-Firestore — חוסמים גישה בלי רענון ידני */
+  useEffect(() => {
+    if (!useFirebase || !firebaseUser) return;
+    if (!accountApprovedFromProfile || accessUntilMillisFromProfile == null) return;
+    const delay = accessUntilMillisFromProfile - Date.now();
+    if (delay <= 0) return;
+    const id = window.setTimeout(() => {
+      setAccountApprovedFromProfile(false);
+      setAccountBlockReasonFromProfile("expired");
+    }, delay + 400);
+    return () => window.clearTimeout(id);
+  }, [useFirebase, firebaseUser, accountApprovedFromProfile, accessUntilMillisFromProfile]);
 
   /** אם Firestore/onSnapshot לא מחזירים – לא נשארים על "טוען" לנצח */
   useEffect(() => {
@@ -199,6 +237,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoggedIn,
       hasAcceptedTerms,
       accountApproved,
+      accountBlockReason,
       hasAppAccess,
       firebaseUser: useFirebase ? firebaseUser : null,
       login,
@@ -211,6 +250,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoggedIn,
       hasAcceptedTerms,
       accountApproved,
+      accountBlockReason,
       hasAppAccess,
       firebaseUser,
       login,

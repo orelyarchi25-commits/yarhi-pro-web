@@ -803,7 +803,7 @@ export default function AluminumSimulator() {
 
   return (
     <div
-      className="relative w-full h-[calc(100vh-120px)] rounded-2xl overflow-hidden border border-metallic-700/50 bg-navy-900/30"
+      className="relative w-full h-[calc(100dvh-8rem)] min-h-[420px] rounded-2xl overflow-hidden border border-metallic-700/50 bg-navy-900/30"
       dir="rtl"
     >
       <div

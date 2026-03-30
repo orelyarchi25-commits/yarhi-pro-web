@@ -8,8 +8,10 @@ service cloud.firestore {
       allow create: if request.auth != null && request.auth.uid == userId
         && request.resource.data.accountApproved == false;
 
+      // לקוח לא רשאי לשנות accessValidUntil — רק Console / Admin SDK
       allow update: if request.auth != null && request.auth.uid == userId
-        && (request.resource.data.accountApproved != true || resource.data.accountApproved == true);
+        && (request.resource.data.accountApproved != true || resource.data.accountApproved == true)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['accessValidUntil']);
     }
   }
 }

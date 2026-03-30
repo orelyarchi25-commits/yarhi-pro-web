@@ -27,6 +27,8 @@ const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "3d", "settings", "bu
 function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
+/** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
+const SIM_VERSION = "frame-ribs-side-outward-v1";
 
 // --- Constants: RAL colors (same order as original) ---
 const RAL_OPTIONS = [
@@ -90,6 +92,7 @@ function HomeGate() {
     isLoggedIn,
     hasAcceptedTerms,
     accountApproved,
+    accountBlockReason,
     authReady,
     profileLoading,
     firebaseUser,
@@ -125,16 +128,39 @@ function HomeGate() {
   }
 
   if (isLoggedIn && hasAcceptedTerms && !accountApproved && firebaseUser) {
+    const expired = accountBlockReason === "expired";
     return (
       <main className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-6" dir="rtl">
-        <div className="w-full max-w-xl rounded-3xl border border-sky-600/50 bg-slate-800/95 shadow-2xl p-8 md:p-10 text-center space-y-4">
-          <h1 className="text-2xl md:text-3xl font-black text-sky-300">החשבון ממתין לאישור</h1>
-          <p className="text-slate-200 text-sm leading-relaxed">
-            ההרשמה התקבלה. <strong>הגישה למערכת תיפתח</strong> לאחר אישור ידני על ידי המנהל (לאחר תשלום / בדיקה).
-          </p>
-          <p className="text-slate-400 text-xs leading-relaxed">
-            כשהמנהל יאשר את החשבון ב-Firestore, רענן את הדף או התחבר מחדש — והמערכת תיפתח אוטומטית.
-          </p>
+        <div
+          className={`w-full max-w-xl rounded-3xl border shadow-2xl p-8 md:p-10 text-center space-y-4 bg-slate-800/95 ${
+            expired ? "border-amber-600/50" : "border-sky-600/50"
+          }`}
+        >
+          <h1 className={`text-2xl md:text-3xl font-black ${expired ? "text-amber-300" : "text-sky-300"}`}>
+            {expired ? "פג תוקף הגישה" : "החשבון ממתין לאישור"}
+          </h1>
+          {expired ? (
+            <>
+              <p className="text-slate-200 text-sm leading-relaxed">
+                תוקף החשבון במערכת הסתיים. לחידוש גישה צריך לפנות למנהל — הוא יעדכן את השדות ב-Firestore (למשל{" "}
+                <code className="text-amber-200">accessValidUntil</code>).
+              </p>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                אחרי שהמנהל מאריך את התוקף, רענן את הדף או התחבר מחדש.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-slate-200 text-sm leading-relaxed">
+                ההרשמה התקבלה. <strong>הגישה למערכת תיפתח</strong> לאחר אישור ידני על ידי המנהל (לאחר תשלום / בדיקה).
+              </p>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                כשהמנהל יאשר את החשבון ב-Firestore (<code className="text-sky-200">accountApproved: true</code>
+                {", "}
+                ואופציונלית <code className="text-sky-200">accessValidUntil</code> לתאריך סיום), רענן את הדף או התחבר מחדש.
+              </p>
+            </>
+          )}
           <p className="text-slate-500 text-xs">
             אימייל: <span className="font-mono text-slate-300">{firebaseUser.email ?? "—"}</span>
           </p>
@@ -216,11 +242,16 @@ function AuthenticatedPageContent() {
   const currentView = parseView(new URLSearchParams(searchString).get("view"));
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const fenceSimIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const pergolaSimIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const lastUidRef = useRef<string | null>(null);
   const [alertMsg, setAlertMsg] = useState("");
   const [hiddenCostsBox, setHiddenCostsBox] = useState(false);
   const [fenceHiddenCostsBox, setFenceHiddenCostsBox] = useState(false);
   const [kitOrderModal, setKitOrderModal] = useState<null | { kind: "pergola" | "fence" }>(null);
   const [fencesInnerTab, setFencesInnerTab] = useState<"calc" | "sim">("calc");
+  const [pergolaSimLoaded, setPergolaSimLoaded] = useState(false);
+  /** במובייל: גיליון "עוד" (הגדרות / פיננסי / התנתקות) */
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   // Pergola form state
   const [custName, setCustName] = useState("");
@@ -259,23 +290,23 @@ function AuthenticatedPageContent() {
   const [tensionerColor, setTensionerColor] = useState("");
 
   // Settings (used in calc)
-  const [pricePerKg, setPricePerKg] = useState("26");
-  const [sellPricePerSqm, setSellPricePerSqm] = useState("950");
-  const [sysInstallPriceSqm, setSysInstallPriceSqm] = useState("250");
-  const [sysTransportPrice, setSysTransportPrice] = useState("500");
-  const [sysSantafPrice, setSysSantafPrice] = useState("73");
-  const [sysLedPrice, setSysLedPrice] = useState("22.5");
-  const [sysScrewPrice, setSysScrewPrice] = useState("100");
-  const [sysDripEdgePrice, setSysDripEdgePrice] = useState("45");
-  const [sysContractorName, setSysContractorName] = useState("ירחי אלומיניום");
+  const [pricePerKg, setPricePerKg] = useState("");
+  const [sellPricePerSqm, setSellPricePerSqm] = useState("");
+  const [sysInstallPriceSqm, setSysInstallPriceSqm] = useState("");
+  const [sysTransportPrice, setSysTransportPrice] = useState("");
+  const [sysSantafPrice, setSysSantafPrice] = useState("");
+  const [sysLedPrice, setSysLedPrice] = useState("");
+  const [sysScrewPrice, setSysScrewPrice] = useState("");
+  const [sysDripEdgePrice, setSysDripEdgePrice] = useState("");
+  const [sysContractorName, setSysContractorName] = useState("");
   const [sysCompanyId, setSysCompanyId] = useState("");
   const [sysPhone, setSysPhone] = useState("");
   const [sysAddress, setSysAddress] = useState("");
   const [sysEmail, setSysEmail] = useState("");
-  const [simCaption, setSimCaption] = useState("ירחי אלומיניום מפעל ייצור הסולל 3 חולון");
-  const [sysFencePriceSqm, setSysFencePriceSqm] = useState("650");
-  const [sysFenceSetPrice, setSysFenceSetPrice] = useState("50");
-  const [sysJumboPrice, setSysJumboPrice] = useState("1");
+  const [simCaption, setSimCaption] = useState("");
+  const [sysFencePriceSqm, setSysFencePriceSqm] = useState("");
+  const [sysFenceSetPrice, setSysFenceSetPrice] = useState("");
+  const [sysJumboPrice, setSysJumboPrice] = useState("");
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
   const [pergolaResult, setPergolaResult] = useState<PergolaCalcResult>(EMPTY_PERGOLA_RESULT);
   const [fenceResult, setFenceResult] = useState<FenceCalcResult>(EMPTY_FENCE_RESULT);
@@ -322,6 +353,49 @@ function AuthenticatedPageContent() {
       if (raw) setCrmData(JSON.parse(raw));
     } catch {}
   }, []);
+
+  /** מונע ערבוב נתונים בין קבלנים באותו דפדפן (localStorage). */
+  useEffect(() => {
+    const uid = firebaseUser?.uid ?? null;
+    if (!uid) {
+      lastUidRef.current = uid;
+      return;
+    }
+
+    if (lastUidRef.current && lastUidRef.current !== uid) {
+      try {
+        localStorage.removeItem("yarhi_crm_data");
+        localStorage.removeItem("yarchiTransactions");
+        localStorage.removeItem("yarhi_current_calc");
+        localStorage.removeItem("yarhi_logoDataUrl");
+        for (const key of BUSINESS_SETTINGS_KEYS) localStorage.removeItem("yarhi_" + key);
+      } catch {}
+
+      setCrmData([]);
+      setBusinessTransactions([]);
+      setLogoDataUrl(null);
+
+      setSysContractorName("");
+      setSysCompanyId("");
+      setSysPhone("");
+      setSysAddress("");
+      setSysEmail("");
+      setSimCaption("");
+      setPricePerKg("");
+      setSellPricePerSqm("");
+      setSysInstallPriceSqm("");
+      setSysTransportPrice("");
+      setSysSantafPrice("");
+      setSysLedPrice("");
+      setSysScrewPrice("");
+      setSysDripEdgePrice("");
+      setSysFencePriceSqm("");
+      setSysFenceSetPrice("");
+      setSysJumboPrice("");
+    }
+
+    lastUidRef.current = uid;
+  }, [firebaseUser?.uid]);
 
 
   useEffect(() => {
@@ -424,6 +498,37 @@ function AuthenticatedPageContent() {
         const rawWs = snap.exists() ? snap.data()?.[USER_WORKSPACE_FIELD] : undefined;
         const parsed = parseWorkspaceFromFirestore(rawWs);
         if (!parsed) {
+          // משתמש חדש (או בלי yarhiWorkspace בכלל): מנקים מקומית כדי שלא יישארו נתוני משתמש קודם
+          try {
+            localStorage.removeItem("yarhi_crm_data");
+            localStorage.removeItem("yarchiTransactions");
+            localStorage.removeItem("yarhi_current_calc");
+            localStorage.removeItem("yarhi_logoDataUrl");
+            for (const key of BUSINESS_SETTINGS_KEYS) localStorage.removeItem("yarhi_" + key);
+          } catch {}
+
+          setCrmData([]);
+          setBusinessTransactions([]);
+          setLogoDataUrl(null);
+
+          setSysContractorName("");
+          setSysCompanyId("");
+          setSysPhone("");
+          setSysAddress("");
+          setSysEmail("");
+          setSimCaption("");
+          setPricePerKg("");
+          setSellPricePerSqm("");
+          setSysInstallPriceSqm("");
+          setSysTransportPrice("");
+          setSysSantafPrice("");
+          setSysLedPrice("");
+          setSysScrewPrice("");
+          setSysDripEdgePrice("");
+          setSysFencePriceSqm("");
+          setSysFenceSetPrice("");
+          setSysJumboPrice("");
+
           setWorkspaceCloudHydrated(true);
           return;
         }
@@ -435,6 +540,38 @@ function AuthenticatedPageContent() {
           parsed.businessSettings !== undefined ||
           Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl");
         if (!hasWorkspaceChunk) {
+          // משתמש חדש (או בלי yarhiWorkspace): נרצה שהגדרות העסק יהיו ריקות כברירת מחדל
+          try {
+            localStorage.removeItem("yarhi_crm_data");
+            localStorage.removeItem("yarchiTransactions");
+            localStorage.removeItem("yarhi_current_calc");
+            localStorage.removeItem("yarhi_logoDataUrl");
+            for (const key of BUSINESS_SETTINGS_KEYS) {
+              localStorage.removeItem("yarhi_" + key);
+            }
+          } catch {}
+
+          setCrmData([]);
+          setBusinessTransactions([]);
+          setLogoDataUrl(null);
+
+          setSysContractorName("");
+          setSysCompanyId("");
+          setSysPhone("");
+          setSysAddress("");
+          setSysEmail("");
+          setSimCaption("");
+          setPricePerKg("");
+          setSellPricePerSqm("");
+          setSysInstallPriceSqm("");
+          setSysTransportPrice("");
+          setSysSantafPrice("");
+          setSysLedPrice("");
+          setSysScrewPrice("");
+          setSysDripEdgePrice("");
+          setSysFencePriceSqm("");
+          setSysFenceSetPrice("");
+          setSysJumboPrice("");
           setWorkspaceCloudHydrated(true);
           return;
         }
@@ -534,6 +671,30 @@ function AuthenticatedPageContent() {
             else if (key === "sysFenceSetPrice") setSysFenceSetPrice(v);
             else if (key === "sysJumboPrice") setSysJumboPrice(v);
           }
+        } else {
+          // אם אין businessSettings ב-Firestore: מנקים localStorage כדי לא "לרשת" ברירות מחדל ממישהו אחר
+          try {
+            for (const key of BUSINESS_SETTINGS_KEYS) {
+              localStorage.removeItem("yarhi_" + key);
+            }
+          } catch {}
+          setSysContractorName("");
+          setSysCompanyId("");
+          setSysPhone("");
+          setSysAddress("");
+          setSysEmail("");
+          setSimCaption("");
+          setPricePerKg("");
+          setSellPricePerSqm("");
+          setSysInstallPriceSqm("");
+          setSysTransportPrice("");
+          setSysSantafPrice("");
+          setSysLedPrice("");
+          setSysScrewPrice("");
+          setSysDripEdgePrice("");
+          setSysFencePriceSqm("");
+          setSysFenceSetPrice("");
+          setSysJumboPrice("");
         }
         try {
           if (parsed.crmProjects !== undefined) {
@@ -1211,8 +1372,8 @@ function AuthenticatedPageContent() {
           </div>
         </div>
         <div class="title-box">
-          <h2 style="font-size:20px;font-weight:bold;color:#1e40af;margin:0;">סיכום הזמנה ללקוח</h2>
-          <p style="font-weight:bold;color:#2563eb;margin:5px 0 0 0;">${new Date().toLocaleDateString("he-IL")}</p>
+          <h2 style="font-size:20px;font-weight:bold;color:#1e40af;margin:0;">הצעת מחיר</h2>
+          <p style="font-weight:bold;color:#2563eb;margin:5px 0 0 0;">${new Date().toLocaleDateString("he-IL")} ${new Date().toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" })}</p>
         </div>
       </div>
       <div class="spec-grid">
@@ -1242,7 +1403,7 @@ function AuthenticatedPageContent() {
           <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:0;">הדמיה (לפי הנתונים שהוזנו)</h3>
           <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
         </div>
-        <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד פרגולה" src="/sim.html" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
+        <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד פרגולה" src="/sim.html?rev=${SIM_VERSION}" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
       </div>
       <script>
       (function(){
@@ -1263,6 +1424,10 @@ function AuthenticatedPageContent() {
               postsLeft: ${pLeft},
               postsBack: ${pBack},
               roofType: 'slats',
+              isLShape: ${isLShape ? "true" : "false"},
+              lWallWidth: ${isLShape ? parseFloat(lWallWidth) || 0 : 0},
+              lWallDepth: ${isLShape ? parseFloat(lWallDepth) || 0 : 0},
+              lShapeSide: '${lShapeSide}',
               hasSantaf: ${hasSantaf ? "true" : "false"},
               santafHex: '${santafHexQuote}',
               frameHex: '${frameHex}',
@@ -1302,36 +1467,47 @@ function AuthenticatedPageContent() {
   }, [pergolaResult, custName, custPhone, custAddress, sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, getLogoHtml, showAlert, lengthWall, exitWidth, isLShape, lWallWidth, dividerSize, dividerSmoothCount, dividerLedCount, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, frameType, shadingProfile, spacing, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postType, colorSelect, shadeColorSelect, simCaption]);
 
   const handleWhatsAppOrder = useCallback(() => {
-    const pFront = parseInt(postCountFront) || 0;
-    const pRight = parseInt(postCountRight) || 0;
-    const pLeft = parseInt(postCountLeft) || 0;
-    const pBack = parseInt(postCountBack) || 0;
-    const pLegacy = parseInt(postCount) || 0;
-    const pSidesTotal = pFront + pRight + pLeft + pBack;
-    const pTotal = pSidesTotal > 0 ? pSidesTotal : pLegacy;
     const message =
-      "שלום ירחי אלומיניום, אני מעוניין להזמין קיט.\n" +
-      `מאת (קבלן): ${sysEmail || "-"}\n` +
-      `לקוח קצה: ${custName || "-"}\n` +
+      "סיכום הזמנת קיט - ירחי אלומיניום\n" +
       "\n" +
-      "--- מפרט פרגולה ---\n" +
-      `מידות בסיס: רוחב ${lengthWall || "-"} ס\"מ | יציאה ${exitWidth || "-"} ס\"מ\n` +
-      `פרגולה בצורת ר': ${isLShape ? "כן - רוחב קיר " + (lWallWidth || "-") + " עומק " + (lWallDepth || "-") + " צד " + (lShapeSide || "-") : "לא"}\n` +
-      `צבע מסגרת פרגולה: ${colorSelect || "-"}\n` +
-      `צבע פרופילי הצללה: ${shadeColorSelect || "-"}\n` +
-      `סוג פרופיל מסגרת/היקפי: ${frameType || "-"}\n` +
-      `פרופיל חלוקה/קסטות: ${dividerSize || "-"}\n` +
-      `סוג פרופיל הצללה/חציצים: ${shadingProfile || "-"}\n` +
-      `מרווח בין חציצים: ${spacing || "-"} ס\"מ\n` +
-      `סנטף (קירוי): ${hasSantaf ? "כן, צבע: " + (santafColor || "-") : "לא"}\n` +
-      `סוג אף מים: ${dripEdgeType || "-"}\n\n` +
-      "--- תוספות ---\n" +
-      `תאורת לד: ${hasLed ? "כן, כמות: " + (ledCount || "-") + " צבע: " + (ledColor || "-") : "לא"}\n` +
-      `מאוורר: ${hasFan ? "כן, כמות: " + (fanCount || "-") : "לא"}\n` +
-      `עמודים: ${pTotal > 0 ? (pSidesTotal > 0 ? pTotal + " עמודים (חזית: " + pFront + ", ימין: " + pRight + ", שמאל: " + pLeft + ", סוף: " + pBack + ")" : pTotal + " עמודים") + ", סוג: " + (postType || "-") + ", גובה: " + (postHeight || "-") + " ס\"מ" : "ללא עמודים"}\n` +
-      `מותחנים (כבלים): ${parseInt(tensionerCount) > 0 ? tensionerCount + " מותחנים, צבע: " + (tensionerColor || "-") : "ללא מותחנים"}`;
+      "פרטי הקבלן (שולח ההזמנה):\n" +
+      `אימייל: ${sysEmail}\n` +
+      "\n" +
+      "פרטי לקוח הקצה:\n" +
+      `שם: ${custName}\n` +
+      "\n" +
+      "מפרט טכני - פרגולה:\n" +
+      `מידות: רוחב ${lengthWall} ס\"מ | יציאה ${exitWidth} ס\"מ\n` +
+      `פרגולת ר': ${
+        isLShape
+          ? "כן - רוחב קיר: " + lWallWidth + ", עומק: " + lWallDepth + ", צד: " + lShapeSide
+          : "לא"
+      }\n` +
+      `צבע מסגרת: ${colorSelect}\n` +
+      `צבע הצללה: ${shadeColorSelect}\n` +
+      `סוג מסגרת (היקפי): ${frameType}\n` +
+      `פרופיל חלוקה/קסטות: ${dividerSize}\n` +
+      `פרופיל הצללה (חציצים): ${shadingProfile}\n` +
+      `מרווח בין חציצים: ${spacing} ס\"מ\n` +
+      "\n" +
+      "תוספות וקירוי:\n" +
+      `סנטף: ${hasSantaf ? "כן, צבע: " + santafColor : "ללא"}\n` +
+      `אף מים: ${hasSantaf ? dripEdgeType : "ללא"}\n` +
+      `תאורת לד: ${hasLed ? "כן, כמות: " + ledCount + ", צבע: " + ledColor : "ללא"}\n` +
+      `מאוורר: ${hasFan ? "כן, כמות: " + fanCount : "ללא"}\n` +
+      `עמודים: ${
+        Number(postCount) > 0
+          ? postCount + " עמודים, סוג: " + postType + ", גובה: " + postHeight + " ס\"מ"
+          : "ללא עמודים"
+      }\n` +
+      `מותחנים: ${
+        Number(tensionerCount) > 0
+          ? tensionerCount + " מותחנים, צבע: " + tensionerColor
+          : "ללא מותחנים"
+      }`;
 
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank");
+    const encodedMessage = encodeURIComponent(message);
+    window.open("https://wa.me/972522288798?text=" + encodedMessage, "_blank");
   }, [
     sysEmail,
     custName,
@@ -1652,28 +1828,154 @@ function AuthenticatedPageContent() {
     );
   }, [currentView, fencesInnerTab, fenceSegments, fenceGap, fenceSlat, fenceInGround, fenceResult.frameHex, fenceResult.slatHex, fenceResult.spacerHex]);
 
+  useEffect(() => {
+    if (currentView !== "3d" || !pergolaSimLoaded) return;
+    const iframe = pergolaSimIframeRef.current;
+    const win = iframe?.contentWindow;
+    if (!win) return;
+
+    const L = pergolaResult.L || parseFloat(lengthWall) || 0;
+    const W = pergolaResult.W || parseFloat(exitWidth) || 0;
+    const lW = isLShape ? parseFloat(lWallWidth) || 0 : 0;
+    const lD = isLShape ? parseFloat(lWallDepth) || 0 : 0;
+
+    win.postMessage(
+      {
+        type: "applyExternalConfig",
+        config: {
+          L,
+          W,
+          isLShape,
+          lWallWidth: lW,
+          lWallDepth: lD,
+          lShapeSide,
+          frameType,
+          dividers: Math.max(0, Math.min(8, pergolaResult.nDividersTotal ?? 0)),
+          gap: parseFloat(spacing) || 0,
+          frameHex: pergolaResult.frameHex,
+          slatHex: pergolaResult.shadeHex,
+          santafHex: pergolaResult.santafHex,
+          hasSantaf,
+          captionText: simCaption || "",
+        },
+      },
+      "*"
+    );
+  }, [
+    currentView,
+    pergolaSimLoaded,
+    pergolaResult.L,
+    pergolaResult.W,
+    pergolaResult.nDividersTotal,
+    lengthWall,
+    exitWidth,
+    isLShape,
+    lWallWidth,
+    lWallDepth,
+    lShapeSide,
+    frameType,
+    spacing,
+    pergolaResult.frameHex,
+    pergolaResult.shadeHex,
+    pergolaResult.santafHex,
+    hasSantaf,
+    simCaption,
+  ]);
+
+  useEffect(() => {
+    setMobileMoreOpen(false);
+  }, [searchString]);
+
+  useEffect(() => {
+    if (!mobileMoreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMobileMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileMoreOpen]);
+
   const navCls = (view: ViewId) =>
-    `flex items-center gap-3 py-4 px-6 rounded-xl font-semibold text-base transition text-right w-full cursor-pointer ${currentView === view ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30" : "text-slate-300 hover:bg-slate-700 hover:text-white"}`;
+    `flex items-center gap-2 md:gap-3 py-2.5 px-3 md:py-4 md:px-6 rounded-xl font-semibold text-sm md:text-base transition text-right w-full cursor-pointer ${currentView === view ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30" : "text-slate-300 hover:bg-slate-700 hover:text-white"}`;
+
+  const mobileTabCls = (view: ViewId) => {
+    const on = currentView === view;
+    return `flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 px-0.5 text-[10px] font-bold leading-tight transition sm:text-[11px] ${
+      on ? "bg-blue-600 text-white shadow-md" : "text-slate-400 active:bg-slate-800"
+    }`;
+  };
+  const pergolaSyncToken = [
+    parseFloat(lengthWall) || 0,
+    parseFloat(exitWidth) || 0,
+    isLShape ? 1 : 0,
+    isLShape ? parseFloat(lWallWidth) || 0 : 0,
+    isLShape ? parseFloat(lWallDepth) || 0 : 0,
+    lShapeSide,
+    parseFloat(spacing) || 0,
+    pergolaResult.nDividersTotal ?? 0,
+    pergolaResult.frameHex || "",
+    pergolaResult.shadeHex || "",
+    pergolaResult.santafHex || "",
+    hasSantaf ? 1 : 0,
+    simCaption || "",
+    frameType || "",
+  ].join("|");
+  const pergolaSimSrc = (() => {
+    const params = new URLSearchParams();
+    params.set("rev", SIM_VERSION);
+    params.set("L", String(pergolaResult.L || parseFloat(lengthWall) || 0));
+    params.set("W", String(pergolaResult.W || parseFloat(exitWidth) || 0));
+    params.set("gap", String(parseFloat(spacing) || 0));
+    params.set("dividers", String(Math.max(0, Math.min(8, pergolaResult.nDividersTotal ?? 0))));
+    params.set("frameType", frameType || "");
+    params.set("frameHex", pergolaResult.frameHex || "#888888");
+    params.set("slatHex", pergolaResult.shadeHex || "#888888");
+    params.set("santafHex", pergolaResult.santafHex || "#888888");
+    params.set("captionText", simCaption || "");
+    params.set("isLShape", isLShape ? "1" : "0");
+    params.set("lWallWidth", String(isLShape ? parseFloat(lWallWidth) || 0 : 0));
+    params.set("lWallDepth", String(isLShape ? parseFloat(lWallDepth) || 0 : 0));
+    params.set("lShapeSide", lShapeSide || "right");
+    params.set("hasSantaf", hasSantaf ? "1" : "0");
+    params.set("sync", encodeURIComponent(pergolaSyncToken));
+    return `/sim.html?${params.toString()}`;
+  })();
 
   return (
-    <div dir="rtl" className="flex h-screen w-screen overflow-hidden bg-slate-900">
-      <aside className="relative z-20 w-[280px] shrink-0 flex flex-col border-r border-slate-700 bg-slate-800 text-white no-print">
-        <div className="pt-8 pb-10 text-center border-b border-slate-700">
+    <div dir="rtl" className="flex h-dvh max-h-dvh w-full max-w-[100vw] overflow-hidden bg-slate-900">
+      {/* סיידבר — רק ממסך בינוני ומעלה; במובייל הניווט בתחתית המסך */}
+      <aside
+        id="app-side-nav"
+        className="no-print relative z-20 box-border hidden h-full w-[280px] shrink-0 flex-col border-l border-slate-600 bg-slate-800 text-white lg:flex"
+      >
+        <div className="border-b border-slate-700 px-2 pt-8 pb-10 text-center">
           <h1 className="text-3xl font-black text-blue-400 tracking-wider">Yarhi PRO</h1>
-          <p className="text-sm mt-1 font-bold text-slate-200">{sysContractorName || "שם העסק לא הוגדר"}</p>
-          {String(sysEmail || "").trim().toLowerCase() === "yarchialuminum@gmail.com" && <p className="text-xs mt-1 font-black text-amber-300">מנהל 👑</p>}
-          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Advanced Pergola System</p>
-          <p className="text-[10px] text-slate-500 mt-1">© כל הזכויות שמורות</p>
+          <p className="mt-1 text-sm font-bold text-slate-200">{sysContractorName || "שם העסק לא הוגדר"}</p>
+          {String(sysEmail || "").trim().toLowerCase() === "yarchialuminum@gmail.com" && <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p>}
+          <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-400">Advanced Pergola System</p>
+          <p className="mt-1 text-[10px] text-slate-500">© כל הזכויות שמורות</p>
         </div>
-        <nav className="flex-1 mt-6 flex flex-col gap-2 px-2 overflow-y-auto" role="navigation">
-          <Link href="/?view=dashboard" className={navCls("dashboard")}><span className="text-xl">📊</span>לוח בקרה</Link>
-          <Link href="/?view=data" className={navCls("data")}><span className="text-xl">📏</span>פרגולות</Link>
-          <Link href="/?view=fences" className={navCls("fences")}><span className="text-xl">🪟</span>גדרות</Link>
-          <Link href="/?view=3d" className={navCls("3d")}><span className="text-xl">🎨</span>הדמיית 3D מורחבת</Link>
-          <Link href="/?view=settings" className={navCls("settings")}><span className="text-xl">⚙️</span>הגדרות עסק</Link>
-          <Link href="/?view=business" className={navCls("business") + " bg-indigo-900/40 border border-indigo-500/30"}><span className="text-xl">💼</span>ניהול פיננסי וגבייה</Link>
+        <nav className="mt-6 flex flex-1 flex-col gap-2 overflow-y-auto px-2 pb-4" role="navigation">
+          <Link href="/?view=dashboard" className={navCls("dashboard")}>
+            <span className="text-xl">📊</span>לוח בקרה
+          </Link>
+          <Link href="/?view=data" className={navCls("data")}>
+            <span className="text-xl">📏</span>פרגולות
+          </Link>
+          <Link href="/?view=fences" className={navCls("fences")}>
+            <span className="text-xl">🪟</span>גדרות
+          </Link>
+          <Link href="/?view=3d" className={navCls("3d")}>
+            <span className="text-xl">🎨</span>הדמיית 3D מורחבת
+          </Link>
+          <Link href="/?view=settings" className={navCls("settings")}>
+            <span className="text-xl">⚙️</span>הגדרות עסק
+          </Link>
+          <Link href="/?view=business" className={navCls("business") + " border border-indigo-500/30 bg-indigo-900/40"}>
+            <span className="text-xl">💼</span>ניהול פיננסי וגבייה
+          </Link>
         </nav>
-        <div className="p-6 border-t border-slate-700 text-center text-xs text-slate-500">
+        <div className="shrink-0 border-t border-slate-700 px-3 py-3 text-center text-[10px] leading-relaxed text-slate-500">
           <button
             type="button"
             onClick={() => {
@@ -1682,19 +1984,32 @@ function AuthenticatedPageContent() {
                 router.push("/login");
               })();
             }}
-            className="w-full mb-3 py-2.5 rounded-xl bg-red-600/90 hover:bg-red-600 text-white font-black text-sm transition shadow"
+            className="mb-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-red-600/90 py-2 px-3 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600"
           >
-            🚪 התנתקות
+            <span className="text-base leading-none" aria-hidden>🚪</span>
+            התנתקות
           </button>
-          גרסת מערכת 3.0 (PRO)<br />פותח עבור ירחי אלומיניום
+          גרסת מערכת 3.0 (PRO)
+          <br />
+          פותח עבור ירחי אלומיניום
         </div>
       </aside>
-      <main ref={mainScrollRef} className="relative z-10 flex-1 overflow-y-auto bg-slate-100 rounded-tl-3xl rounded-bl-3xl">
-        {alertMsg && <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[10000] bg-slate-800 text-white px-7 py-3 rounded-xl font-bold shadow-lg border border-slate-600">{alertMsg}</div>}
+      <main
+        ref={mainScrollRef}
+        className={
+          "relative z-10 flex min-h-0 min-w-0 flex-1 flex-col bg-slate-100 pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] lg:pb-0 " +
+          (currentView === "3d" ? "overflow-hidden" : "overflow-y-auto")
+        }
+      >
+        {alertMsg && (
+          <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[10000] -translate-x-1/2 rounded-xl border border-slate-600 bg-slate-800 px-7 py-3 font-bold text-white shadow-lg lg:bottom-8">
+            {alertMsg}
+          </div>
+        )}
 
         {/* VIEW: DASHBOARD */}
         {currentView === "dashboard" && (
-          <section className="p-8 max-w-6xl mx-auto">
+          <section className="w-full max-w-none px-3 py-4 sm:px-4 md:px-5 lg:px-6">
             <div className="bg-gradient-to-r from-blue-900 to-slate-800 rounded-3xl p-10 text-white shadow-xl mb-8 relative overflow-hidden">
               <div className="relative z-10">
                 <h2 className="text-5xl font-black mb-2">שלום, {sysContractorName}</h2>
@@ -1752,7 +2067,7 @@ function AuthenticatedPageContent() {
 
         {/* VIEW: PERGOLAS (DATA) */}
         {currentView === "data" && (
-          <section className="p-8 max-w-[1400px] mx-auto">
+          <section className="w-full max-w-none px-3 py-4 sm:px-4 md:px-5 lg:px-6">
             <header className="flex justify-between items-center mb-6 flex-wrap gap-4">
               <h2 className="text-3xl font-black text-slate-800">הזנת נתונים והפקת דו&quot;חות</h2>
               <div className="flex gap-2 flex-wrap">
@@ -1897,7 +2212,7 @@ function AuthenticatedPageContent() {
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-orange-500">
                   <h2 className="text-xl font-black mb-4 text-orange-800 border-b border-orange-100 pb-2 flex items-center gap-2">📐 סקיצה והוראות עבודה למסגר</h2>
-                  <div key={`sim-${lengthWall}-${exitWidth}-${spacing}-${colorSelect}-${shadeColorSelect}`} className="text-sm text-slate-800 space-y-2 font-medium" dangerouslySetInnerHTML={{ __html: pergolaResult.instructionsHtml }} />
+                  <div key={`sim-${lengthWall}-${exitWidth}-${spacing}-${colorSelect}-${shadeColorSelect}-${frameType}`} className="text-sm text-slate-800 space-y-2 font-medium" dangerouslySetInnerHTML={{ __html: pergolaResult.instructionsHtml }} />
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500">
                   <h2 className="text-xl font-black mb-4 text-blue-800 border-b border-blue-100 pb-2 flex items-center gap-2">✂️ רשימת חיתוכים (בס&quot;מ)</h2>
@@ -1925,7 +2240,7 @@ function AuthenticatedPageContent() {
         )}
         {/* VIEW: FENCES */}
         {currentView === "fences" && (
-          <section className="p-8 max-w-[1400px] mx-auto">
+          <section className="w-full max-w-none px-3 py-4 sm:px-4 md:px-5 lg:px-6">
             <header className="flex justify-between items-center mb-6 flex-wrap gap-4">
               <h2 className="text-3xl font-black text-blue-900">יצירת גדר חדשה</h2>
               <div className="flex gap-2 flex-wrap">
@@ -2001,11 +2316,11 @@ function AuthenticatedPageContent() {
                       <h3 className="text-lg font-black text-slate-800">הדמיית 3D לגדרות</h3>
                       <div className="text-xs font-bold text-slate-500">עמודים + שלבים לפי הנתונים</div>
                     </div>
-                    <div className="w-full bg-slate-900">
+                    <div className="w-full h-[min(720px,calc(100dvh-14rem))] min-h-[min(520px,50dvh)] bg-slate-900">
                       <iframe
                         title="Fence 3D"
                         src="/fence-sim.html"
-                        className="w-full min-h-[520px] h-[520px] bg-slate-900"
+                        className="block h-full w-full bg-slate-900"
                         ref={fenceSimIframeRef}
                         referrerPolicy="no-referrer"
                       />
@@ -2038,13 +2353,27 @@ function AuthenticatedPageContent() {
         )}
         {/* VIEW: 3D SIMULATION */}
         {currentView === "3d" && (
-          <section className="p-6 h-full flex flex-col max-w-[1400px] mx-auto">
-            <header className="flex justify-between items-center mb-4">
-              <div><h2 className="text-3xl font-black text-slate-800">הדמיה חדשה עם תמונת המקום</h2><p className="text-slate-500 text-sm mt-1">הדמיית 3D מתקדמת המשולבת עם תמונת המקום, בחלון נפרד בתוך המערכת.</p></div>
-              <button type="button" onClick={() => switchView("data")} className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold hover:bg-blue-700 transition shadow-sm">חזור למפרט טכני</button>
+          <section className="flex min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden">
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2 sm:px-4 sm:py-3">
+              <div className="min-w-0">
+                <h2 className="text-xl font-black text-slate-800 sm:text-2xl lg:text-3xl">הדמיה חדשה עם תמונת המקום</h2>
+                <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">הדמיית 3D מתקדמת המשולבת עם תמונת המקום.</p>
+              </div>
+              <button type="button" onClick={() => switchView("data")} className="shrink-0 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700">
+                חזור למפרט טכני
+              </button>
             </header>
-            <div className="flex-1 rounded-2xl overflow-hidden border border-slate-300 shadow-lg bg-slate-900/5 min-h-[400px]">
-              <iframe title="Yarhi PRO - הדמיה תלת-ממד" src="/sim.html" className="w-full h-full block min-h-[400px] bg-slate-900" referrerPolicy="no-referrer" loading="lazy" />
+            <div className="min-h-0 flex-1 w-full overflow-hidden bg-slate-900">
+              <iframe
+                key={pergolaSyncToken}
+                title="Yarhi PRO - הדמיה תלת-ממד"
+                src={pergolaSimSrc}
+                className="block h-full w-full min-h-0 border-0 bg-slate-900"
+                referrerPolicy="no-referrer"
+                loading="lazy"
+                ref={pergolaSimIframeRef}
+                onLoad={() => setPergolaSimLoaded(true)}
+              />
             </div>
           </section>
         )}
@@ -2093,6 +2422,18 @@ function AuthenticatedPageContent() {
                     <div><label className="block text-sm font-semibold text-slate-600 mb-1">עלות ג&apos;מבו בודד (₪)</label><input type="number" value={sysJumboPrice} onChange={(e) => { setSysJumboPrice(e.target.value); saveSysSettings(); }} className="w-full border rounded-lg p-2.5 text-lg font-bold bg-white" /></div>
                   </div>
                 </div>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      saveSysSettings();
+                      showAlert("הגדרות העסק נשמרו");
+                    }}
+                    className="w-full rounded-xl bg-blue-600 py-3 font-black text-white hover:bg-blue-700 transition shadow-md"
+                  >
+                    💾 שמור הגדרות עסק
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -2109,6 +2450,107 @@ function AuthenticatedPageContent() {
           </section>
         )}
       </main>
+
+      {/* מובייל בלבד: פס ניווט דק בתחתית — התוכן (חישובים / הדמיה) מקבל את כל הגובה למעלה */}
+      <div className="pointer-events-none fixed bottom-0 left-0 right-0 z-30 lg:hidden">
+        <nav
+          className="pointer-events-auto flex items-stretch justify-between gap-0.5 border-t border-slate-700/90 bg-slate-900/95 px-0.5 pt-1 shadow-[0_-6px_24px_rgba(0,0,0,0.4)] backdrop-blur-md"
+          style={{ paddingBottom: "max(0.4rem, env(safe-area-inset-bottom, 0px))" }}
+          aria-label="ניווט מהיר"
+        >
+          <Link href="/?view=data" className={mobileTabCls("data")}>
+            <span className="text-[1.15rem] leading-none">📏</span>
+            <span className="max-w-full truncate">פרגולות</span>
+          </Link>
+          <Link href="/?view=fences" className={mobileTabCls("fences")}>
+            <span className="text-[1.15rem] leading-none">🪟</span>
+            <span className="max-w-full truncate">גדרות</span>
+          </Link>
+          <Link href="/?view=3d" className={mobileTabCls("3d")}>
+            <span className="text-[1.15rem] leading-none">🎨</span>
+            <span className="max-w-full truncate">3D</span>
+          </Link>
+          <Link href="/?view=dashboard" className={mobileTabCls("dashboard")}>
+            <span className="text-[1.15rem] leading-none">📊</span>
+            <span className="max-w-full truncate">לוח</span>
+          </Link>
+          <button
+            type="button"
+            className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 px-0.5 text-[10px] font-bold leading-tight sm:text-[11px] ${
+              mobileMoreOpen || currentView === "settings" || currentView === "business"
+                ? "bg-slate-700 text-white"
+                : "text-slate-400 active:bg-slate-800"
+            }`}
+            onClick={() => setMobileMoreOpen((o) => !o)}
+            aria-expanded={mobileMoreOpen}
+            aria-label="עוד אפשרויות"
+          >
+            <span className="text-[1.15rem] leading-none">⋯</span>
+            <span>עוד</span>
+          </button>
+        </nav>
+      </div>
+
+      {mobileMoreOpen && (
+        <div className="fixed inset-0 z-[45] lg:hidden">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/55"
+            aria-label="סגור"
+            onClick={() => setMobileMoreOpen(false)}
+          />
+          <div
+            className="absolute bottom-0 left-0 right-0 max-h-[min(70vh,420px)] overflow-y-auto rounded-t-2xl border border-slate-600 bg-slate-800 p-4 text-white shadow-2xl"
+            style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom, 0px))" }}
+            role="dialog"
+            aria-label="תפריט נוסף"
+          >
+            <div className="mb-3 flex items-center justify-between border-b border-slate-600 pb-3">
+              <div>
+                <p className="text-xs text-slate-400">מחובר כ־</p>
+                <p className="font-bold text-slate-100">{sysContractorName || "—"}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-500 px-3 py-1.5 text-sm font-bold text-slate-200"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                סגור
+              </button>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Link
+                href="/?view=settings"
+                className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                ⚙️ הגדרות עסק
+              </Link>
+              <Link
+                href="/?view=business"
+                className="rounded-xl border border-indigo-500/40 bg-indigo-900/30 px-4 py-3 text-right font-bold"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                💼 ניהול פיננסי וגבייה
+              </Link>
+              <button
+                type="button"
+                className="rounded-xl bg-red-600/90 px-4 py-3 text-center font-black text-white"
+                onClick={() => {
+                  setMobileMoreOpen(false);
+                  void (async () => {
+                    await logout();
+                    router.push("/login");
+                  })();
+                }}
+              >
+                🚪 התנתקות
+              </button>
+            </div>
+            <p className="mt-4 text-center text-[10px] text-slate-500">גרסת מערכת 3.0 (PRO)</p>
+          </div>
+        </div>
+      )}
 
       {kitOrderModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 no-print">

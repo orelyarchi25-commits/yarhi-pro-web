@@ -1,0 +1,14 @@
+---
+description: בסוף כל סשן שבו בוצעו שינויי קוד בפרויקט, הוסף למשתמש בלוק פריסה ל-Vercel (PowerShell) אחרי הסיכום.
+globs: "**/*"
+---
+
+לאחר שינויים בקוד, בסוף התשובה תמיד הוסף בלוק קוד PowerShell מוכן להעתקה:
+
+```powershell
+cd "C:\Users\USER\Desktop\YarhiPro-Web"
+npm run build
+npx vercel --prod
+```
+
+אם זו הפעם הראשונה עם Vercel CLI, ציין שאפשר קודם להריץ `npx vercel` בלי `--prod` להתחברות. הזכר לבדוק שמשתני סביבה מוגדרים ב-Vercel Dashboard.

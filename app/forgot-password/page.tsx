@@ -6,8 +6,6 @@ import { sendPasswordResetEmail } from "firebase/auth";
 import { getFirebaseAuth, getFirebaseProjectIdForUi, isFirebaseConfigured } from "@/lib/firebase";
 import { firebaseAuthErrorMessageHe, getFirebaseErrorCode } from "@/lib/auth-errors-he";
 import { normalizeLoginEmail } from "@/lib/normalize-email";
-import { FirebaseConnectionHint } from "@/components/FirebaseConnectionHint";
-
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [msg, setMsg] = useState("");
@@ -68,10 +66,6 @@ export default function ForgotPasswordPage() {
         <p className="text-slate-500 text-sm text-center mb-6">
           הזן את האימייל של החשבון ונשלח קישור לאיפוס.
         </p>
-
-        <div className="mb-6">
-          <FirebaseConnectionHint />
-        </div>
 
         <form onSubmit={(e) => void handleReset(e)} className="space-y-4">
           <div>
