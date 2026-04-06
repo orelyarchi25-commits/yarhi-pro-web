@@ -316,6 +316,7 @@ function AuthenticatedPageContent() {
   const [fenceCustPhone, setFenceCustPhone] = useState("");
   const [fenceCustAddress, setFenceCustAddress] = useState("");
   const [fenceSegments, setFenceSegments] = useState<{ id: number; L: number; H: number; P?: number }[]>([{ id: 1, L: 0, H: 0 }]);
+  const [fenceSegDrafts, setFenceSegDrafts] = useState<Record<number, Partial<Record<"L" | "H" | "P", string>>>>({});
   const [fenceInGround, setFenceInGround] = useState(false);
   const [fenceSlat, setFenceSlat] = useState("100");
   const [fenceGap, setFenceGap] = useState("2");
@@ -914,8 +915,51 @@ function AuthenticatedPageContent() {
   ]);
 
   const addFenceSeg = useCallback(() => setFenceSegments((prev) => [...prev, { id: Date.now(), L: 0, H: 0 }]), []);
-  const removeFenceSeg = useCallback((id: number) => setFenceSegments((prev) => prev.filter((s) => s.id !== id)), []);
+  const removeFenceSeg = useCallback((id: number) => {
+    setFenceSegments((prev) => prev.filter((s) => s.id !== id));
+    setFenceSegDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
   const updateFenceSeg = useCallback((id: number, field: "L" | "H" | "P", value: number | undefined) => setFenceSegments((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s))), []);
+  const getFenceSegInputValue = useCallback((seg: { id: number; L: number; H: number; P?: number }, field: "L" | "H" | "P") => {
+    const draft = fenceSegDrafts[seg.id]?.[field];
+    if (draft !== undefined) return draft;
+    const current = seg[field];
+    if (typeof current !== "number" || current === 0) return "";
+    return String(current);
+  }, [fenceSegDrafts]);
+  const setFenceSegDraft = useCallback((id: number, field: "L" | "H" | "P", rawValue: string) => {
+    const normalized = rawValue.replace(",", ".");
+    if (!/^\d*\.?\d*$/.test(normalized)) return;
+    setFenceSegDrafts((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] || {}), [field]: normalized },
+    }));
+  }, []);
+  const commitFenceSegDraft = useCallback((id: number, field: "L" | "H" | "P") => {
+    const raw = fenceSegDrafts[id]?.[field];
+    if (raw === undefined) return;
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      updateFenceSeg(id, field, field === "P" ? undefined : 0);
+    } else if (field === "P") {
+      updateFenceSeg(id, field, parseInt(trimmed, 10) || 0);
+    } else {
+      updateFenceSeg(id, field, parseFloat(trimmed) || 0);
+    }
+    setFenceSegDrafts((prev) => {
+      if (!prev[id]) return prev;
+      const entry = { ...prev[id] };
+      delete entry[field];
+      const next = { ...prev };
+      if (Object.keys(entry).length === 0) delete next[id];
+      else next[id] = entry;
+      return next;
+    });
+  }, [fenceSegDrafts, updateFenceSeg]);
 
   const getLogoHtml = useCallback(() => {
     if (!logoDataUrl) return "";
@@ -2398,9 +2442,9 @@ function AuthenticatedPageContent() {
                   <div className="space-y-4">{fenceSegments.map((seg) => (
                     <div key={seg.id} className="bg-white p-5 rounded-2xl border-2 border-slate-200 shadow-sm relative flex flex-col gap-4">
                       <button type="button" onClick={() => removeFenceSeg(seg.id)} className="absolute top-4 left-4 text-red-500 bg-red-50 w-8 h-8 rounded-lg font-black hover:bg-red-100 border border-red-100 flex items-center justify-center">X</button>
-                      <div><label className="block text-sm font-bold text-slate-600 mb-1">אורך כולל (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={seg.L || ""} onChange={(e) => updateFenceSeg(seg.id, "L", parseFloat(e.target.value.replace(",", ".")) || 0)} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl" placeholder="0" /></div>
-                      <div><label className="block text-sm font-bold text-slate-600 mb-1">גובה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={seg.H || ""} onChange={(e) => updateFenceSeg(seg.id, "H", parseFloat(e.target.value.replace(",", ".")) || 0)} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl" placeholder="0" /></div>
-                      <div><label className="block text-xs font-bold text-slate-500 mb-1">מספר עמודים כולל</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={seg.P ?? ""} onChange={(e) => { const v = e.target.value.replace(",", "."); updateFenceSeg(seg.id, "P", v === "" ? undefined : (parseInt(v, 10) || 0)); }} className="w-full text-center font-black text-xl p-2.5 border border-slate-300 rounded-lg" placeholder="סה״כ" /></div>
+                      <div><label className="block text-sm font-bold text-slate-600 mb-1">אורך כולל (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "L")} onChange={(e) => setFenceSegDraft(seg.id, "L", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "L")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl" placeholder="0" /></div>
+                      <div><label className="block text-sm font-bold text-slate-600 mb-1">גובה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "H")} onChange={(e) => setFenceSegDraft(seg.id, "H", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "H")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl" placeholder="0" /></div>
+                      <div><label className="block text-xs font-bold text-slate-500 mb-1">מספר עמודים כולל</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "P")} onChange={(e) => setFenceSegDraft(seg.id, "P", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "P")} className="w-full text-center font-black text-xl p-2.5 border border-slate-300 rounded-lg" placeholder="סה״כ" /></div>
                     </div>
                   ))}</div>
                   <div className="mt-4 pt-3 border-t">
