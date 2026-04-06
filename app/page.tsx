@@ -1345,6 +1345,7 @@ function AuthenticatedPageContent() {
     const customerWaText = encodeURIComponent(
       `שלום ${custName || ""}, מצורף סיכום הפרגולה שלך מ-${sysContractorName || "Yarhi Pro"}.`
     );
+    const customerWaHref = canSendToCustomer ? `https://wa.me/${customerWaPhone}?text=${customerWaText}` : "";
 
     w.document.write(`
       <html dir="rtl" lang="he"><head><title>הצעת מחיר - ${custName || "לקוח"}</title>
@@ -1414,7 +1415,11 @@ function AuthenticatedPageContent() {
         <div class="no-print" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;">
           <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:0;">הדמיה (לפי הנתונים שהוזנו)</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
-            <button id="btn-whatsapp-quote" style="background:${canSendToCustomer ? "#16a34a" : "#94a3b8"};color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:${canSendToCustomer ? "pointer" : "not-allowed"};border:none;" ${canSendToCustomer ? "" : "disabled"}>📲 שלח בוואטסאפ ללקוח</button>
+            ${
+              canSendToCustomer
+                ? `<a id="btn-whatsapp-quote" href="${customerWaHref}" target="_self" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#16a34a;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">📲 שלח בוואטסאפ ללקוח</a>`
+                : `<button id="btn-whatsapp-quote" style="background:#94a3b8;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:not-allowed;border:none;" disabled>📲 שלח בוואטסאפ ללקוח</button>`
+            }
             <button id="btn-close-quote" style="background:#334155;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">✖️ סגור</button>
             <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
           </div>
@@ -1426,7 +1431,7 @@ function AuthenticatedPageContent() {
         var btn=document.getElementById('btn-print-quote');
         var closeBtn=document.getElementById('btn-close-quote');
         var waBtn=document.getElementById('btn-whatsapp-quote');
-        var waUrl=${JSON.stringify(canSendToCustomer ? `https://wa.me/${customerWaPhone}?text=${customerWaText}` : "")};
+        var waUrl=${JSON.stringify(customerWaHref)};
         if(!btn)return;
         var iframe=document.getElementById('quote-sim-iframe');
         // Apply live config into sim.html (3D)
@@ -1468,7 +1473,8 @@ function AuthenticatedPageContent() {
           };
         }
         if (waBtn) {
-          waBtn.onclick=function(){
+          var goWhatsApp = function(ev){
+            if(ev && ev.preventDefault) ev.preventDefault();
             if(!waUrl){ alert('לא נמצא מספר טלפון לקוח תקין בפרטים.'); return; }
             var wapp = null;
             try { wapp = window.open(waUrl, '_blank'); } catch(e) {}
@@ -1476,6 +1482,8 @@ function AuthenticatedPageContent() {
               try { window.location.href = waUrl; } catch(e) {}
             }
           };
+          waBtn.onclick = goWhatsApp;
+          waBtn.addEventListener('touchend', goWhatsApp, { passive: false });
         }
         btn.onclick=function(){
           btn.disabled=true;btn.textContent='מדפיס...';
