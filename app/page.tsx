@@ -2224,8 +2224,8 @@ function AuthenticatedPageContent() {
                   <h3 className="text-lg font-bold mb-4 border-b pb-2 text-slate-700 flex items-center gap-2">📐 מידות ומבנה (חוץ-חוץ)</h3>
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2">
-                      <div><label className="block text-sm font-bold text-blue-700 mb-1">אורך קיר ראשי (ס&quot;מ)</label><input type="text" inputMode="numeric" pattern="[0-9]*" dir="ltr" value={lengthWall} onChange={(e) => { setLengthWall(e.target.value); saveCurrentState(); }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
-                      <div><label className="block text-sm font-bold text-blue-700 mb-1">יציאה (ס&quot;מ)</label><input type="text" inputMode="numeric" pattern="[0-9]*" dir="ltr" value={exitWidth} onChange={(e) => { setExitWidth(e.target.value); saveCurrentState(); }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
+                      <div><label className="block text-sm font-bold text-blue-700 mb-1">אורך קיר ראשי (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lengthWall} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLengthWall(v); saveCurrentState(); } }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
+                      <div><label className="block text-sm font-bold text-blue-700 mb-1">יציאה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={exitWidth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setExitWidth(v); saveCurrentState(); } }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
                     </div>
                     <div className="p-3 bg-orange-50 rounded-xl border border-orange-200">
                       <label className="flex items-center gap-2 cursor-pointer mb-2 border-b border-orange-200 pb-2">
@@ -2234,8 +2234,8 @@ function AuthenticatedPageContent() {
                       </label>
                       {isLShape && (
                         <div className="grid grid-cols-2 gap-2 mt-2">
-                          <div><label className="block text-xs text-orange-700 mb-1">רוחב הבליטה</label><input type="text" inputMode="numeric" pattern="[0-9]*" dir="ltr" value={lWallWidth} onChange={(e) => { setLWallWidth(e.target.value); saveCurrentState(); }} className="w-full border border-orange-300 rounded-lg p-2" /></div>
-                          <div><label className="block text-xs text-orange-700 mb-1">עומק הבליטה</label><input type="text" inputMode="numeric" pattern="[0-9]*" dir="ltr" value={lWallDepth} onChange={(e) => { setLWallDepth(e.target.value); saveCurrentState(); }} className="w-full border border-orange-300 rounded-lg p-2" /></div>
+                          <div><label className="block text-xs text-orange-700 mb-1">רוחב הבליטה</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lWallWidth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLWallWidth(v); saveCurrentState(); } }} className="w-full border border-orange-300 rounded-lg p-2" /></div>
+                          <div><label className="block text-xs text-orange-700 mb-1">עומק הבליטה</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lWallDepth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLWallDepth(v); saveCurrentState(); } }} className="w-full border border-orange-300 rounded-lg p-2" /></div>
                           <div className="col-span-2"><label className="block text-xs text-orange-700 mb-1">צד הבליטה</label><select value={lShapeSide} onChange={(e) => { setLShapeSide(e.target.value as "left" | "right"); saveCurrentState(); }} className="w-full border border-orange-300 rounded-lg p-2 bg-white"><option value="right">הבליטה בקיר בצד ימין</option><option value="left">הבליטה בקיר בצד שמאל</option></select></div>
                         </div>
                       )}
