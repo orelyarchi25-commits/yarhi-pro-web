@@ -514,11 +514,14 @@
         });
     }
 
-    /** קורות מקבילות ל־Z: פסי פרופיל על הפאה החיצונית (זרות מהמרכז) — כמו חזית/אחור. */
+    /**
+     * קורות מקבילות ל־Z: בימין — פסים על הפאה החיצונית (+X). בשמאל — פעמיים: חוץ (+הזחה ל־-X) ופנים (+הזחה ל־+X),
+     * כדי שיראו את הפרופיל גם “מבחוץ” (סיבוב מצלמה) וגם מברירת המחדל; ribX מעט מוגדש לבולטות.
+     */
     function addFrameProfileRibsAlongZ(group, color, zMin, zMax, xBeamCenter, beamY, fh, fw, visualMode) {
         if (visualMode === 'smooth') return;
         const nRibs = visualMode === 'hitech' ? 4 : 2;
-        const ribX = 0.007;
+        const ribX = 0.009;
         const ribY = Math.min(0.016, fh * 0.18);
         const yB = beamY - fh / 2;
         const yT = beamY + fh / 2;
@@ -528,11 +531,20 @@
         } else {
             for (let i = 1; i <= 4; i++) ys.push(yB + (fh * i) / 5);
         }
-        const outwardSign = xBeamCenter > 0 ? 1 : xBeamCenter < 0 ? -1 : 1;
-        const xFace = xBeamCenter + outwardSign * (fw / 2 + ribX / 2);
+        const half = fw / 2 + ribX / 2;
+        const epsOut = 0.0025;
+        const epsIn = 0.007;
+        let xFaces;
+        if (xBeamCenter < 0) {
+            xFaces = [xBeamCenter - half - epsOut, xBeamCenter + half + epsIn];
+        } else if (xBeamCenter > 0) {
+            xFaces = [xBeamCenter + half + epsOut];
+        } else {
+            xFaces = [half + epsOut];
+        }
         const len = zMax - zMin;
         const cz = (zMin + zMax) / 2;
-        ys.forEach((yc) => {
+        const addRibAt = (xFace, yc) => {
             const rib = createBox(ribX, ribY, len, color);
             rib.position.set(xFace, yc, cz);
             rib.renderOrder = 2;
@@ -542,7 +554,8 @@
                 rib.material.polygonOffsetUnits = -4;
             }
             group.add(rib);
-        });
+        };
+        xFaces.forEach((xf) => ys.forEach((yc) => addRibAt(xf, yc)));
     }
 
     function _setRangeAndNumber(idRange, idNum, value) {

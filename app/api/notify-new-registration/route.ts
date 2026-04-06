@@ -77,6 +77,9 @@ export async function POST(request: NextRequest) {
     const contractorName = String(data.contractorName ?? "");
     const phone = String(data.phone ?? "");
     const email = String(data.email ?? decoded.email ?? "");
+    const registrationPlan = String(data.registrationPlan ?? "");
+    const paymentMethod = String(data.paymentMethod ?? "");
+    const paymentProofFileName = String(data.paymentProofFileName ?? "");
 
     const subject = `רישום קבלן חדש — ${businessName || email || uid}`;
 
@@ -96,6 +99,17 @@ export async function POST(request: NextRequest) {
       `שם קבלן: ${contractorName || "—"}`,
       `טלפון: ${phone || "—"}`,
       `אימייל: ${email || "—"}`,
+      `מסלול: ${
+        registrationPlan === "monthly"
+          ? "חודשי"
+          : registrationPlan === "annual"
+            ? "שנתי"
+            : registrationPlan === "trial_7d"
+              ? "ניסיון 7 ימים"
+              : "—"
+      }`,
+      `אמצעי תשלום שדווח: ${paymentMethod === "bank" ? "העברה בנקאית" : paymentMethod === "bit" ? "ביט (Bit)" : "—"}`,
+      `צילום אישור תשלום: ${paymentProofFileName || "לא צורף"}`,
       `מזהה משתמש (UID): ${uid}`,
     ].join("\n");
 

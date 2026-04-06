@@ -28,7 +28,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "frame-ribs-side-outward-v1";
+const SIM_VERSION = "frame-ribs-left-dual-face-v1";
 
 // --- Constants: RAL colors (same order as original) ---
 const RAL_OPTIONS = [
@@ -627,7 +627,7 @@ function AuthenticatedPageContent() {
           if (f.fenceCustName !== undefined) setFenceCustName(String(f.fenceCustName));
           if (f.fenceCustPhone !== undefined) setFenceCustPhone(String(f.fenceCustPhone));
           if (f.fenceCustAddress !== undefined) setFenceCustAddress(String(f.fenceCustAddress));
-          if (typeof f.fenceInGround === "boolean") setFenceInGround(f.fenceInGround);
+          setFenceInGround(false);
           if (f.fenceSlat !== undefined) setFenceSlat(String(f.fenceSlat));
           if (f.fenceGap !== undefined) setFenceGap(String(f.fenceGap));
           if (f.fenceColor !== undefined) setFenceColor(String(f.fenceColor));
@@ -1333,6 +1333,18 @@ function AuthenticatedPageContent() {
     const frameHex = pergolaResult.frameHex;
     const shadeHex = pergolaResult.shadeHex;
     const santafHexQuote = pergolaResult.santafHex;
+    const rawPhone = String(custPhone || "").trim();
+    const phoneDigits = rawPhone.replace(/\D/g, "");
+    const customerWaPhone =
+      phoneDigits.startsWith("972")
+        ? phoneDigits
+        : phoneDigits.startsWith("0")
+          ? `972${phoneDigits.slice(1)}`
+          : phoneDigits;
+    const canSendToCustomer = customerWaPhone.length >= 9;
+    const customerWaText = encodeURIComponent(
+      `שלום ${custName || ""}, מצורף סיכום הפרגולה שלך מ-${sysContractorName || "Yarhi Pro"}.`
+    );
 
     w.document.write(`
       <html dir="rtl" lang="he"><head><title>הצעת מחיר - ${custName || "לקוח"}</title>
@@ -1401,13 +1413,20 @@ function AuthenticatedPageContent() {
       <div id="sim-section" style="margin-bottom:30px;page-break-inside:avoid;">
         <div class="no-print" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;">
           <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:0;">הדמיה (לפי הנתונים שהוזנו)</h3>
-          <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+            <button id="btn-whatsapp-quote" style="background:${canSendToCustomer ? "#16a34a" : "#94a3b8"};color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:${canSendToCustomer ? "pointer" : "not-allowed"};border:none;" ${canSendToCustomer ? "" : "disabled"}>📲 שלח בוואטסאפ ללקוח</button>
+            <button id="btn-close-quote" style="background:#334155;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">✖️ סגור</button>
+            <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
+          </div>
         </div>
         <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד פרגולה" src="/sim.html?rev=${SIM_VERSION}" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
       </div>
       <script>
       (function(){
         var btn=document.getElementById('btn-print-quote');
+        var closeBtn=document.getElementById('btn-close-quote');
+        var waBtn=document.getElementById('btn-whatsapp-quote');
+        var waUrl=${JSON.stringify(canSendToCustomer ? `https://wa.me/${customerWaPhone}?text=${customerWaText}` : "")};
         if(!btn)return;
         var iframe=document.getElementById('quote-sim-iframe');
         // Apply live config into sim.html (3D)
@@ -1438,6 +1457,22 @@ function AuthenticatedPageContent() {
         };
         if (iframe) iframe.onload = function(){ setTimeout(applyCfg, 150); };
         setTimeout(applyCfg, 600);
+        if (closeBtn) {
+          closeBtn.onclick=function(){
+            try { window.close(); } catch(e) {}
+            setTimeout(function(){
+              if(!window.closed){
+                try { window.location.href = '/'; } catch(e) {}
+              }
+            }, 120);
+          };
+        }
+        if (waBtn) {
+          waBtn.onclick=function(){
+            if(!waUrl){ alert('לא נמצא מספר טלפון לקוח תקין בפרטים.'); return; }
+            window.open(waUrl, '_blank');
+          };
+        }
         btn.onclick=function(){
           btn.disabled=true;btn.textContent='מדפיס...';
           setTimeout(function(){window.print();btn.disabled=false;btn.textContent='🖨️ הדפס סיכום';},50);
@@ -1466,51 +1501,86 @@ function AuthenticatedPageContent() {
     w.document.close();
   }, [pergolaResult, custName, custPhone, custAddress, sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, getLogoHtml, showAlert, lengthWall, exitWidth, isLShape, lWallWidth, dividerSize, dividerSmoothCount, dividerLedCount, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, frameType, shadingProfile, spacing, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postType, colorSelect, shadeColorSelect, simCaption]);
 
-  const handleWhatsAppOrder = useCallback(() => {
-    const message =
-      "סיכום הזמנת קיט - ירחי אלומיניום\n" +
-      "\n" +
+  const handleWhatsAppOrder = useCallback((kind: "pergola" | "fence") => {
+    const contractorHeader =
       "פרטי הקבלן (שולח ההזמנה):\n" +
-      `אימייל: ${sysEmail}\n` +
-      "\n" +
-      "פרטי לקוח הקצה:\n" +
-      `שם: ${custName}\n` +
-      "\n" +
-      "מפרט טכני - פרגולה:\n" +
-      `מידות: רוחב ${lengthWall} ס\"מ | יציאה ${exitWidth} ס\"מ\n` +
-      `פרגולת ר': ${
-        isLShape
-          ? "כן - רוחב קיר: " + lWallWidth + ", עומק: " + lWallDepth + ", צד: " + lShapeSide
-          : "לא"
-      }\n` +
-      `צבע מסגרת: ${colorSelect}\n` +
-      `צבע הצללה: ${shadeColorSelect}\n` +
-      `סוג מסגרת (היקפי): ${frameType}\n` +
-      `פרופיל חלוקה/קסטות: ${dividerSize}\n` +
-      `פרופיל הצללה (חציצים): ${shadingProfile}\n` +
-      `מרווח בין חציצים: ${spacing} ס\"מ\n` +
-      "\n" +
-      "תוספות וקירוי:\n" +
-      `סנטף: ${hasSantaf ? "כן, צבע: " + santafColor : "ללא"}\n` +
-      `אף מים: ${hasSantaf ? dripEdgeType : "ללא"}\n` +
-      `תאורת לד: ${hasLed ? "כן, כמות: " + ledCount + ", צבע: " + ledColor : "ללא"}\n` +
-      `מאוורר: ${hasFan ? "כן, כמות: " + fanCount : "ללא"}\n` +
-      `עמודים: ${
-        Number(postCount) > 0
-          ? postCount + " עמודים, סוג: " + postType + ", גובה: " + postHeight + " ס\"מ"
-          : "ללא עמודים"
-      }\n` +
-      `מותחנים: ${
-        Number(tensionerCount) > 0
-          ? tensionerCount + " מותחנים, צבע: " + tensionerColor
-          : "ללא מותחנים"
-      }`;
+      `אימייל: ${sysEmail || "-"}\n`;
+
+    const fenceSegmentsForMessage = fenceSegments.filter((s) => s.L > 0 && s.H > 0);
+    const fenceSegmentsLines =
+      fenceSegmentsForMessage.length > 0
+        ? fenceSegmentsForMessage
+            .map((s, i) => `• מקטע ${i + 1}: אורך ${s.L} ס"מ | גובה ${s.H} ס"מ`)
+            .join("\n")
+        : "• לא הוזנו מקטעים תקינים";
+
+    const message =
+      kind === "fence"
+        ? "סיכום הזמנת קיט גדר - ירחי אלומיניום\n" +
+          "\n" +
+          contractorHeader +
+          "\n" +
+          "פרטי לקוח הקצה:\n" +
+          `שם: ${fenceCustName || "-"}\n` +
+          "\n" +
+          "מפרט טכני - גדר:\n" +
+          "מקטעים:\n" +
+          `${fenceSegmentsLines}\n` +
+          `סוג שלב: ${fenceSlat}\n` +
+          `מרווח בין שלבים: ${fenceGap} ס\"מ\n` +
+          `צבע מסגרת: ${fenceColor}\n` +
+          `צבע שלבים: ${fenceSlatColor}\n` +
+          `מספר מקטעים: ${fenceSegments.filter((s) => s.L > 0 && s.H > 0).length}\n` +
+          `סה\"כ אורך: ${fenceSegments.filter((s) => s.L > 0).reduce((sum, s) => sum + s.L, 0)} ס\"מ`
+        : "סיכום הזמנת קיט פרגולה - ירחי אלומיניום\n" +
+          "\n" +
+          contractorHeader +
+          "\n" +
+          "פרטי לקוח הקצה:\n" +
+          `שם: ${custName}\n` +
+          "\n" +
+          "מפרט טכני - פרגולה:\n" +
+          `מידות: רוחב ${lengthWall} ס\"מ | יציאה ${exitWidth} ס\"מ\n` +
+          `פרגולת ר': ${
+            isLShape
+              ? "כן - רוחב קיר: " + lWallWidth + ", עומק: " + lWallDepth + ", צד: " + lShapeSide
+              : "לא"
+          }\n` +
+          `צבע מסגרת: ${colorSelect}\n` +
+          `צבע הצללה: ${shadeColorSelect}\n` +
+          `סוג מסגרת (היקפי): ${frameType}\n` +
+          `פרופיל חלוקה/קסטות: ${dividerSize}\n` +
+          `פרופיל הצללה (חציצים): ${shadingProfile}\n` +
+          `מרווח בין חציצים: ${spacing} ס\"מ\n` +
+          "\n" +
+          "תוספות וקירוי:\n" +
+          `סנטף: ${hasSantaf ? "כן, צבע: " + santafColor : "ללא"}\n` +
+          `אף מים: ${hasSantaf ? dripEdgeType : "ללא"}\n` +
+          `תאורת לד: ${hasLed ? "כן, כמות: " + ledCount + ", צבע: " + ledColor : "ללא"}\n` +
+          `מאוורר: ${hasFan ? "כן, כמות: " + fanCount : "ללא"}\n` +
+          `עמודים: ${
+            Number(postCount) > 0
+              ? postCount + " עמודים, סוג: " + postType + ", גובה: " + postHeight + " ס\"מ"
+              : "ללא עמודים"
+          }\n` +
+          `מותחנים: ${
+            Number(tensionerCount) > 0
+              ? tensionerCount + " מותחנים, צבע: " + tensionerColor
+              : "ללא מותחנים"
+          }`;
 
     const encodedMessage = encodeURIComponent(message);
     window.open("https://wa.me/972522288798?text=" + encodedMessage, "_blank");
   }, [
     sysEmail,
     custName,
+    fenceCustName,
+    fenceSlat,
+    fenceGap,
+    fenceColor,
+    fenceSlatColor,
+    fenceInGround,
+    fenceSegments,
     lengthWall,
     exitWidth,
     isLShape,
@@ -1570,7 +1640,7 @@ function AuthenticatedPageContent() {
       setFenceGap(s.fenceGap ?? "2");
       setFenceColor(s.fenceColor ?? "RAL 9016");
       setFenceSlatColor(s.fenceSlatColor ?? "RAL 9016");
-      setFenceInGround(!!s.fenceInGround);
+      setFenceInGround(false);
       if (s.segs && s.segs.length > 0) setFenceSegments(s.segs.map((seg, i) => ({ id: Date.now() + i, ...seg })));
       switchView("fences");
       return;
@@ -2274,7 +2344,9 @@ function AuthenticatedPageContent() {
                       <div><label className="block text-xs font-bold text-slate-500 mb-1">מספר עמודים כולל</label><input type="number" value={seg.P ?? ""} onChange={(e) => { const v = e.target.value; updateFenceSeg(seg.id, "P", v === "" ? undefined : (parseInt(v) || 0)); }} className="w-full text-center font-black text-xl p-2.5 border border-slate-300 rounded-lg" placeholder="סה״כ" /></div>
                     </div>
                   ))}</div>
-                  <div className="mt-4 pt-3 border-t"><label className="flex items-center gap-2 cursor-pointer w-full"><input type="checkbox" checked={fenceInGround} onChange={(e) => setFenceInGround(e.target.checked)} className="w-5 h-5 accent-blue-600" /><span className="text-sm font-bold text-slate-700">העמודים שתולים באדמה</span></label><div className="text-xs text-slate-500 font-bold bg-slate-100 p-2 rounded-lg text-center mt-2">החישוב המלא מתבצע בשרת המערכת</div></div>
+                  <div className="mt-4 pt-3 border-t">
+                    <div className="text-xs text-slate-500 font-bold bg-slate-100 p-2 rounded-lg text-center mt-2">החישוב המלא מתבצע בשרת המערכת</div>
+                  </div>
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 bg-slate-50">
                   <h3 className="text-lg font-bold mb-4 border-b border-slate-200 pb-2 text-slate-700">🧱 מפרט טכני</h3>
@@ -2595,7 +2667,7 @@ function AuthenticatedPageContent() {
               <button
                 type="button"
                 onClick={() => {
-                  handleWhatsAppOrder();
+                  handleWhatsAppOrder(kitOrderModal.kind);
                   setKitOrderModal(null);
                 }}
                 className="w-full bg-emerald-600 text-white px-5 py-3 rounded-2xl font-black hover:bg-emerald-700 transition flex items-center justify-center gap-2"
