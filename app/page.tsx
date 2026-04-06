@@ -1470,7 +1470,11 @@ function AuthenticatedPageContent() {
         if (waBtn) {
           waBtn.onclick=function(){
             if(!waUrl){ alert('לא נמצא מספר טלפון לקוח תקין בפרטים.'); return; }
-            window.open(waUrl, '_blank');
+            var wapp = null;
+            try { wapp = window.open(waUrl, '_blank'); } catch(e) {}
+            if (!wapp) {
+              try { window.location.href = waUrl; } catch(e) {}
+            }
           };
         }
         btn.onclick=function(){
