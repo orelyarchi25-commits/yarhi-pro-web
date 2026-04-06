@@ -989,6 +989,19 @@ function AuthenticatedPageContent() {
     const transportExVat = fenceResult.transportExVat;
     const vatAmount = fenceResult.vatAmount;
     const slatLabel = fenceResult.slatLabel;
+    const rawFencePhone = String(fenceCustPhone || "").trim();
+    const fencePhoneDigits = rawFencePhone.replace(/\D/g, "");
+    const fenceWaPhone =
+      fencePhoneDigits.startsWith("972")
+        ? fencePhoneDigits
+        : fencePhoneDigits.startsWith("0")
+          ? `972${fencePhoneDigits.slice(1)}`
+          : fencePhoneDigits;
+    const canSendFenceToCustomer = fenceWaPhone.length >= 9;
+    const fenceWaText = encodeURIComponent(
+      `שלום ${fenceCustName || ""}, מצורף סיכום הגדר שלך מ-${sysContractorName || "Yarhi Pro"}.`
+    );
+    const fenceWaHref = canSendFenceToCustomer ? `https://wa.me/${fenceWaPhone}?text=${fenceWaText}` : "";
 
     w.document.write(`
       <html dir="rtl" lang="he"><head><title>הצעת מחיר - ${fenceCustName || "לקוח"}</title>
@@ -1060,7 +1073,15 @@ function AuthenticatedPageContent() {
       <div id="sim-section" style="margin-bottom:30px;page-break-inside:avoid;">
         <div class="no-print" style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;">
           <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:0;">הדמיה (לפי הנתונים שהוזנו)</h3>
-          <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+            ${
+              canSendFenceToCustomer
+                ? `<a id="btn-whatsapp-quote" href="${fenceWaHref}" target="_self" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#16a34a;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">📲 שלח בוואטסאפ ללקוח</a>`
+                : `<button id="btn-whatsapp-quote" style="background:#94a3b8;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:not-allowed;border:none;" disabled>📲 שלח בוואטסאפ ללקוח</button>`
+            }
+            <button id="btn-close-quote" style="background:#334155;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">✖️ סגור</button>
+            <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
+          </div>
         </div>
         <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד גדרות" src="/fence-sim.html" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
       </div>
@@ -1068,6 +1089,9 @@ function AuthenticatedPageContent() {
       <script>
       (function(){
         var btn=document.getElementById('btn-print-quote');
+        var closeBtn=document.getElementById('btn-close-quote');
+        var waBtn=document.getElementById('btn-whatsapp-quote');
+        var waUrl=${JSON.stringify(fenceWaHref)};
         if(!btn)return;
         var iframe=document.getElementById('quote-sim-iframe');
         // Apply live config into fence-sim.html (3D)
@@ -1087,6 +1111,29 @@ function AuthenticatedPageContent() {
         };
         if (iframe) iframe.onload = function(){ setTimeout(applyCfg, 150); };
         setTimeout(applyCfg, 600);
+        if (closeBtn) {
+          closeBtn.onclick=function(){
+            try { window.close(); } catch(e) {}
+            setTimeout(function(){
+              if(!window.closed){
+                try { window.location.href = '/'; } catch(e) {}
+              }
+            }, 120);
+          };
+        }
+        if (waBtn) {
+          var goWhatsApp = function(ev){
+            if(ev && ev.preventDefault) ev.preventDefault();
+            if(!waUrl){ alert('לא נמצא מספר טלפון לקוח תקין בפרטים.'); return; }
+            var wapp = null;
+            try { wapp = window.open(waUrl, '_blank'); } catch(e) {}
+            if (!wapp) {
+              try { window.location.href = waUrl; } catch(e) {}
+            }
+          };
+          waBtn.onclick = goWhatsApp;
+          waBtn.addEventListener('touchend', goWhatsApp, { passive: false });
+        }
         btn.onclick=function(){
           btn.disabled=true;btn.textContent='מדפיס...';
           setTimeout(function(){window.print();btn.disabled=false;btn.textContent='🖨️ הדפס סיכום';},50);
