@@ -4294,6 +4294,7 @@ ${logoBlock}
               <div>
                 <p className="text-xs text-slate-400">מחובר כ־</p>
                 <p className="font-bold text-slate-100">{sysContractorName || "—"}</p>
+                {isManagerUser ? <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p> : null}
               </div>
               <button
                 type="button"
