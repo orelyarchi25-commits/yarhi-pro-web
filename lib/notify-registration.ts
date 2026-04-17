@@ -10,12 +10,16 @@ function envAny(...keys: string[]): string {
   return "";
 }
 
+function unquoteEnvValue(value: string): string {
+  return value.trim().replace(/^['"]+|['"]+$/g, "").trim();
+}
+
 export function getNotifyResendApiKey(): string {
-  return envAny("RESEND_API_KEY", "RESEND_KEY");
+  return unquoteEnvValue(envAny("RESEND_API_KEY", "RESEND_KEY"));
 }
 
 export function getNotifyAdminEmailRaw(): string {
-  return envAny("ADMIN_NOTIFY_EMAIL", "ADMIN_EMAIL");
+  return unquoteEnvValue(envAny("ADMIN_NOTIFY_EMAIL", "ADMIN_EMAIL"));
 }
 
 export function getNotifyRegistrationMissing(): NotifyRegistrationMissing[] {
@@ -32,7 +36,7 @@ export function parseAdminNotifyEmails(): string[] {
   const raw = getNotifyAdminEmailRaw();
   return raw
     .split(/[,;]+/)
-    .map((s) => s.trim())
+    .map((s) => unquoteEnvValue(s))
     .filter(Boolean);
 }
 
