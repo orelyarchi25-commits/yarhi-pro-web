@@ -8,6 +8,7 @@ import BusinessView, { loadTransactions, type CrmProject, type Transaction } fro
 import { useAuth } from "@/components/AuthProvider";
 import { useSearchString } from "@/hooks/useSearchString";
 import { getFirebaseDb } from "@/lib/firebase";
+import { isAdminEmail } from "@/lib/admin-access";
 import {
   BUSINESS_SETTINGS_KEYS,
   parseWorkspaceFromFirestore,
@@ -294,7 +295,7 @@ function AuthenticatedPageContent() {
   const router = useRouter();
   const searchString = useSearchString();
   const { logout, firebaseUser, isAdmin } = useAuth();
-  const isManagerUser = isAdmin;
+  const isManagerUser = isAdmin || isAdminEmail(firebaseUser?.email);
   const currentView = parseView(new URLSearchParams(searchString).get("view"));
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const fenceSimIframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -363,6 +364,7 @@ function AuthenticatedPageContent() {
   const [sysPhone, setSysPhone] = useState("");
   const [sysAddress, setSysAddress] = useState("");
   const [sysEmail, setSysEmail] = useState("");
+  const showManagerBadge = isManagerUser || isAdminEmail(sysEmail);
   const [simCaption, setSimCaption] = useState("");
   const [sysFencePriceSqm, setSysFencePriceSqm] = useState("");
   const [sysFenceSetPrice, setSysFenceSetPrice] = useState("");
@@ -3185,7 +3187,7 @@ ${logoBlock}
         <div className="border-b border-slate-700 px-2 pt-8 pb-10 text-center">
           <h1 className="text-3xl font-black text-blue-400 tracking-wider">Yarhi PRO</h1>
           <p className="mt-1 text-sm font-bold text-slate-200">{sysContractorName || "שם העסק לא הוגדר"}</p>
-          {isManagerUser && <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p>}
+          {showManagerBadge && <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p>}
           <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-400">Advanced Pergola System</p>
           <p className="mt-1 text-[10px] text-slate-500">© כל הזכויות שמורות</p>
         </div>
@@ -4294,7 +4296,7 @@ ${logoBlock}
               <div>
                 <p className="text-xs text-slate-400">מחובר כ־</p>
                 <p className="font-bold text-slate-100">{sysContractorName || "—"}</p>
-                {isManagerUser ? <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p> : null}
+                {showManagerBadge ? <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p> : null}
               </div>
               <button
                 type="button"
