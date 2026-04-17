@@ -15,7 +15,7 @@ export function getNotifyResendApiKey(): string {
 }
 
 export function getNotifyAdminEmailRaw(): string {
-  return envAny("ADMIN_NOTIFY_EMAIL", "ADMIN_EMAIL") || "yarhipro@gmail.com";
+  return envAny("ADMIN_NOTIFY_EMAIL", "ADMIN_EMAIL");
 }
 
 export function getNotifyRegistrationMissing(): NotifyRegistrationMissing[] {
