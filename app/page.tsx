@@ -3223,7 +3223,7 @@ ${logoBlock}
             <span className="text-base leading-none" aria-hidden>🚪</span>
             התנתקות
           </button>
-          גרסת מערכת 3.0 (PRO)
+          גרסת מערכת 3.0.1 (PRO)
           <br />
           פותח עבור ירחי אלומיניום
         </div>
@@ -4333,7 +4333,7 @@ ${logoBlock}
                 🚪 התנתקות
               </button>
             </div>
-            <p className="mt-4 text-center text-[10px] text-slate-500">גרסת מערכת 3.0 (PRO)</p>
+            <p className="mt-4 text-center text-[10px] text-slate-500">גרסת מערכת 3.0.1 (PRO)</p>
           </div>
         </div>
       )}
