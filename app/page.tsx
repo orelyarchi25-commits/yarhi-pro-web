@@ -239,12 +239,10 @@ function HomeGate() {
           <div className="w-full max-w-xl rounded-3xl border border-amber-600/50 bg-slate-800/95 shadow-2xl p-8 md:p-10 text-center space-y-4">
             <h1 className="text-2xl md:text-3xl font-black text-amber-300">מחובר – אבל אין אישור תקנון בענן</h1>
             <p className="text-slate-200 text-sm leading-relaxed">
-              ההתחברות ל-Firebase הצליחה, אבל לא ניתן לקרוא/לשמור את המסמך <code className="text-amber-200">users/</code>
-              ב-Firestore (לרוב: <strong>כללי Firestore לא פורסמו</strong> או חוסמים).
+              ההתחברות הצליחה, אבל כרגע לא ניתן להשלים את הגישה לחשבון.
             </p>
             <p className="text-slate-400 text-xs leading-relaxed">
-              פתח <strong>Firebase Console</strong> → <strong>Firestore Database</strong> → <strong>Rules</strong> → הדבק את התוכן מקובץ{" "}
-              <code className="text-slate-300">firestore.rules</code> בפרויקט → <strong>Publish</strong>. אחרי זה התנתק והתחבר שוב.
+              נסה להתנתק ולהתחבר שוב בעוד רגע. אם הבעיה נמשכת, פנה לתמיכה.
             </p>
             <button
               type="button"
