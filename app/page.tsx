@@ -3185,7 +3185,7 @@ ${logoBlock}
         <div className="border-b border-slate-700 px-2 pt-8 pb-10 text-center">
           <h1 className="text-3xl font-black text-blue-400 tracking-wider">Yarhi PRO</h1>
           <p className="mt-1 text-sm font-bold text-slate-200">{sysContractorName || "שם העסק לא הוגדר"}</p>
-          {String(sysEmail || "").trim().toLowerCase() === "yarchialuminum@gmail.com" && <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p>}
+          {isManagerUser && <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p>}
           <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-400">Advanced Pergola System</p>
           <p className="mt-1 text-[10px] text-slate-500">© כל הזכויות שמורות</p>
         </div>
