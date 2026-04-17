@@ -285,7 +285,7 @@ export default function RegisterPage() {
             </div>
             <div className="rounded-xl border border-white/10 bg-black/20 p-4 text-slate-300">
               <p className="font-semibold text-slate-200">העברה בנקאית</p>
-              <p className="mt-1">הפועלים (12), סניף 604 קריית שלום ת&quot;א, חשבון 140924, מוטב ירחי אוראל</p>
+              <p className="mt-1">פרטי העברה יישלחו באופן פרטי לאחר יצירת קשר.</p>
             </div>
           </div>
         </div>
