@@ -3,6 +3,9 @@ import { Heebo } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
 import "./globals.css";
 
+/** מונע דף סטטי שנתקע — מוגדר רק ב-layout (קומפוננטת שרת), לא בעמוד עם "use client" */
+export const dynamic = "force-dynamic";
+
 // מושכים את הפונט Heebo מגוגל, שמוגדר מראש לתמוך בעברית מושלמת
 const heebo = Heebo({ subsets: ["hebrew", "latin"] });
 

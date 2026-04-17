@@ -19,6 +19,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -70,6 +71,8 @@ export default function LoginPage() {
               email: emailNorm,
               termsAcceptedAt: serverTimestamp(),
               termsVersion: TERMS_VERSION,
+              // נדרש ליצירת מסמך חדש לפי Firestore Rules.
+              accountApproved: false,
               updatedAt: serverTimestamp(),
             },
             { merge: true }
@@ -149,15 +152,26 @@ export default function LoginPage() {
             </div>
             <div>
               <label className="mb-1.5 block text-sm font-semibold text-slate-300">סיסמה</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-[#060910] px-4 py-3 text-white placeholder:text-slate-500 focus:border-blue-500/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-                placeholder="סיסמה"
-                required
-                autoComplete="current-password"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-[#060910] px-4 py-3 pl-12 text-white placeholder:text-slate-500 focus:border-blue-500/60 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                  placeholder="סיסמה"
+                  required
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-300 transition hover:bg-white/10 hover:text-white"
+                  aria-label={showPassword ? "הסתר סיסמה" : "הצג סיסמה"}
+                  title={showPassword ? "הסתר סיסמה" : "הצג סיסמה"}
+                >
+                  {showPassword ? "🙈" : "👁️"}
+                </button>
+              </div>
             </div>
             <div className="flex items-center justify-between text-xs">
               <Link href="/forgot-password" className="font-bold text-blue-400 hover:underline">

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { sendPasswordResetEmail } from "firebase/auth";
-import { getFirebaseAuth, getFirebaseProjectIdForUi, isFirebaseConfigured } from "@/lib/firebase";
+import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase";
 import { firebaseAuthErrorMessageHe, getFirebaseErrorCode } from "@/lib/auth-errors-he";
 import { normalizeLoginEmail } from "@/lib/normalize-email";
 export default function ForgotPasswordPage() {
@@ -47,10 +47,7 @@ export default function ForgotPasswordPage() {
         url: `${origin}/login`,
         handleCodeInApp: false,
       });
-      const pid = getFirebaseProjectIdForUi();
-      setMsg(
-        `הבקשה נרשמה. אם האימייל רשום בפרויקט Firebase הזה (${pid}) – אמור להגיע מייל עם קישור. אם לא מגיע כלום: בדוק ספאם/דואר לא רצוי, וב־Firebase Console → Authentication → Users – האם האימייל מופיע שם? אם לא – צור משתמש ב«הרשמה» או בקונסולה (חשבון מפרויקט אחר לא עובר אוטומטית). פתח את הקישור מהמייל פעם אחת בלבד (תצוגה מקדימה לפעמים «שורפת» את הקישור).`
-      );
+      setMsg("אם האימייל קיים במערכת, נשלח אליו קישור לאיפוס סיסמה. בדוק גם בתיבת ספאם/קידומי מכירות.");
     } catch (err: unknown) {
       const code = getFirebaseErrorCode(err);
       setError(firebaseAuthErrorMessageHe(code));
@@ -92,11 +89,11 @@ export default function ForgotPasswordPage() {
         </form>
 
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 text-right leading-relaxed space-y-2">
-          <p className="font-bold">אם מופיעה באנגלית: «expired or already been used»</p>
+          <p className="font-bold">לא קיבלת מייל?</p>
           <ul className="list-disc list-inside space-y-1">
-            <li>בקש איפוס שוב, ואז פתח את המייל בדפדפן אחר או גלישה בסתר.</li>
-            <li>ב-Firebase Console → Authentication → Settings → Authorized domains – ודא שמופיע הדומיין שלך (כולל localhost לפיתוח).</li>
-            <li>ב-Google Cloud → APIs → Credentials – אם הגבלת את מפתח ה-API, ודא ש-Firebase Auth לא חסום.</li>
+            <li>בדוק בתיבת ספאם/קידומי מכירות.</li>
+            <li>ודא שהקלדת את האימייל נכון.</li>
+            <li>אפשר לבקש שוב קישור אחרי דקה.</li>
           </ul>
         </div>
 

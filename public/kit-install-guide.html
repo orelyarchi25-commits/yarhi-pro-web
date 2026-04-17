@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>חוברת הדרכה והרכבה - ירחי אלומיניום</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body {
+            font-family: 'Assistant', sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        main {
+            flex-grow: 1;
+        }
+
+        @media print {
+            body { background-color: #ffffff; }
+            .no-print { display: none !important; }
+            .print-page-break { page-break-before: always; }
+            .step-card {
+                break-inside: avoid;
+                border: 2px solid #e2e8f0;
+                box-shadow: none !important;
+                margin-bottom: 20px;
+            }
+            .print-exact { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            #methodSelection { display: none; }
+            footer {
+                position: static;
+                margin-top: 40px;
+                page-break-inside: avoid;
+            }
+        }
+
+        .sketch-container {
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+            background-size: 20px 20px;
+        }
+
+        .tab-btn.active {
+            background-color: #1e3a8a;
+            color: white;
+            border-color: #1e3a8a;
+        }
+    </style>
+</head>
+<body class="antialiased pb-20 print:pb-0 flex flex-col min-h-screen">
+
+    <script>
+        const readBool = (v, def = false) => {
+            if (v === null || v === undefined || v === "") return def;
+            const s = String(v).toLowerCase().trim();
+            return s === "1" || s === "true" || s === "yes";
+        };
+        const readNum = (v, def = 0) => {
+            const n = Number(String(v ?? "").replace(",", "."));
+            return Number.isFinite(n) ? n : def;
+        };
+        const readStr = (v, def = "") => (v === null || v === undefined ? def : String(v));
+
+        function parseProjectDataFromUrl() {
+            const p = new URLSearchParams(window.location.search || "");
+            return {
+                customerName: readStr(p.get("customerName"), "לקוח"),
+                orderDate: readStr(p.get("orderDate"), new Date().toLocaleDateString("he-IL")),
+                phone: readStr(p.get("phone"), ""),
+                address: readStr(p.get("address"), ""),
+                width: readNum(p.get("width"), 0),
+                projection: readNum(p.get("projection"), 0),
+                profileType: readStr(p.get("profileType"), "דאבל טי 140/40"),
+                color: readStr(p.get("color"), ""),
+                hasSantuf: readBool(p.get("hasSantuf"), true),
+                postsCount: readNum(p.get("postsCount"), 2),
+                tensionersCount: readNum(p.get("tensionersCount"), 0),
+                tensionerColor: readStr(p.get("tensionerColor"), ""),
+                supportMode: readStr(p.get("supportMode"), ""),
+                partitionsCount: readNum(p.get("partitionsCount"), 4),
+                fieldsCount: readNum(p.get("fieldsCount"), 5),
+                shadingType: readStr(p.get("shadingType"), "20/40"),
+            };
+        }
+
+        const projectData = parseProjectDataFromUrl();
+    </script>
+
+    <header class="bg-[#1e3a8a] text-white py-6 px-4 shadow-md print-exact no-print flex-shrink-0">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold">ירחי אלומיניום - מדריך הרכבה</h1>
+                <p class="text-blue-200 text-sm mt-1">מערכת מקצועית לקבלני אלומיניום</p>
+            </div>
+            <div class="bg-white/10 p-2 rounded-lg flex gap-3">
+                <button onclick="window.print()" class="flex items-center gap-2 bg-white text-[#1e3a8a] px-4 py-2 rounded-md font-bold hover:bg-gray-100 transition">
+                    <i data-lucide="printer" class="w-5 h-5"></i>
+                    הדפס חוברת
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-4xl mx-auto px-4 py-8 w-full">
+
+        <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card print-page-break">
+            <div class="flex justify-between items-start mb-6 border-b pb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-900 mb-2">פרגולת אלומיניום - <span id="ui-name"></span></h2>
+                    <p class="text-gray-500 flex items-center gap-2">
+                        <i data-lucide="calendar" class="w-4 h-4"></i> תאריך הזמנה: <span id="ui-date"></span>
+                    </p>
+                    <p class="text-gray-500 text-sm mt-1">טלפון: <span id="ui-phone"></span></p>
+                    <p class="text-gray-500 text-sm">כתובת: <span id="ui-address"></span></p>
+                </div>
+                <div class="text-left bg-slate-50 p-4 rounded-xl border">
+                    <p class="text-sm text-gray-500 mb-1">מידות המערכת</p>
+                    <p class="text-2xl font-black text-[#1e3a8a]" dir="ltr">
+                        <span id="ui-width"></span> x <span id="ui-proj"></span> cm
+                    </p>
+                </div>
+            </div>
+
+            <div class="mb-8">
+                <h3 class="text-lg font-bold mb-3 flex items-center gap-2"><i data-lucide="ruler" class="w-5 h-5 text-[#1e3a8a]"></i> סקיצה כללית למסגר</h3>
+                <div class="sketch-container border-2 border-gray-300 rounded-xl p-8 relative flex flex-col items-center justify-center min-h-[300px] print-exact">
+                    <div class="absolute top-0 w-full h-12 bg-gray-300 flex items-center justify-center font-bold text-gray-600 tracking-widest print-exact">
+                        ק י ר &nbsp; א ח ו ר י
+                    </div>
+
+                    <div class="relative border-4 border-[#1e3a8a] w-3/4 h-48 mt-12 print-exact" style="background-color: rgba(30, 58, 138, 0.05);">
+                        <div class="absolute left-1/3 top-0 bottom-0 border-l-2 border-dashed border-[#1e3a8a] opacity-50"></div>
+                        <div class="absolute right-1/3 top-0 bottom-0 border-l-2 border-dashed border-[#1e3a8a] opacity-50"></div>
+
+                        <div class="absolute -top-7 left-1/2 -translate-x-1/2 bg-white px-2 font-bold text-[#1e3a8a] text-sm">קורת L (קיר): <span id="sk-width"></span> ס"מ</div>
+                        <div class="absolute top-1/2 -left-20 -translate-y-1/2 bg-white px-2 font-bold text-[#1e3a8a] text-sm transform -rotate-90">יציאה: <span id="sk-proj"></span> ס"מ</div>
+
+                        <div class="absolute -bottom-3 -left-3 w-6 h-6 bg-orange-500 border-2 border-white print-exact rounded-sm shadow"></div>
+                        <div class="absolute -bottom-3 -right-3 w-6 h-6 bg-orange-500 border-2 border-white print-exact rounded-sm shadow"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-5 flex gap-4 mb-4 print-exact">
+                <i data-lucide="check-circle" class="w-8 h-8 text-blue-600 flex-shrink-0 mt-1"></i>
+                <div>
+                    <h4 class="font-bold text-blue-800 text-lg mb-1">לפני שמתחילים - בדיקת תכולה</h4>
+                    <p class="text-blue-700 text-sm">
+                        אנא פתח את המארזים ובדוק שכל החלקים, הפרופילים והברגים המופיעים ברשימת החומרים קיימים ותקינים <strong>לפני</strong> תחילת ההרכבה.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+            <h2 class="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                <i data-lucide="package" class="w-6 h-6 text-[#1e3a8a]"></i> תכולת הקיט (רשימת פרופילים)
+            </h2>
+
+            <div class="overflow-hidden border border-gray-200 rounded-xl print-exact">
+                <table class="w-full text-right">
+                    <thead class="bg-[#1e3a8a] text-white print-exact">
+                        <tr>
+                            <th class="px-4 py-3 font-bold w-12 text-center">✓</th>
+                            <th class="px-4 py-3 font-bold">סוג הפרופיל / החלק</th>
+                            <th class="px-4 py-3 font-bold text-center w-24">כמות</th>
+                            <th class="px-4 py-3 font-bold">מידות ופירוט</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 bg-white">
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">קורת קיר (פרופיל L)</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg">1</td>
+                            <td class="px-4 py-3 text-gray-600">אורך: <span id="bom-width1"></span> ס"מ</td>
+                        </tr>
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">קורות צד</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg">2</td>
+                            <td class="px-4 py-3 text-gray-600">אורך: <span id="bom-proj"></span> ס"מ</td>
+                        </tr>
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">קורת חזית</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg">1</td>
+                            <td class="px-4 py-3 text-gray-600">אורך: <span id="bom-width2"></span> ס"מ</td>
+                        </tr>
+                        <tr class="hover:bg-gray-50 bg-blue-50/30" id="row-posts">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">עמודי תמיכה + תושבות</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg" id="bom-posts"></td>
+                            <td class="px-4 py-3 text-gray-600" id="bom-posts-detail">כולל תושבות עליונות ותחתונות (U)</td>
+                        </tr>
+                        <tr class="hover:bg-gray-50 bg-cyan-50/30" id="row-tensioners">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">מותחני קיר (טלסקופיים)</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg" id="bom-tensioners"></td>
+                            <td class="px-4 py-3 text-gray-600">צבע: <strong id="bom-tensioner-color"></strong>, כולל אוזניים + ברגי דוך + איסכורית קודח</td>
+                        </tr>
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">פרופילי חציצה (פנימיים)</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg" id="bom-partitions"></td>
+                            <td class="px-4 py-3 text-gray-600">מורכבים בין קורת הקיר לחזית</td>
+                        </tr>
+                        <tr class="hover:bg-gray-50 bg-orange-50/30">
+                            <td class="px-4 py-3 text-center border-l"><div class="w-5 h-5 border-2 border-gray-300 rounded mx-auto"></div></td>
+                            <td class="px-4 py-3 font-semibold text-gray-800">שדות הצללה מוכנים</td>
+                            <td class="px-4 py-3 text-center font-bold text-lg" id="bom-fields"></td>
+                            <td class="px-4 py-3 text-gray-600">סוג שלבים: <strong id="bom-shading-type" class="text-orange-600"></strong></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4 text-sm text-gray-500">
+                * הקיט כולל גם את כל אביזרי החיבור הנדרשים: עכבישים, ברגי איסכורית, ברגי שפיץ עם אטם, וג'מבואים (בהתאם להזמנה).
+            </div>
+        </section>
+
+        <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+
+            <div class="bg-red-50 border-2 border-red-200 rounded-xl p-5 flex gap-4 mb-8 print-exact">
+                <i data-lucide="alert-triangle" class="w-10 h-10 text-red-600 flex-shrink-0"></i>
+                <div>
+                    <h4 class="font-bold text-red-800 text-lg mb-1">אזהרת בטיחות חמורה!</h4>
+                    <p class="text-red-700 text-sm">
+                        <strong>סכנת התחשמלות ופגיעה בתשתיות:</strong> לפני קידוח בקיר, חובה לוודא שאין תשתיות חשמל, צנרת מים או גז העוברות באזור הקידוח.
+                        יש לעבוד תמיד עם ציוד מגן אישי מלא (כפפות, משקפי מגן, נעלי עבודה סגורות).
+                    </p>
+                </div>
+            </div>
+
+            <h2 class="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                <i data-lucide="wrench" class="w-6 h-6 text-[#1e3a8a]"></i> ציוד עבודה נדרש (להכנה מראש)
+            </h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">🪜</span> <span>סולם</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">⚡</span> <span class="text-sm">פטישון + מקדחים (11,7)</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">🔩</span> <span class="text-sm">ג'מבואים כפולים (וקצרים)</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">📏</span> <span>פלס ומטר מדידה</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">🔨</span> <span>פטיש גומי וברזל</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3">
+                    <span class="text-2xl flex-shrink-0">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-700">
+                            <rect x="2" y="7" width="12" height="6" rx="1" />
+                            <path d="M14 9h3l1 2h-4" />
+                            <path d="M18 10h4" />
+                            <path d="M5 13l-1 8h4l1-8" />
+                            <path d="M6 19h3" />
+                        </svg>
+                    </span>
+                    <span class="text-sm">מברגה (ביט ג'מבו, איסכורית, פיליפס)</span>
+                </div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3">
+                    <span class="text-2xl flex-shrink-0">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-orange-600">
+                            <circle cx="12" cy="12" r="8" stroke-dasharray="4 2" />
+                            <circle cx="12" cy="12" r="2" />
+                            <path d="M12 12l4-4" />
+                            <path d="M4 20h16" />
+                        </svg>
+                    </span>
+                    <span class="text-sm font-semibold">מסור גרונג</span>
+                </div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">🧴</span> <span>חומר איטום (סיקה)</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">🔩</span> <span class="text-sm leading-tight">ברגי איסכורית שפיץ עם אטם גדול (לסנטף)</span></div>
+                <div class="bg-slate-50 p-3 rounded-lg border flex items-center gap-3"><span class="text-2xl">⚙️</span> <span class="text-sm leading-tight">בורג איסכורית קטן קודח לחיבורים</span></div>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card print-page-break">
+            <h2 class="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+                <i data-lucide="eye" class="w-6 h-6 text-[#1e3a8a]"></i> דגשים ויזואליים להרכבה
+            </h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 print-exact">
+
+                <div class="border-2 border-slate-800 rounded-2xl p-4 bg-white relative flex flex-col items-center justify-center min-h-[200px] shadow-sm">
+                    <div class="absolute top-4 right-4 w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold text-lg">1</div>
+                    <svg viewBox="0 0 200 120" class="w-full h-32 mt-2">
+                        <rect x="40" y="10" width="20" height="100" fill="#cbd5e1" rx="2"/>
+                        <rect x="60" y="35" width="30" height="50" fill="#3b82f6" rx="4"/>
+                        <text x="75" y="65" fill="white" font-size="16" font-weight="bold" text-anchor="middle" font-family="sans-serif">A</text>
+                        <line x1="90" y1="60" x2="130" y2="60" stroke="#1e293b" stroke-width="3" stroke-dasharray="5"/>
+                        <rect x="130" y="58" width="40" height="4" fill="#ef4444"/>
+                        <rect x="170" y="45" width="25" height="30" fill="#1e293b" rx="4"/>
+                        <rect x="195" y="50" width="5" height="20" fill="#1e293b" rx="2"/>
+                    </svg>
+                    <div class="mt-4 bg-slate-100 px-6 py-2 rounded-lg font-bold text-slate-800 text-sm w-full text-center">קידוח ועיגון פרופיל קיר (A)</div>
+                </div>
+
+                <div class="border-2 border-slate-800 rounded-2xl p-4 bg-white relative flex flex-col items-center justify-center min-h-[200px] shadow-sm">
+                    <div class="absolute top-4 right-4 w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold text-lg">2</div>
+                    <svg viewBox="0 0 200 120" class="w-full h-32 mt-2">
+                        <rect x="40" y="15" width="15" height="90" fill="#3b82f6"/>
+                        <rect x="55" y="15" width="90" height="15" fill="#94a3b8"/>
+                        <text x="100" y="27" fill="white" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">B</text>
+                        <rect x="55" y="90" width="90" height="15" fill="#94a3b8"/>
+                        <text x="100" y="102" fill="white" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">B</text>
+                        <rect x="145" y="15" width="15" height="90" fill="#94a3b8"/>
+                        <text x="152.5" y="65" fill="white" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">C</text>
+
+                        <path d="M 47.5 22.5 L 100 60 L 152.5 22.5" fill="none" stroke="#ef4444" stroke-width="2"/>
+
+                        <circle cx="47.5" cy="22.5" r="10" fill="none" stroke="#ef4444" stroke-width="3"/>
+                        <circle cx="152.5" cy="22.5" r="10" fill="none" stroke="#ef4444" stroke-width="3"/>
+                        <circle cx="47.5" cy="97.5" r="10" fill="none" stroke="#ef4444" stroke-width="3"/>
+                        <circle cx="152.5" cy="97.5" r="10" fill="none" stroke="#ef4444" stroke-width="3"/>
+
+                        <text x="100" y="80" fill="#ef4444" font-size="14" font-weight="bold" text-anchor="middle" font-family="sans-serif">4x עכבישים</text>
+                    </svg>
+                    <div class="mt-4 bg-slate-100 px-6 py-2 rounded-lg font-bold text-slate-800 text-sm w-full text-center">חיבור כל 4 הפינות בעזרת "עכבישים"</div>
+                </div>
+
+                <div class="border-2 border-slate-800 rounded-2xl p-4 bg-white relative flex flex-col items-center justify-center min-h-[200px] shadow-sm">
+                    <div class="absolute top-4 right-4 w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold text-lg">3</div>
+                    <svg viewBox="0 0 200 120" class="w-full h-32 mt-2">
+                        <rect x="75" y="5" width="50" height="15" fill="#1e293b" rx="4"/>
+                        <rect x="90" y="5" width="20" height="15" fill="#cbd5e1"/>
+                        <circle cx="100" cy="12.5" r="4" fill="#22c55e"/>
+                        <rect x="40" y="20" width="120" height="15" fill="#94a3b8" rx="2"/>
+                        <text x="100" y="31" fill="white" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">C</text>
+                        <rect x="50" y="35" width="15" height="75" fill="#3b82f6"/>
+                        <rect x="135" y="35" width="15" height="75" fill="#3b82f6"/>
+                        <line x1="30" y1="110" x2="170" y2="110" stroke="#1e293b" stroke-width="4"/>
+                        <line x1="20" y1="75" x2="50" y2="75" stroke="#ef4444" stroke-width="2"/>
+                        <line x1="150" y1="75" x2="180" y2="75" stroke="#ef4444" stroke-width="2"/>
+                    </svg>
+                    <div class="mt-4 bg-slate-100 px-6 py-2 rounded-lg font-bold text-slate-800 text-sm w-full text-center">פילוס קורת החזית (C) על העמודים</div>
+                </div>
+
+                <div class="border-2 border-slate-800 rounded-2xl p-4 bg-white relative flex flex-col items-center justify-center min-h-[200px] shadow-sm">
+                    <div class="absolute top-4 right-4 w-8 h-8 bg-slate-800 text-white rounded-full flex items-center justify-center font-bold text-lg">4</div>
+                    <svg viewBox="0 0 200 120" class="w-full h-32 mt-2">
+                        <rect x="20" y="105" width="160" height="10" fill="#94a3b8" rx="2"/>
+                        <path d="M 10 65 Q 35 30 60 65 T 110 65 T 160 65 T 210 65" fill="none" stroke="#3b82f6" stroke-width="6" stroke-linecap="round"/>
+
+                        <rect x="33" y="5" width="4" height="25" fill="#ef4444"/>
+                        <rect x="29" y="0" width="12" height="6" fill="#1e293b"/>
+                        <path d="M 45 20 L 55 30 L 70 10" fill="none" stroke="#22c55e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+                        <line x1="85" y1="50" x2="85" y2="100" stroke="#ef4444" stroke-width="3" stroke-dasharray="4"/>
+                        <path d="M 95 45 L 110 60 M 110 45 L 95 60" stroke="#ef4444" stroke-width="4" stroke-linecap="round"/>
+                    </svg>
+                    <div class="mt-4 bg-slate-100 px-6 py-2 rounded-lg font-bold text-slate-800 text-sm w-full text-center">הברגת סנטף - בגל העליון בלבד!</div>
+                </div>
+
+            </div>
+        </section>
+
+        <section id="methodSelection" class="bg-blue-50 border-2 border-[#1e3a8a] rounded-2xl p-6 mb-8 no-print">
+            <h3 class="text-xl font-bold text-[#1e3a8a] mb-4 text-center">בחר את שיטת ההרכבה שלך:</h3>
+            <div class="flex flex-col sm:flex-row gap-4 justify-center">
+                <button id="btn-method1" onclick="setMethod(1)" class="tab-btn active px-8 py-4 rounded-xl border-2 font-bold text-lg flex items-center justify-center gap-2 transition-all">
+                    <i data-lucide="crane"></i>
+                    שיטה 1: הרכבה עם מנוף / במת הרמה
+                </button>
+                <button id="btn-method2" onclick="setMethod(2)" class="tab-btn px-8 py-4 rounded-xl border-2 border-gray-300 text-gray-600 bg-white font-bold text-lg flex items-center justify-center gap-2 transition-all hover:border-[#1e3a8a]">
+                    <i data-lucide="users"></i>
+                    שיטה 2: הרכבה ידנית (ללא מנוף)
+                </button>
+            </div>
+            <p class="text-center mt-3 text-sm text-gray-600">הוראות ההרכבה למטה ישתנו בהתאם לשיטה שתבחר.</p>
+        </section>
+
+        <div id="steps-container"></div>
+
+        <div id="common-steps">
+            <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card print-page-break">
+                <h3 class="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-3">
+                    <span class="bg-[#1e3a8a] text-white w-8 h-8 rounded-full flex items-center justify-center text-lg print-exact step-num-common"></span>
+                    הכנסת שדות ההצללה והכנה לסנטף
+                </h3>
+                <div class="space-y-4">
+                    <div class="flex gap-4 p-4 bg-slate-50 rounded-lg">
+                        <i data-lucide="layout-grid" class="w-6 h-6 text-gray-500 mt-1 flex-shrink-0"></i>
+                        <div>
+                            <h4 class="font-bold text-lg">שדות הצללה</h4>
+                            <p class="text-gray-700">הכנס את שדות ההצללה (המוכנים מראש) אל תוך המרווחים שבין פרופילי החציצה.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 p-4 bg-slate-50 rounded-lg border-l-4 border-orange-500">
+                        <i data-lucide="arrow-up" class="w-6 h-6 text-orange-500 mt-1 flex-shrink-0"></i>
+                        <div>
+                            <h4 class="font-bold text-lg">פרופילי הכנה לסנטף</h4>
+                            <p class="text-gray-700">מעל שדות ההצללה, התקן פרופילי הכנה לסנטף (ניצבים) <strong>במרווח של כל 50 ס"מ</strong>. קבע אותם בעזרת בורג קודח.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+                <h3 class="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-3">
+                    <span class="bg-[#1e3a8a] text-white w-8 h-8 rounded-full flex items-center justify-center text-lg print-exact step-num-common"></span>
+                    קירוי סנטף ואיטום קיר
+                </h3>
+                <div class="space-y-4">
+                    <div class="flex gap-4 p-4 bg-slate-50 rounded-lg">
+                        <i data-lucide="cloud-rain" class="w-6 h-6 text-blue-500 mt-1 flex-shrink-0"></i>
+                        <div>
+                            <h4 class="font-bold text-lg">הנחת לוחות הסנטף</h4>
+                            <p class="text-gray-700">הנח את לוחות הסנטף מעל פרופילי ההכנה. <strong>חובה לבצע חפיפה של גל או שניים</strong> בין לוח ללוח.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 p-4 bg-slate-50 rounded-lg">
+                        <i data-lucide="settings" class="w-6 h-6 text-gray-500 mt-1 flex-shrink-0"></i>
+                        <div>
+                            <h4 class="font-bold text-lg">הברגת הסנטף</h4>
+                            <p class="text-gray-700">תפוס את הסנטף לפרופילי ההכנה בעזרת בורג שפיץ עם אטם גדול. יש להבריג <strong>בגל העליון כל 3 גלים, ועל כל נקודות החפיפה.</strong></p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+                        <i data-lucide="droplet" class="w-6 h-6 text-green-600 mt-1 flex-shrink-0"></i>
+                        <div>
+                            <h4 class="font-bold text-lg text-green-800">איטום מפגש קיר (קריטי למניעת נזילות)</h4>
+                            <p class="text-green-700">בין הסנטף לקיר האחורי, קבע פרופיל "מפגש קיר". יש לאטום את המרווח בין הפרופיל לקיר באופן יסודי בעזרת חומר איטום מסוג "סיקה".</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <footer class="bg-gray-900 text-white mt-auto py-8 px-4 flex-shrink-0 print-exact">
+        <div class="max-w-4xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="text-center md:text-right">
+                <h3 class="text-xl font-bold text-orange-500 mb-1">קיטים להרכבה עצמית מבית ירחי אלומיניום</h3>
+                <p class="text-gray-300 italic">"המקום שבו יוקרה וידע מקצועי נפגשים"</p>
+            </div>
+
+            <div class="bg-white/10 p-4 rounded-xl border border-white/20 text-center">
+                <p class="text-sm text-gray-300 mb-2">נתקלתם בבעיה? יש לכם שאלה? אנחנו כאן:</p>
+                <div class="flex items-center justify-center gap-2 text-xl font-bold text-white">
+                    <i data-lucide="phone" class="w-5 h-5 text-orange-500"></i>
+                    <a href="tel:0522288798" class="hover:text-orange-400 transition" dir="ltr">052-2288798</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        function getSupportFlags() {
+            const postsCount = Number(projectData.postsCount) || 0;
+            const tensionersCount = Number(projectData.tensionersCount) || 0;
+            const mode = String(projectData.supportMode || "").toLowerCase();
+            if (mode === "posts") return { postsCount, tensionersCount, hasPosts: true, hasTensioners: false };
+            if (mode === "tensioners") return { postsCount, tensionersCount, hasPosts: false, hasTensioners: true };
+            if (mode === "both") return { postsCount, tensionersCount, hasPosts: true, hasTensioners: true };
+            return {
+                postsCount,
+                tensionersCount,
+                hasPosts: postsCount > 0 || tensionersCount === 0,
+                hasTensioners: tensionersCount > 0,
+            };
+        }
+
+        function renderSupportBullets() {
+            const support = getSupportFlags();
+            const bullets = [];
+            if (support.hasPosts) {
+                bullets.push("<li><strong>העמדת עמודים:</strong> קבע תושבת U לרצפה עבור כל עמוד (ג'מבו קצרים), והכנס את עמודי התמיכה לפי הכמות הנדרשת.</li>");
+            }
+            if (support.hasTensioners) {
+                bullets.push("<li><strong>מותחני קיר - אוזניים:</strong> קבע אוזן אחת לקיר, ואוזן מקבילה על פרופיל המסגרת/קורת החלוקה.</li>");
+                bullets.push("<li><strong>מותחני קיר - טלסקופי:</strong> חבר ביניהן צינור טלסקופי, תפוס עם בורג דוך לאוזן ולצינור, ונעל את הצינור הטלסקופי בעזרת בורג איסכורית קודח.</li>");
+            }
+            return bullets.join("");
+        }
+
+        function getMethod1HTML() {
+            return `
+            <div class="mb-6 pb-2 border-b-2 border-[#1e3a8a] inline-block">
+                <h2 class="text-2xl font-black text-[#1e3a8a]">הוראות: שיטה 1 (עם מנוף/הנפה)</h2>
+            </div>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+                <h3 class="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-3">
+                    <span class="bg-[#1e3a8a] text-white w-8 h-8 rounded-full flex items-center justify-center text-lg print-exact">1</span>
+                    הרכבת מסגרת הפרגולה (על הקרקע)
+                </h3>
+                <ul class="space-y-3 text-lg text-gray-700 list-disc list-inside marker:text-orange-500">
+                    <li>חבר את קורת ה-L (קורת הקיר) עם קורות הצדדים.</li>
+                    <li>החיבור בפינות מתבצע בעזרת <strong>מחברי עכביש</strong>. יש לסגור כל חיבור בעזרת בורג איסכורית קודח קטן.</li>
+                    <li>חבר את קורת החזית באותה שיטה.</li>
+                    <li>חבר את פרופילי החציצה: מצד אחד לתושבות שכבר מותקנות על קורת ה-L, ומצד שני לקורת החזית.</li>
+                </ul>
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+                <div class="bg-orange-100 border-r-4 border-orange-500 p-4 mb-6 print-exact">
+                    <h4 class="font-bold text-orange-800 text-lg flex items-center gap-2"><i data-lucide="ruler"></i> דגש קריטי - שיפוע למים!</h4>
+                    <p class="text-orange-900">שים לב: קורת ה-L מותקנת על הקיר כשהיא <strong>מפולסת (ישרה) לחלוטין</strong>. קורות הצד צריכות לרדת ממנה בשיפוע של <strong>לפחות 5%</strong> כלפי מטה אל קורת החזית, כדי להבטיח ניקוז מים תקין.</p>
+                </div>
+
+                <h3 class="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-3">
+                    <span class="bg-[#1e3a8a] text-white w-8 h-8 rounded-full flex items-center justify-center text-lg print-exact">2</span>
+                    הנפה, פילוס וקיבוע
+                </h3>
+                <ul class="space-y-3 text-lg text-gray-700 list-disc list-inside marker:text-orange-500">
+                    <li>הנף את הקונסטרוקציה המורכבת בעזרת מנוף או במת הרמה.</li>
+                    <li>קבע את קורת ה-L (קורת הקיר) לקיר בעזרת <strong>ג'מבו כפול</strong>. הקידוח יתבצע עם פטישון ומקדח 11 בידיה.</li>
+                    <li>וודא פילוס מדויק של קורת ה-L על הקיר (אופקית), והקפד שקורות הצד יורדות בשיפוע של 5% כלפי קורת החזית.</li>
+                    <li>קבע את תושבות ה-U לקורת החזית.</li>
+                    ${renderSupportBullets()}
+                </ul>
+            </section>
+        `;
+        }
+
+        function getMethod2HTML() {
+            return `
+            <div class="mb-6 pb-2 border-b-2 border-[#1e3a8a] inline-block">
+                <h2 class="text-2xl font-black text-[#1e3a8a]">הוראות: שיטה 2 (הרכבה ידנית ללא מנוף)</h2>
+            </div>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+                <div class="bg-orange-100 border-r-4 border-orange-500 p-4 mb-6 print-exact">
+                    <h4 class="font-bold text-orange-800 text-lg flex items-center gap-2"><i data-lucide="ruler"></i> דגש קריטי - שיפוע למים!</h4>
+                    <p class="text-orange-900">שים לב: קורת ה-L מותקנת על הקיר כשהיא <strong>מפולסת (ישרה) לחלוטין</strong>. תכנן מראש את גובה העמודים כך שקורות הצד ירדו מהקיר כלפי קורת החזית בשיפוע של <strong>לפחות 5%</strong> לניקוז מים.</p>
+                </div>
+
+                <h3 class="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-3">
+                    <span class="bg-[#1e3a8a] text-white w-8 h-8 rounded-full flex items-center justify-center text-lg print-exact">1</span>
+                    קיבוע לקיר והתחלת מסגרת
+                </h3>
+                <ul class="space-y-3 text-lg text-gray-700 list-disc list-inside marker:text-orange-500">
+                    <li>פלס לחלוטין אופקית וקבע את קורת ה-L (קורת הקיר) אל הקיר בעזרת <strong>ג'מבו כפול</strong> (פטישון ומקדח 11).</li>
+                    <li>חבר את קורות הצדדים אל קורת הקיר בעזרת <strong>מחברי עכביש</strong> בזווית היורדת (5%). סגור עם בורג איסכורית קטן קודח.</li>
+                    <li>חבר את קורת החזית אל קורות הצדדים.</li>
+                </ul>
+            </section>
+
+            <section class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 step-card">
+                <h3 class="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-3">
+                    <span class="bg-[#1e3a8a] text-white w-8 h-8 rounded-full flex items-center justify-center text-lg print-exact">2</span>
+                    השלמת השלד והתמיכות
+                </h3>
+                <ul class="space-y-3 text-lg text-gray-700 list-disc list-inside marker:text-orange-500">
+                    <li>חבר את פרופילי החציצה (הפנימיים): צד אחד לתושבות המותקנות על קורת הקיר, וצד שני לקורת החזית.</li>
+                    <li>קבע את תושבות ה-U לקורת החזית.</li>
+                    ${renderSupportBullets()}
+                </ul>
+            </section>
+        `;
+        }
+
+        function applyProjectDataToUi() {
+            const support = getSupportFlags();
+            document.getElementById('ui-name').textContent = projectData.customerName || "לקוח";
+            document.getElementById('ui-date').textContent = projectData.orderDate || "—";
+            document.getElementById('ui-phone').textContent = projectData.phone || "—";
+            document.getElementById('ui-address').textContent = projectData.address || "—";
+            document.getElementById('ui-width').textContent = projectData.width || "—";
+            document.getElementById('ui-proj').textContent = projectData.projection || "—";
+
+            document.getElementById('sk-width').textContent = projectData.width || "—";
+            document.getElementById('sk-proj').textContent = projectData.projection || "—";
+
+            document.getElementById('bom-width1').textContent = projectData.width || "—";
+            document.getElementById('bom-width2').textContent = projectData.width || "—";
+            document.getElementById('bom-proj').textContent = projectData.projection || "—";
+            document.getElementById('bom-posts').textContent = support.postsCount || "—";
+            document.getElementById('bom-tensioners').textContent = support.tensionersCount || "—";
+            document.getElementById('bom-tensioner-color').textContent = projectData.tensionerColor || "לפי הזמנה";
+            document.getElementById('bom-partitions').textContent = projectData.partitionsCount || "—";
+            document.getElementById('bom-fields').textContent = projectData.fieldsCount || "—";
+            document.getElementById('bom-shading-type').textContent = projectData.shadingType || "—";
+
+            document.getElementById('row-posts').style.display = support.hasPosts ? "" : "none";
+            document.getElementById('row-tensioners').style.display = support.hasTensioners ? "" : "none";
+
+            const postsDetail = document.getElementById('bom-posts-detail');
+            postsDetail.textContent = support.hasTensioners && support.hasPosts
+                ? "כולל תושבות עליונות ותחתונות (U), בנוסף למותחנים לפי התכנון"
+                : "כולל תושבות עליונות ותחתונות (U)";
+        }
+
+        function setMethod(methodNum) {
+            document.getElementById('btn-method1').classList.remove('active', 'bg-[#1e3a8a]', 'text-white');
+            document.getElementById('btn-method1').classList.add('bg-white', 'text-gray-600', 'border-gray-300');
+
+            document.getElementById('btn-method2').classList.remove('active', 'bg-[#1e3a8a]', 'text-white');
+            document.getElementById('btn-method2').classList.add('bg-white', 'text-gray-600', 'border-gray-300');
+
+            document.getElementById(`btn-method${methodNum}`).classList.add('active', 'bg-[#1e3a8a]', 'text-white');
+            document.getElementById(`btn-method${methodNum}`).classList.remove('bg-white', 'text-gray-600', 'border-gray-300');
+
+            const container = document.getElementById('steps-container');
+            container.innerHTML = methodNum === 1 ? getMethod1HTML() : getMethod2HTML();
+
+            const commonSteps = document.querySelectorAll('.step-num-common');
+            commonSteps[0].textContent = '3';
+            commonSteps[1].textContent = '4';
+
+            lucide.createIcons();
+        }
+
+        window.addEventListener("message", (event) => {
+            const data = event.data || {};
+            if (data.type !== "applyGuideConfig") return;
+            Object.assign(projectData, data.config || {});
+            applyProjectDataToUi();
+            setMethod(1);
+        });
+
+        applyProjectDataToUi();
+        setMethod(1);
+        lucide.createIcons();
+    </script>
+</body>
+</html>

@@ -52,7 +52,7 @@ export default function DashboardPage() {
           </h1>
           <p className="mt-3 text-metallic-300 text-sm leading-relaxed">
             {expired
-              ? "תוקף הגישה במערכת הסתיים. פנה למנהל לחידוש (ב-Firestore: עדכון accessValidUntil). אחר כך רענן או התחבר מחדש."
+              ? "תוקף הגישה במערכת הסתיים. פנה למנהל לחידוש ולאחר מכן רענן את הדף או התחבר מחדש."
               : "אין גישה ללוח הבקרה עד שמנהל מאשר את החשבון. חזור לדף הבית או התנתק."}
           </p>
           <Link

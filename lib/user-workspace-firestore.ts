@@ -24,6 +24,20 @@ export const BUSINESS_SETTINGS_KEYS = [
   "sysFencePriceSqm",
   "sysFenceSetPrice",
   "sysJumboPrice",
+  "sysVitrine7000PriceSqm",
+  "sysVitrine9000PriceSqm",
+  /** שיעור מע״מ באחוזים (ברירת מחדל 18) — משפיע על תמחור ללקוח ועל פיננסי */
+  "sysVatPercent",
+  /** תנאי מסמכים/הצעות מחיר: זמן אספקה דינמי (ימים) */
+  "sysQuoteDeliveryDays",
+  /** תנאי מסמכים/הצעות מחיר: שנות אחריות דינמיות */
+  "sysWorkWarrantyYears",
+  /** תנאי מסמכים/הצעות מחיר: אחוז תשלום שלב 1 (מקדמה) */
+  "sysPaymentStage1Percent",
+  /** תנאי מסמכים/הצעות מחיר: אחוז תשלום שלב 2 (אספקה/תחילת התקנה) */
+  "sysPaymentStage2Percent",
+  /** תנאי מסמכים/הצעות מחיר: אחוז תשלום שלב 3 (בסיום) */
+  "sysPaymentStage3Percent",
 ] as const;
 
 export type BusinessSettingsRecord = Partial<Record<(typeof BUSINESS_SETTINGS_KEYS)[number], string>>;
@@ -35,6 +49,8 @@ export type UserWorkspaceSnapshot = {
     fenceCustName: string;
     fenceCustPhone: string;
     fenceCustAddress: string;
+    /** הערות התקנה פנימיות — לא בהצעת מחיר */
+    fenceCustInternalNotes?: string;
     fenceSegments: FenceSegmentDraft[];
     fenceInGround: boolean;
     fenceSlat: string;

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>מערכת חישוב פתחים עצמאית</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="card">
+        <h1>מערכת חישוב חומר וחיתוך - עצמאית</h1>
+        <p>
+          מערכת נפרדת לחלוטין מ-Yarhi Pro. מזינים פתחים, בוחרים סדרה ומספר כנפיים,
+          ומקבלים רשימת חומר + חיתוך + זכוכית.
+        </p>
+      </header>
+
+      <section class="card">
+        <div class="row between">
+          <h2>פתחים לפרויקט</h2>
+          <button id="add-opening-btn" type="button">+ הוסף פתח</button>
+        </div>
+        <div id="openings-list" class="stack"></div>
+      </section>
+
+      <section class="card">
+        <div class="row between">
+          <h2>חישוב</h2>
+          <button id="calc-btn" type="button" class="primary">חשב חומר וחיתוך</button>
+        </div>
+        <p class="hint">
+          ניתן לערוך נוסחאות בתוך הקובץ <code>app.js</code> תחת
+          <code>TEMPLATE_LIBRARY</code>.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>משקל למטר לפי מק"ט (ק"ג/מ')</h2>
+        <p class="hint">הזן ערכים לפי הרשימות שלך. החישוב יופיע אוטומטית בכל שורת חומר.</p>
+        <div class="grid">
+          <div>
+            <h3>טבלת משקלים 7000</h3>
+            <div id="weights-editor-7000"></div>
+          </div>
+          <div>
+            <h3>טבלת משקלים 9000</h3>
+            <div id="weights-editor-9000"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>פלט לפי פתחים</h2>
+        <div id="per-opening-output" class="stack"></div>
+      </section>
+
+      <section class="card">
+        <h2>סיכום חומר מצטבר לפרויקט</h2>
+        <div id="aggregate-output"></div>
+      </section>
+    </main>
+
+    <template id="opening-template">
+      <article class="opening-item">
+        <div class="row between">
+          <h3 class="opening-title">פתח</h3>
+          <button type="button" class="remove-btn danger">הסר</button>
+        </div>
+        <div class="grid">
+          <label>
+            סדרה
+            <select class="series-input">
+              <option value="7000">7000</option>
+              <option value="9000">9000</option>
+            </select>
+          </label>
+          <label>
+            כנפיים
+            <select class="wings-input">
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+          <label>
+            רוחב (מ"מ)
+            <input class="width-input" type="number" min="1" step="1" placeholder="לדוגמה 3000" />
+          </label>
+          <label>
+            גובה (מ"מ)
+            <input class="height-input" type="number" min="1" step="1" placeholder="לדוגמה 2900" />
+          </label>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

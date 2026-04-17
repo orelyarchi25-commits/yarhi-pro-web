@@ -1,10 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CrmStatus } from "@/lib/crm-status";
+import {
+  CRM_STATUS_SELECT_OPTIONS,
+  CRM_STATUS_UI,
+  crmLeadEntryShowsAsClient,
+  crmProjectEligibleForDebtors,
+  crmProjectShowsLifecycleLeadClientPill,
+  crmStatusRequiresPositiveDealIncVat,
+  getCrmStatusLabel,
+  parseCrmStatus,
+} from "@/lib/crm-status";
+import { DEFAULT_VAT_DECIMAL, formatBusinessVatPercentLabel } from "@/lib/vat";
 
 const STORAGE_TX = "yarchiTransactions";
 const STORAGE_CRM = "yarhi_crm_data";
-const VAT_RATE = 0.18;
 
 const MONTHS = ["ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני", "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר"];
 
@@ -109,15 +120,20 @@ function normalizeIncomeVatEntryMode(v: string | undefined, hasVat: boolean): In
 }
 
 /** המרת סכום שהוזן לפי מצב מע״מ → סכום סופי (כולל מע״מ כשיש), בסיס ומע״מ */
-function moneyFromVatRaw(raw: number, vatMode: IncomeVatEntryMode): { final: number; vat: number; base: number; hasVat: boolean } {
+function moneyFromVatRaw(
+  raw: number,
+  vatMode: IncomeVatEntryMode,
+  vatRate: number
+): { final: number; vat: number; base: number; hasVat: boolean } {
   const r = raw < 0 || isNaN(raw) ? 0 : raw;
+  const vr = vatRate >= 0 && Number.isFinite(vatRate) ? vatRate : DEFAULT_VAT_DECIMAL;
   if (vatMode === "none") return { final: r, vat: 0, base: r, hasVat: false };
   if (vatMode === "inc") {
-    const base = r / (1 + VAT_RATE);
+    const base = r / (1 + vr);
     const vat = r - base;
     return { final: r, vat, base, hasVat: true };
   }
-  const vat = r * VAT_RATE;
+  const vat = r * vr;
   return { final: r + vat, vat, base: r, hasVat: true };
 }
 
@@ -134,7 +150,40 @@ export type CrmProject = {
   isFence?: boolean;
   totalLength?: number;
   isExternal?: boolean;
+  /** ליד שנכנס מהלוח בקרה (לא מפרגולה/גדר) */
+  isLead?: boolean;
+  /** שלב במעקב — קובע הופעה ברשימת חייבים */
+  crmStatus?: CrmStatus;
+  /** מתי הוגדר crmStatus הנוכחי (ISO) — למעקב 48 שעות בלוח הבקרה */
+  crmStatusSince?: string;
 };
+
+/** למילוי אוטומטי בפרטי לקוח במודל תשלום — ליד / פרגולה / גדר */
+function getIncomePrefillFromCrmProject(p: CrmProject): { name: string; phone: string; address: string } {
+  const fs = (p.formState ?? {}) as Record<string, unknown>;
+  if (p.isLead) {
+    return {
+      name: (p.customer ?? "").trim(),
+      phone: String(fs.leadPhone ?? "").trim(),
+      address: String(fs.leadAddress ?? "").trim(),
+    };
+  }
+  if (p.isFence) {
+    const fromForm = String(fs.fenceCustName ?? "").trim();
+    const fallbackName = (p.customer ?? "").replace(/\s*\(גדר\)\s*$/, "").trim();
+    return {
+      name: fromForm || fallbackName,
+      phone: String(fs.fenceCustPhone ?? "").trim(),
+      address: String(fs.fenceCustAddress ?? "").trim(),
+    };
+  }
+  const custName = String(fs.custName ?? "").trim();
+  return {
+    name: custName || (p.customer ?? "").trim(),
+    phone: String(fs.custPhone ?? "").trim(),
+    address: String(fs.custAddress ?? "").trim(),
+  };
+}
 
 export type Transaction = {
   id: number;
@@ -197,9 +246,19 @@ type Props = {
   /** תנועות קופה – מנוהל בדף הראשי לסנכרון Firestore */
   transactions: Transaction[];
   persistTransactions: (next: Transaction[]) => void;
+  /** שיעור מע״מ עשרוני (0.18) מתוך הגדרות העסק */
+  businessVatRate?: number;
 };
 
-export default function BusinessView({ crmData, setCrmData, onLoadProject, transactions, persistTransactions }: Props) {
+export default function BusinessView({
+  crmData,
+  setCrmData,
+  onLoadProject,
+  transactions,
+  persistTransactions,
+  businessVatRate = DEFAULT_VAT_DECIMAL,
+}: Props) {
+  const vatPercentLabel = formatBusinessVatPercentLabel(businessVatRate);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
   const [isAllTime, setIsAllTime] = useState(false);
@@ -294,10 +353,12 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
       .reduce((s, t) => s + (t.vatAmount ?? 0), 0);
     const vatBalance = vatCollected - vatPaid;
     const projectTotalDebt = crmData.reduce((a, p) => {
+      if (!crmProjectEligibleForDebtors(p)) return a;
       const paid = transactions.filter((t) => t.projectId === p.id && t.type === "income").reduce((s, t) => s + t.amount, 0);
       return a + Math.max(0, (p.sellingPriceInc ?? 0) - paid);
     }, 0);
     const projectDebtors = crmData
+      .filter(crmProjectEligibleForDebtors)
       .map((p) => {
         const paid = transactions.filter((t) => t.projectId === p.id && t.type === "income").reduce((s, t) => s + t.amount, 0);
         const debt = (p.sellingPriceInc ?? 0) - paid;
@@ -385,7 +446,7 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
   const addExternalProject = useCallback(
     (name: string, income: number) => {
       const id = Math.max(0, ...crmData.map((p) => p.id)) + 1;
-      const base = income / (1 + VAT_RATE);
+      const base = income / (1 + businessVatRate);
       const vat = income - base;
       setCrmData([
         {
@@ -404,12 +465,12 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
       setExternalModal(false);
       addToast("הלקוח נשמר! עכשיו ניתן להוסיף לו תשלומים", "success");
     },
-    [crmData, setCrmData, addToast]
+    [crmData, setCrmData, addToast, businessVatRate]
   );
 
   const handleSaveProjectEdit = useCallback(
-    (id: number, newName: string, newIncome: number) => {
-      const base = newIncome / (1 + VAT_RATE);
+    (id: number, newName: string, newIncome: number, newCrmStatus: CrmStatus) => {
+      const base = newIncome / (1 + businessVatRate);
       const vat = newIncome - base;
       setCrmData((prev) =>
         prev.map((p) =>
@@ -421,6 +482,9 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
                 income: base,
                 incomeExVat: base,
                 vatAmount: vat,
+                crmStatus: newCrmStatus,
+                crmStatusSince:
+                  parseCrmStatus(p.crmStatus) === newCrmStatus ? p.crmStatusSince : new Date().toISOString(),
               }
             : p
         )
@@ -428,7 +492,7 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
       setProjectEditModal(null);
       addToast("פרטי הלקוח עודכנו בהצלחה", "success");
     },
-    [setCrmData, addToast]
+    [setCrmData, addToast, businessVatRate]
   );
 
   const deleteProject = useCallback(
@@ -632,16 +696,32 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
                   >
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
                           <h4 className="font-black text-xl text-slate-800">{p.customer}</h4>
                           {isFullyPaid && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full">שולם במלואו</span>}
                           {p.isExternal && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">פרויקט חיצוני</span>}
+                          {crmProjectShowsLifecycleLeadClientPill(p) &&
+                            (crmLeadEntryShowsAsClient(p.crmStatus) ? (
+                              <span className="bg-emerald-100 text-emerald-900 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">לקוח</span>
+                            ) : (
+                              <span className="bg-indigo-100 text-indigo-800 text-[10px] font-bold px-2 py-0.5 rounded-full">ליד</span>
+                            ))}
+                          {(() => {
+                            const s = parseCrmStatus(p.crmStatus);
+                            if (!s) return null;
+                            const ui = CRM_STATUS_UI[s];
+                            return (
+                              <span title={getCrmStatusLabel(p.crmStatus)} className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${ui.pill}`}>
+                                {ui.emoji} {CRM_STATUS_SELECT_OPTIONS.find((o) => o.value === s)?.label}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <p className="text-xs text-slate-400 mb-3">{p.date}</p>
                         <div className="flex flex-wrap gap-2">
                           {!p.isExternal && (
                             <button type="button" onClick={() => onLoadProject(p.id)} className="text-xs text-slate-600 hover:text-indigo-700 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
-                              טען מידות ו-3D
+                              {p.isLead ? (crmLeadEntryShowsAsClient(p.crmStatus) ? "פתח עריכת לקוח" : "פתח עריכת ליד") : "טען מידות ו-3D"}
                             </button>
                           )}
                           <button type="button" onClick={() => setProjectEditModal(p)} className="text-xs text-slate-600 hover:text-blue-700 bg-slate-100 hover:bg-blue-50 border border-slate-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
@@ -807,6 +887,8 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
           defaultDesc={txModal.defaultDesc}
           projects={crmData}
           incomeCustomerOptions={incomeCustomerOptions}
+          vatRateDecimal={businessVatRate}
+          vatPercentLabel={vatPercentLabel}
           onSave={handleSaveTransaction}
           onClose={closeTxModal}
         />
@@ -815,8 +897,9 @@ export default function BusinessView({ crmData, setCrmData, onLoadProject, trans
       {projectEditModal && (
         <ProjectEditModalFull
           project={projectEditModal}
-          onSave={(id, name, income) => handleSaveProjectEdit(id, name, income)}
+          onSave={(id, name, income, crmStatus) => handleSaveProjectEdit(id, name, income, crmStatus)}
           onClose={() => setProjectEditModal(null)}
+          reportError={(msg) => addToast(msg, "error")}
         />
       )}
 
@@ -884,6 +967,8 @@ function TxModalFull({
   defaultDesc,
   projects,
   incomeCustomerOptions,
+  vatRateDecimal,
+  vatPercentLabel,
   onSave,
   onClose,
 }: {
@@ -894,6 +979,8 @@ function TxModalFull({
   defaultDesc: string;
   projects: CrmProject[];
   incomeCustomerOptions: string[];
+  vatRateDecimal: number;
+  vatPercentLabel: string;
   onSave: (tx: Transaction, action: "add" | "edit") => void;
   onClose: () => void;
 }) {
@@ -929,7 +1016,7 @@ function TxModalFull({
         if (!edit.hasVat || vatEntry === "none") {
           setAmountInput(String(Math.round(edit.amount)));
         } else if (vatEntry === "exc") {
-          const net = edit.baseAmount ?? edit.amount / (1 + VAT_RATE);
+          const net = edit.baseAmount ?? edit.amount / (1 + vatRateDecimal);
           setAmountInput(String(Math.round(net)));
         } else {
           setAmountInput(String(Math.round(edit.amount)));
@@ -951,7 +1038,7 @@ function TxModalFull({
         const g = edit.incomeOutstandingAmount ?? 0;
         if (g <= 0) setIncomeOutstandingInput("");
         else if (!edit.hasVat || vatEntry === "none") setIncomeOutstandingInput(String(Math.round(g)));
-        else if (vatEntry === "exc") setIncomeOutstandingInput(String(Math.round(g / (1 + VAT_RATE))));
+        else if (vatEntry === "exc") setIncomeOutstandingInput(String(Math.round(g / (1 + vatRateDecimal))));
         else setIncomeOutstandingInput(String(Math.round(g)));
       } else {
         setIncomeCustName("");
@@ -982,7 +1069,12 @@ function TxModalFull({
         setIncomeOutstandingInput("");
         if (defaultProjectId) {
           const p = projects.find((x) => String(x.id) === defaultProjectId);
-          if (p?.customer) setIncomeCustName(p.customer);
+          if (p) {
+            const c = getIncomePrefillFromCrmProject(p);
+            if (c.name) setIncomeCustName(c.name);
+            if (c.phone) setIncomeCustPhone(c.phone);
+            if (c.address) setIncomeCustAddress(c.address);
+          }
         }
       } else {
         setIncomeCustName("");
@@ -995,18 +1087,21 @@ function TxModalFull({
         setIncomeOutstandingInput("");
       }
     }
-  }, [isOpen, edit, txMode, defaultProjectId, defaultDesc, projects]);
+  }, [isOpen, edit, txMode, defaultProjectId, defaultDesc, projects, vatRateDecimal]);
 
   useLockBodyScroll(isOpen);
 
   const rawAmount = Number(amountInput) || 0;
   const { finalAmount, vatAmount, baseAmount } = useMemo(() => {
-    const m = moneyFromVatRaw(rawAmount, vatMode);
+    const m = moneyFromVatRaw(rawAmount, vatMode, vatRateDecimal);
     return { finalAmount: m.final, vatAmount: m.vat, baseAmount: m.base };
-  }, [amountInput, vatMode]);
+  }, [amountInput, vatMode, vatRateDecimal]);
 
   const rawOutstanding = Number(incomeOutstandingInput) || 0;
-  const outstandingSplit = useMemo(() => moneyFromVatRaw(rawOutstanding, vatMode), [incomeOutstandingInput, vatMode]);
+  const outstandingSplit = useMemo(
+    () => moneyFromVatRaw(rawOutstanding, vatMode, vatRateDecimal),
+    [incomeOutstandingInput, vatMode, vatRateDecimal]
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1152,10 +1247,10 @@ function TxModalFull({
             <div className={`p-5 rounded-2xl border ${txMode === "income" ? "bg-emerald-50/50 border-emerald-100" : "bg-red-50/50 border-red-100"}`}>
               <div className="grid grid-cols-1 gap-4 mb-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">מע&quot;מ (18%) — איך להבין את הסכומים?</label>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">מע&quot;מ ({vatPercentLabel}) — איך להבין את הסכומים?</label>
                   <select className={`${selectClass} font-bold`} value={vatMode} onChange={(e) => setVatMode(e.target.value as "inc" | "exc" | "none")}>
                     <option value="inc">הסכומים להזנה כוללים מע&quot;מ</option>
-                    <option value="exc">הסכומים להזנה לפני מע&quot;מ (נוסיף 18%)</option>
+                    <option value="exc">{`הסכומים להזנה לפני מע״מ (נוסיף ${vatPercentLabel})`}</option>
                     <option value="none">פטור ממע&quot;מ</option>
                   </select>
                   <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
@@ -1176,7 +1271,7 @@ function TxModalFull({
                   {vatMode !== "none" && (
                     <div className="mt-3 rounded-2xl border-2 border-indigo-300 bg-gradient-to-br from-indigo-50 to-white px-3 py-3 shadow-sm">
                       <div className="sm:hidden rounded-xl bg-indigo-950 text-white px-3 py-2 mb-2 flex items-center justify-between gap-2">
-                        <span className="text-xs font-bold">מע״מ 18%</span>
+                        <span className="text-xs font-bold">{`מע״מ ${vatPercentLabel}`}</span>
                         <span className="font-black tabular-nums text-base">{formatCurrency(vatAmount)}</span>
                         <span className="text-xs font-bold">סה״כ</span>
                         <span className={`font-black tabular-nums text-base ${txMode === "income" ? "text-emerald-300" : "text-red-300"}`}>{formatCurrency(finalAmount)}</span>
@@ -1188,7 +1283,7 @@ function TxModalFull({
                           <span className="font-bold tabular-nums text-slate-900">{formatCurrency(baseAmount)}</span>
                         </div>
                         <div className="rounded-lg bg-indigo-100/90 px-2 py-2 border border-indigo-200 ring-2 ring-indigo-200/80">
-                          <span className="text-indigo-900 block text-xs font-bold mb-0.5">מע״מ 18%</span>
+                          <span className="text-indigo-900 block text-xs font-bold mb-0.5">{`מע״מ ${vatPercentLabel}`}</span>
                           <span className="font-black tabular-nums text-indigo-950 text-lg">{formatCurrency(vatAmount)}</span>
                         </div>
                         <div className="rounded-lg bg-white/90 px-2 py-2 border border-indigo-100">
@@ -1241,7 +1336,7 @@ function TxModalFull({
               {(rawAmount > 0 || (txMode === "income" && rawOutstanding > 0)) && (
                 <div className="rounded-2xl border-2 border-indigo-200 bg-white p-4 shadow-sm space-y-4">
                   <div className="flex items-center gap-2 border-b border-indigo-100 pb-2">
-                    <span className="text-lg font-black text-indigo-900">פירוט מע&quot;מ (18%)</span>
+                    <span className="text-lg font-black text-indigo-900">{`פירוט מע״מ (${vatPercentLabel})`}</span>
                     <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
                       {vatMode === "inc" ? "הוזן כולל מע״מ" : vatMode === "exc" ? "הוזן לפני מע״מ" : "פטור"}
                     </span>
@@ -1257,7 +1352,7 @@ function TxModalFull({
                         <span className="font-semibold tabular-nums">{formatCurrency(baseAmount)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm mb-2 border-b border-slate-200 pb-2">
-                        <span className="text-slate-600">מע&quot;מ 18%:</span>
+                        <span className="text-slate-600">{`מע״מ ${vatPercentLabel}:`}</span>
                         <span className="font-semibold text-indigo-700 tabular-nums">{formatCurrency(vatAmount)}</span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -1274,7 +1369,7 @@ function TxModalFull({
                         <span className="font-semibold tabular-nums">{formatCurrency(outstandingSplit.base)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm mb-2 border-b border-red-100 pb-2">
-                        <span className="text-slate-700">מע&quot;מ 18%:</span>
+                        <span className="text-slate-700">{`מע״מ ${vatPercentLabel}:`}</span>
                         <span className="font-semibold text-indigo-700 tabular-nums">{formatCurrency(outstandingSplit.vat)}</span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -1419,24 +1514,48 @@ function ProjectEditModalFull({
   project,
   onSave,
   onClose,
+  reportError,
 }: {
   project: CrmProject;
-  onSave: (id: number, name: string, income: number) => void;
+  onSave: (id: number, name: string, income: number, crmStatus: CrmStatus) => void;
   onClose: () => void;
+  reportError?: (message: string) => void;
 }) {
   const [name, setName] = useState(project.customer ?? "");
   const [incomeInput, setIncomeInput] = useState(String(project.sellingPriceInc ?? 0));
+  const [crmStatus, setCrmStatus] = useState<CrmStatus>(() => parseCrmStatus(project.crmStatus) ?? "in_progress");
 
   useEffect(() => {
     setName(project.customer ?? "");
     setIncomeInput(String(project.sellingPriceInc ?? 0));
+    setCrmStatus(parseCrmStatus(project.crmStatus) ?? "in_progress");
   }, [project]);
 
   useLockBodyScroll(true);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(project.id, name, Number(incomeInput) || 0);
+    const incVat = Number(String(incomeInput).replace(/[^0-9]/g, "")) || 0;
+    if (crmStatusRequiresPositiveDealIncVat(crmStatus) && incVat <= 0) {
+      const msg = "להעברה ל«אושר – ממתין לביצוע» או «בעבודה / ייצור» יש להזין סכום עסקה כולל מע״מ";
+      if (reportError) reportError(msg);
+      else if (typeof window !== "undefined") window.alert(msg);
+      return;
+    }
+    const oldS = parseCrmStatus(project.crmStatus);
+    if (crmStatus === "installed" && oldS !== "installed") {
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(
+          "מעבירים לסטטוס «הותקן / הושלם».\n\n" +
+            "האם עדיין יש חשבון או יתרה פתוחה אצל הלקוח?\n\n" +
+            "אם כן — הפרויקט ימשיך להופיע בחייבים עד סגירה ידנית.\n" +
+            "אם סיימת לגבות — וודא שרישמת את כל התשלומים בקופה."
+        )
+      )
+        return;
+    }
+    onSave(project.id, name, incVat, crmStatus);
   };
 
   const inputClass = "w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all";
@@ -1458,6 +1577,20 @@ function ProjectEditModalFull({
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">שם הלקוח</label>
             <input required className={inputClass} value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">סטטוס במעקב</label>
+            <select
+              className={inputClass}
+              value={crmStatus}
+              onChange={(e) => setCrmStatus(e.target.value as CrmStatus)}
+            >
+              {CRM_STATUS_SELECT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">סך עסקה מעודכן (₪ כולל מע&quot;מ)</label>

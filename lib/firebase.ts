@@ -13,20 +13,23 @@ import {
 } from "firebase/firestore";
 
 /**
- * העדף משתני סביבה (.env.local) — לא לשתף בגיט.
- * אם חסרים משתנים, נופלים להגדרה המוטמעת (לפיתוח).
+ * Firebase מוגדר רק מתוך משתני סביבה (.env.local).
+ * אם חסרים משתנים — האפליקציה תעבוד במצב מקומי ללא ענן.
  */
-const EMBEDDED_CONFIG: FirebaseOptions = {
-  apiKey: "AIzaSyAhIbGxhbr1BLYTzGC78OG5ozom0urN5Lk",
-  authDomain: "yarhi-pro-d20d4.firebaseapp.com",
-  projectId: "yarhi-pro-d20d4",
-  storageBucket: "yarhi-pro-d20d4.firebasestorage.app",
-  messagingSenderId: "744940773875",
-  appId: "1:744940773875:web:03f5345c994c60f7ba7286",
-  measurementId: "G-3WQE088GHX",
-};
+
+function isFirebaseDisabledByEnv(): boolean {
+  const raw = process.env.NEXT_PUBLIC_DISABLE_FIREBASE;
+  if (!raw) return false;
+  const v = raw.trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
 
 function getOptionsFromEnv(): FirebaseOptions | null {
+  // מצב חירום לפיתוח: מכבה שימוש ב-Firebase גם אם .env.local קיים.
+  if (isFirebaseDisabledByEnv()) {
+    return null;
+  }
+
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
   const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
@@ -56,14 +59,14 @@ function getOptionsFromEnv(): FirebaseOptions | null {
 }
 
 function getEffectiveOptions(): FirebaseOptions | null {
-  return getOptionsFromEnv() ?? EMBEDDED_CONFIG;
+  return getOptionsFromEnv();
 }
 
 export function isFirebaseConfigured(): boolean {
   return getEffectiveOptions() !== null;
 }
 
-/** להצגה ב-UI (תמיד מציג projectId אמיתי – מ-.env או מההגדרה המוטמעת) */
+/** להצגה ב-UI */
 export function getFirebaseProjectIdForUi(): string {
   return getEffectiveOptions()?.projectId ?? "?";
 }

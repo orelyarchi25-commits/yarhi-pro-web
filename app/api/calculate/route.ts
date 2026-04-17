@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_VAT_DECIMAL, parseVatRateDecimalFromApiInput } from "@/lib/vat";
 
 // --- RAL options for color validation (fence) ---
 const RAL_OPTIONS = [
@@ -290,7 +291,7 @@ function bool(v: boolean | string | number | undefined, def: boolean): boolean {
   return String(v).toLowerCase() === "true" || String(v) === "1";
 }
 
-function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): {
+function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, vatRate: number = DEFAULT_VAT_DECIMAL): {
   L: number;
   W: number;
   sqm: number;
@@ -357,7 +358,17 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
   const pCountLegacy = parseInt(String(pergola.postCount ?? ""), 10) || 0;
   const pCount = pCountSides > 0 ? pCountSides : pCountLegacy;
   const postHeightRaw = str(pergola.postHeight, "");
-  const postHeights: number[] = postHeightRaw.trim() ? postHeightRaw.split(",").map((h) => parseFloat(h.trim())).filter((h) => !isNaN(h)) : [];
+  /** גבהי עמודים: פסיק, נקודה-פסיק, קו אנכי, או רווחים — לא חייב פסיק במקלדת */
+  const postHeights: number[] = (() => {
+    const t = postHeightRaw.trim();
+    if (!t) return [];
+    return t
+      .split(/[,;|\s]+/)
+      .map((h) => h.trim())
+      .filter(Boolean)
+      .map((h) => parseFloat(h.replace(",", ".")))
+      .filter((h) => !isNaN(h));
+  })();
   while (postHeights.length < pCount) postHeights.push(0);
   const tCount = parseInt(String(pergola.tensionerCount ?? ""), 10) || 0;
   const cutL_Wall = isDoubleT ? (isLShape ? L - 3 : L - 6) : L;
@@ -627,7 +638,7 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null): 
   const wastePercent = bomTotalWeight > 0 ? ((wasteWeight / bomTotalWeight) * 100).toFixed(1) : "0";
   const installCost = sqm * sysInstall + sysTransport;
   const exVat = sqm * sellPriceSqm + installCost;
-  const incVat = exVat * 1.18;
+  const incVat = exVat * (1 + vatRate);
   const profit = exVat - bomTotalCost - installCost;
   let instructions = "";
   if (L > 0 && W > 0) {
@@ -719,7 +730,7 @@ function fenceSlatDisplayLabels(slatT: string): { slatProfileLabel: string; slat
   return { slatProfileLabel, slatLabel };
 }
 
-function calcFence(fence: FenceInput, settings?: FenceSettings | null): {
+function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: number = DEFAULT_VAT_DECIMAL): {
   sqm: number;
   weight: number;
   wasteKg: number;
@@ -849,10 +860,10 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null): {
   const installExVat = iSqmP > 0 ? totS * iSqmP : 0;
   const transportExVat = trP;
   const basicQuoteExVat = Math.max(0, exV - installExVat - transportExVat);
-  const vatAmount = exV * 0.18;
+  const vatAmount = exV * vatRate;
   const hardwareHtml = `<div class="flex justify-between border-b pb-2"><span class="font-bold">סט עמוד (בסיס, רוזטה, קאפ):</span><strong class="text-blue-600">${totP} סטים</strong></div>${!isGr ? `<div class="flex justify-between pt-2"><span class="font-bold">ג'מבואים (4 לעמוד):</span><strong class="text-blue-600">${totP * 4} יח'</strong></div>` : "<div class=\"pt-2\">שתילה באדמה</div>"}`;
   return {
-    sqm: totS, weight: bT, wasteKg: bT - bU, wastePercent: bT > 0 ? (bT - bU) / bT * 100 : 0, cost: bC, profit: exV - bC, sellExVat: exV, sellIncVat: exV * 1.18,
+    sqm: totS, weight: bT, wasteKg: bT - bU, wastePercent: bT > 0 ? (bT - bU) / bT * 100 : 0, cost: bC, profit: exV - bC, sellExVat: exV, sellIncVat: exV * (1 + vatRate),
     cuttingHtml: cutStr, bomHtml: bomStr, hardwareHtml, instructionsHtml: insParts.join(""),
     frameHex, slatHex, spacerHex, slatProfileLabel, slatLabel,
     installExVat, transportExVat, basicQuoteExVat, vatAmount,
@@ -864,21 +875,24 @@ type Body = {
   pergola?: PergolaInput;
   fence?: FenceInput;
   settings?: PergolaSettings | FenceSettings;
+  /** אחוז מע״מ (למשל 18) או שבר (0.18) — אופציונלי */
+  vatPercent?: number | string;
 };
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Body;
-    const { type, pergola, fence, settings } = body;
+    const { type, pergola, fence, settings, vatPercent } = body;
+    const vatRate = parseVatRateDecimalFromApiInput(vatPercent, DEFAULT_VAT_DECIMAL);
     if (process.env.NODE_ENV !== "production") {
       console.log("[api/calculate] Received:", type, type === "pergola" ? { keys: pergola ? Object.keys(pergola) : [], lengthWall: pergola?.lengthWall, exitWidth: pergola?.exitWidth } : { segments: fence?.segments?.length });
     }
     if (type === "pergola") {
-      const result = calcPergola(pergola ?? {}, settings as PergolaSettings | undefined);
+      const result = calcPergola(pergola ?? {}, settings as PergolaSettings | undefined, vatRate);
       return NextResponse.json({ pergola: result });
     }
     if (type === "fence") {
-      const result = calcFence(fence ?? {}, settings as FenceSettings | undefined);
+      const result = calcFence(fence ?? {}, settings as FenceSettings | undefined, vatRate);
       return NextResponse.json({ fence: result });
     }
     return NextResponse.json({ message: "Invalid type: expected 'pergola' or 'fence'" }, { status: 400 });

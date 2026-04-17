@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useAuth } from "./AuthProvider";
 
 export function Header() {
-  const { isLoggedIn, logout } = useAuth();
+  const { isLoggedIn, isAdmin, logout } = useAuth();
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 border-b border-metallic-800/50 bg-navy-950/90 backdrop-blur-xl">
@@ -19,6 +19,12 @@ export function Header() {
         <nav className="flex items-center gap-4">
           {isLoggedIn ? (
             <>
+              {isAdmin ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-xs font-black text-amber-300">
+                  <span aria-hidden>👑</span>
+                  מנהל
+                </span>
+              ) : null}
               <Link
                 href="/dashboard"
                 className="rounded-lg px-4 py-2 text-sm font-medium text-metallic-200 transition hover:bg-metallic-800/50 hover:text-white"
