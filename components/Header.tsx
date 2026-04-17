@@ -20,7 +20,7 @@ export function Header() {
           {isLoggedIn ? (
             <>
               {isAdmin ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-xs font-black text-amber-300">
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-sm font-black text-amber-300">
                   <span aria-hidden>👑</span>
                   מנהל
                 </span>

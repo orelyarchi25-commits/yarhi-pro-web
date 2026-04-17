@@ -3187,7 +3187,7 @@ ${logoBlock}
         <div className="border-b border-slate-700 px-2 pt-8 pb-10 text-center">
           <h1 className="text-3xl font-black text-blue-400 tracking-wider">Yarhi PRO</h1>
           <p className="mt-1 text-sm font-bold text-slate-200">{sysContractorName || "שם העסק לא הוגדר"}</p>
-          {showManagerBadge && <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p>}
+          {showManagerBadge && <p className="mt-1 text-sm font-black text-amber-300">מנהל 👑</p>}
           <p className="mt-1 text-[10px] uppercase tracking-widest text-slate-400">Advanced Pergola System</p>
           <p className="mt-1 text-[10px] text-slate-500">© כל הזכויות שמורות</p>
         </div>
@@ -4296,7 +4296,7 @@ ${logoBlock}
               <div>
                 <p className="text-xs text-slate-400">מחובר כ־</p>
                 <p className="font-bold text-slate-100">{sysContractorName || "—"}</p>
-                {showManagerBadge ? <p className="mt-1 text-xs font-black text-amber-300">מנהל 👑</p> : null}
+                {showManagerBadge ? <p className="mt-1 text-sm font-black text-amber-300">מנהל 👑</p> : null}
               </div>
               <button
                 type="button"
