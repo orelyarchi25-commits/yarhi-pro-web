@@ -57,7 +57,9 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
       : "";
   const previewInstallationDays = Math.max(1, Number(formData.installationDays) || 1);
   const previewInstallationEndDate = previewInstallationDate
-    ? addDays(previewInstallationDate, previewInstallationDays - 1)
+    ? previewInstallationDays <= 1
+      ? previewInstallationDate
+      : addDays(previewInstallationDate, previewInstallationDays)
     : "";
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {

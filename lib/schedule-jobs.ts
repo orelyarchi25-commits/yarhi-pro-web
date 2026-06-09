@@ -32,11 +32,13 @@ export function getInstallationDays(job: ScheduleJob): number {
   return 1;
 }
 
-/** סיום התקנה — יום אחרון בשטח (כולל יום ההתחלה) */
+/** סיום התקנה — אותה לוגיקה כמו ייצור: תחילת שלב + מספר ימים (10.6 + 3 ייצור → 13.6, 13.6 + 3 התקנה → 16.6) */
 export function getInstallationEndDate(job: ScheduleJob): string {
   const start = getInstallationDate(job);
   if (!start) return "";
-  return addDays(start, getInstallationDays(job) - 1);
+  const days = getInstallationDays(job);
+  if (days <= 1) return start;
+  return addDays(start, days);
 }
 
 export function formatInstallationRange(job: ScheduleJob): string {
