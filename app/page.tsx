@@ -67,6 +67,17 @@ function readScheduleJobsFromLocal(uid: string): ScheduleJob[] {
   }
 }
 
+/** עדיפות לענן; אם בענן ריק — לא לדרוס נתונים מקומיים */
+function resolveScheduleJobsOnLoad(uid: string, rawWs: unknown, parsed: ReturnType<typeof parseWorkspaceFromFirestore>): ScheduleJob[] {
+  const fromCloud = Array.isArray((rawWs as Record<string, unknown> | undefined)?.scheduleJobs)
+    ? ((rawWs as Record<string, unknown>).scheduleJobs as ScheduleJob[])
+    : parsed?.scheduleJobs;
+  const fromLocal = readScheduleJobsFromLocal(uid);
+  if (fromCloud && fromCloud.length > 0) return fromCloud;
+  if (fromLocal.length > 0) return fromLocal;
+  return fromCloud ?? [];
+}
+
 // --- Constants: RAL colors (same order as original) ---
 const RAL_OPTIONS = [
   "RAL 9016", "RAL 9010", "RAL 1013", "RAL 1015", "RAL 9006", "RAL 9007", "RAL 7035", "RAL 7037", "RAL 7040",
@@ -1031,7 +1042,12 @@ function AuthenticatedPageContent() {
 
           setCrmData([]);
           setBusinessTransactions([]);
-          setScheduleJobs([]);
+          {
+            const localSchedule = readScheduleJobsFromLocal(uid);
+            scheduleJobsCloudRef.current = localSchedule;
+            scheduleJobsRef.current = localSchedule;
+            setScheduleJobs(localSchedule);
+          }
           setLogoDataUrl(null);
 
           setSysContractorName("");
@@ -1080,7 +1096,12 @@ function AuthenticatedPageContent() {
 
           setCrmData([]);
           setBusinessTransactions([]);
-          setScheduleJobs([]);
+          {
+            const localSchedule = readScheduleJobsFromLocal(uid);
+            scheduleJobsCloudRef.current = localSchedule;
+            scheduleJobsRef.current = localSchedule;
+            setScheduleJobs(localSchedule);
+          }
           setLogoDataUrl(null);
 
           setSysContractorName("");
@@ -1108,20 +1129,15 @@ function AuthenticatedPageContent() {
         }
         if (parsed.crmProjects !== undefined) setCrmData(parsed.crmProjects);
         if (parsed.businessTransactions !== undefined) setBusinessTransactions(parsed.businessTransactions);
-        const cloudSchedule = Array.isArray(rawWs?.scheduleJobs)
-          ? (rawWs.scheduleJobs as ScheduleJob[])
-          : parsed?.scheduleJobs;
-        if (cloudSchedule !== undefined) {
-          scheduleJobsCloudRef.current = cloudSchedule;
-          setScheduleJobs(cloudSchedule);
-          try {
-            localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(cloudSchedule));
-          } catch {}
-        } else {
-          const localSchedule = readScheduleJobsFromLocal(uid);
-          if (localSchedule.length > 0) {
-            scheduleJobsCloudRef.current = localSchedule;
-            setScheduleJobs(localSchedule);
+        {
+          const loadedSchedule = resolveScheduleJobsOnLoad(uid, rawWs, parsed);
+          scheduleJobsCloudRef.current = loadedSchedule;
+          scheduleJobsRef.current = loadedSchedule;
+          setScheduleJobs(loadedSchedule);
+          if (loadedSchedule.length > 0) {
+            try {
+              localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(loadedSchedule));
+            } catch {}
           }
         }
         if (Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl")) {
@@ -2989,7 +3005,9 @@ ${logoBlock}
         scheduleJobs:
           scheduleJobsRef.current.length > 0
             ? scheduleJobsRef.current
-            : scheduleJobsCloudRef.current,
+            : scheduleJobsCloudRef.current.length > 0
+              ? scheduleJobsCloudRef.current
+              : scheduleJobs,
         logoDataUrl,
         businessSettings,
       }) as Record<string, unknown>;
@@ -3181,9 +3199,10 @@ ${logoBlock}
   const persistScheduleJobsToCloud = useCallback(
     async (jobs: ScheduleJob[]) => {
       const uid = firebaseUser?.uid;
-      if (!uid || !workspaceCloudHydrated) return;
+      if (!uid) return;
       const db = getFirebaseDb();
       if (!db) return;
+      if (jobs.length === 0) return;
       const cleaned = sanitizeForFirestore(jobs);
       const userRef = doc(db, "users", uid);
       try {
@@ -3210,7 +3229,7 @@ ${logoBlock}
         console.error("[Yarhi Pro] שמירת scheduleJobs לענן:", err);
       }
     },
-    [firebaseUser?.uid, workspaceCloudHydrated]
+    [firebaseUser?.uid]
   );
 
   const handleScheduleJobsChange = useCallback(
@@ -3220,6 +3239,14 @@ ${logoBlock}
     },
     [applyScheduleJobs, persistScheduleJobsToCloud]
   );
+
+  useEffect(() => {
+    const uid = firebaseUser?.uid;
+    if (!uid || scheduleJobs.length === 0) return;
+    try {
+      localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(scheduleJobs));
+    } catch {}
+  }, [scheduleJobs, firebaseUser?.uid]);
 
   useEffect(() => {
     setMobileMoreOpen(false);
