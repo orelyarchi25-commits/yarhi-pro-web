@@ -12,6 +12,8 @@ export type ScheduleJob = {
   installationAddress: string;
   dateClosed: string;
   productionDays: number;
+  /** ימי עבודה בשטח — ברירת מחדל 1 לעבודות ישנות */
+  installationDays?: number;
   workStartDate?: string;
   installationDate: string;
   status: "pending" | "in-progress" | "completed";

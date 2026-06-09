@@ -4,7 +4,10 @@ import { useMemo, useState } from "react";
 import type { ScheduleJob } from "@/lib/user-workspace-firestore";
 import {
   addDays,
+  formatInstallationRange,
   getInstallationDate,
+  getInstallationDays,
+  getInstallationEndDate,
   getWorkStartDate,
   nextScheduleStatus,
   scheduleStatusColor,
@@ -17,6 +20,7 @@ type FormData = {
   installationAddress: string;
   dateClosed: string;
   productionDays: string;
+  installationDays: string;
   workStartDate: string;
 };
 
@@ -26,6 +30,7 @@ const emptyForm = (): FormData => ({
   installationAddress: "",
   dateClosed: new Date().toISOString().split("T")[0],
   productionDays: "",
+  installationDays: "1",
   workStartDate: "",
 });
 
@@ -50,6 +55,10 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
     formData.workStartDate && formData.productionDays
       ? addDays(formData.workStartDate, Number(formData.productionDays))
       : "";
+  const previewInstallationDays = Math.max(1, Number(formData.installationDays) || 1);
+  const previewInstallationEndDate = previewInstallationDate
+    ? addDays(previewInstallationDate, previewInstallationDays - 1)
+    : "";
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -59,12 +68,14 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const productionDays = Number(formData.productionDays);
+    const installationDays = Math.max(1, Number(formData.installationDays) || 1);
     const workStartDate = formData.workStartDate;
     const newJob: ScheduleJob = {
       ...formData,
       id: Date.now().toString(),
       workStartDate,
       productionDays,
+      installationDays,
       installationDate: addDays(workStartDate, productionDays),
       status: "pending",
       createdAt: new Date().toISOString(),
@@ -91,11 +102,13 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
     e.preventDefault();
     if (!editingJob) return;
     const productionDays = Number(editingJob.productionDays);
+    const installationDays = Math.max(1, Number(editingJob.installationDays) || 1);
     const workStartDate = editingJob.workStartDate || getWorkStartDate(editingJob);
     const updated: ScheduleJob = {
       ...editingJob,
       workStartDate,
       productionDays,
+      installationDays,
       installationDate: addDays(workStartDate, productionDays),
     };
     onJobsChange(jobs.map((j) => (j.id === editingJob.id ? updated : j)));
@@ -175,11 +188,24 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                     <label className="text-sm font-medium text-slate-700">⏱️ ימי ייצור דרושים</label>
                     <input required type="number" min={1} name="productionDays" value={formData.productionDays} onChange={handleInputChange} className="w-full rounded-lg border border-slate-300 p-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500" placeholder="כמה ימי עבודה?" />
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-slate-700">🔧 ימי התקנה בשטח</label>
+                    <input required type="number" min={1} name="installationDays" value={formData.installationDays} onChange={handleInputChange} className="w-full rounded-lg border border-slate-300 p-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500" placeholder="כמה ימים בשטח?" />
+                  </div>
                   {previewInstallationDate && (
                     <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 md:col-span-2">
-                      <span className="font-bold">תאריך התקנה משוער:</span>{" "}
-                      {new Date(previewInstallationDate).toLocaleDateString("he-IL")}
-                      <span className="mr-1 text-indigo-700"> — {formData.productionDays} ימי עבודה מתאריך ההתחלה</span>
+                      <p>
+                        <span className="font-bold">תחילת התקנה משוערת:</span>{" "}
+                        {new Date(previewInstallationDate).toLocaleDateString("he-IL")}
+                        <span className="mr-1 text-indigo-700"> — לאחר {formData.productionDays} ימי ייצור</span>
+                      </p>
+                      <p className="mt-1">
+                        <span className="font-bold">חלון התקנה:</span>{" "}
+                        {previewInstallationDays === 1
+                          ? new Date(previewInstallationDate).toLocaleDateString("he-IL")
+                          : `${new Date(previewInstallationDate).toLocaleDateString("he-IL")} – ${new Date(previewInstallationEndDate).toLocaleDateString("he-IL")}`}
+                        <span className="mr-1 text-indigo-700"> ({previewInstallationDays} {previewInstallationDays === 1 ? "יום" : "ימים"} בשטח)</span>
+                      </p>
                     </div>
                   )}
                   <div className="pt-4 md:col-span-2">
@@ -219,10 +245,10 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                       <div className="flex justify-between"><span>סגירה:</span><span className="font-medium text-slate-800">{new Date(job.dateClosed).toLocaleDateString("he-IL")}</span></div>
                       <div className="flex justify-between"><span>זמן ייצור:</span><span className="font-medium text-slate-800">{job.productionDays} ימים</span></div>
                       <div className="flex justify-between font-bold text-blue-700"><span>תחילת עבודה:</span><span>{new Date(getWorkStartDate(job)).toLocaleDateString("he-IL")}</span></div>
-                      <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-bold text-indigo-700"><span>התקנה משוערת:</span><span>{new Date(getInstallationDate(job)).toLocaleDateString("he-IL")}</span></div>
+                      <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-bold text-indigo-700"><span>חלון התקנה:</span><span className="text-left">{formatInstallationRange(job)}</span></div>
                     </div>
                     <div className="absolute bottom-4 left-4 flex gap-4 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button type="button" onClick={() => setEditingJob({ ...job, workStartDate: getWorkStartDate(job) })} className="text-sm font-medium text-indigo-600 hover:text-indigo-800">✏️ ערוך</button>
+                      <button type="button" onClick={() => setEditingJob({ ...job, workStartDate: getWorkStartDate(job), installationDays: getInstallationDays(job) })} className="text-sm font-medium text-indigo-600 hover:text-indigo-800">✏️ ערוך</button>
                       <button type="button" onClick={() => deleteJob(job.id)} className="text-sm font-medium text-red-500 hover:text-red-700">🗑️ מחק</button>
                     </div>
                   </div>
@@ -236,7 +262,7 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
           <div className="space-y-6">
             <div className="mb-6 rounded-xl border border-slate-100 bg-white p-6 shadow-sm">
               <h2 className="mb-2 flex items-center gap-2 text-xl font-bold text-slate-800">📅 לוח זמנים והיערכות לייצור</h2>
-              <p className="text-sm text-slate-600">הזן תאריך תחילת עבודה וימי ייצור — המערכת מחשבת קדימה את תאריך ההתקנה המשוער.</p>
+              <p className="text-sm text-slate-600">הזן תאריך תחילת עבודה, ימי ייצור וימי התקנה — המערכת מחשבת קדימה את חלון ההתקנה בשטח.</p>
             </div>
             <div className="relative space-y-8 border-r-4 border-indigo-200 pr-6">
               {sortedJobs.length === 0 ? (
@@ -245,6 +271,8 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                 sortedJobs.map((job) => {
                   const workStartDate = getWorkStartDate(job);
                   const installationDate = getInstallationDate(job);
+                  const installationEndDate = getInstallationEndDate(job);
+                  const installDays = getInstallationDays(job);
                   const isCompleted = job.status === "completed";
                   return (
                     <div key={job.id} className={`relative rounded-xl border bg-white p-5 shadow-sm ${isCompleted ? "border-emerald-200 opacity-70" : "border-indigo-100"}`}>
@@ -266,11 +294,15 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                       <div className={`flex items-start gap-3 rounded-lg p-4 ${isCompleted ? "bg-emerald-50 text-emerald-800" : "border border-orange-100 bg-orange-50 text-orange-900"}`}>
                         <span className="text-2xl">{isCompleted ? "✅" : "⚠️"}</span>
                         <div>
-                          <p className="text-sm font-bold">{isCompleted ? "העבודה הושלמה!" : "תאריך התקנה משוער:"}</p>
+                          <p className="text-sm font-bold">{isCompleted ? "העבודה הושלמה!" : "חלון התקנה משוער:"}</p>
                           {!isCompleted && (
                             <p className="mt-1 text-lg font-black">
-                              {new Date(installationDate).toLocaleDateString("he-IL")}
-                              <span className="mr-2 block text-sm font-normal text-orange-700 sm:inline">(לאחר {job.productionDays} ימי עבודה מתאריך ההתחלה)</span>
+                              {installDays === 1
+                                ? new Date(installationDate).toLocaleDateString("he-IL")
+                                : `${new Date(installationDate).toLocaleDateString("he-IL")} – ${new Date(installationEndDate).toLocaleDateString("he-IL")}`}
+                              <span className="mr-2 block text-sm font-normal text-orange-700 sm:inline">
+                                ({installDays} {installDays === 1 ? "יום" : "ימים"} בשטח · לאחר {job.productionDays} ימי ייצור)
+                              </span>
                             </p>
                           )}
                         </div>
@@ -315,6 +347,10 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                   <div className="space-y-1">
                     <label className="text-sm font-medium text-slate-700">ימי ייצור</label>
                     <input required type="number" min={1} name="productionDays" value={editingJob.productionDays} onChange={handleEditChange} className="w-full rounded-lg border border-slate-300 p-2.5 outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium text-slate-700">ימי התקנה בשטח</label>
+                    <input required type="number" min={1} name="installationDays" value={editingJob.installationDays ?? getInstallationDays(editingJob)} onChange={handleEditChange} className="w-full rounded-lg border border-slate-300 p-2.5 outline-none focus:ring-2 focus:ring-indigo-500" />
                   </div>
                   <div className="flex gap-3 pt-4 md:col-span-2">
                     <button type="submit" className="flex-1 rounded-lg bg-indigo-600 py-3 font-bold text-white hover:bg-indigo-700">שמור שינויים</button>

@@ -26,6 +26,29 @@ export function getInstallationDate(job: ScheduleJob): string {
   return job.installationDate || "";
 }
 
+export function getInstallationDays(job: ScheduleJob): number {
+  const days = job.installationDays;
+  if (typeof days === "number" && days > 0) return days;
+  return 1;
+}
+
+/** סיום התקנה — יום אחרון בשטח (כולל יום ההתחלה) */
+export function getInstallationEndDate(job: ScheduleJob): string {
+  const start = getInstallationDate(job);
+  if (!start) return "";
+  return addDays(start, getInstallationDays(job) - 1);
+}
+
+export function formatInstallationRange(job: ScheduleJob): string {
+  const start = getInstallationDate(job);
+  if (!start) return "";
+  const end = getInstallationEndDate(job);
+  const days = getInstallationDays(job);
+  const fmt = (d: string) => new Date(d).toLocaleDateString("he-IL");
+  if (start === end) return `${fmt(start)} (${days === 1 ? "יום אחד" : `${days} ימים`})`;
+  return `${fmt(start)} – ${fmt(end)} (${days} ימים)`;
+}
+
 export function scheduleStatusColor(status: ScheduleJob["status"]): string {
   switch (status) {
     case "completed":
