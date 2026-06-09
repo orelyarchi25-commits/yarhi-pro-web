@@ -49,7 +49,7 @@ function parseView(v: string | null): ViewId {
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
 const SIM_VERSION = "frame-ribs-left-dual-face-v1";
-const SCHEDULE_VERSION = "schedule-v4";
+const SCHEDULE_VERSION = "schedule-v5";
 
 // --- Constants: RAL colors (same order as original) ---
 const RAL_OPTIONS = [
@@ -3139,6 +3139,20 @@ ${logoBlock}
     );
   }, []);
 
+  const persistScheduleJobsToCloud = useCallback(
+    (jobs: ScheduleJob[]) => {
+      const uid = firebaseUser?.uid;
+      if (!uid) return;
+      const db = getFirebaseDb();
+      if (!db) return;
+      const cleaned = sanitizeForFirestore(jobs);
+      void updateDoc(doc(db, "users", uid), {
+        [`${USER_WORKSPACE_FIELD}.scheduleJobs`]: cleaned,
+      }).catch((err) => console.error("[Yarhi Pro] שמירת scheduleJobs לענן:", err));
+    },
+    [firebaseUser?.uid]
+  );
+
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return;
@@ -3147,12 +3161,15 @@ ${logoBlock}
         pushScheduleToIframe();
       }
       if (e.data?.type === "yarhi-schedule-save" && Array.isArray(e.data.jobs)) {
-        setScheduleJobs(e.data.jobs as ScheduleJob[]);
+        const jobs = e.data.jobs as ScheduleJob[];
+        setScheduleJobs(jobs);
+        scheduleJobsRef.current = jobs;
+        persistScheduleJobsToCloud(jobs);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [pushScheduleToIframe]);
+  }, [pushScheduleToIframe, persistScheduleJobsToCloud]);
 
   useEffect(() => {
     if (!workspaceCloudHydrated) return;

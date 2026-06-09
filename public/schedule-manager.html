@@ -114,15 +114,13 @@
         workStartDate: '',
       });
 
-      /** בתוך Yarhi Pro — טעינה ושמירה דרך המערכת הראשית (ענן) */
+      /** בתוך Yarhi Pro — מחכה לנתונים מהענן (ללא localStorage מקומי) */
       useEffect(() => {
         if (!isEmbed) return;
 
-        let parentInit = false;
         const onMessage = (e) => {
           if (e.origin !== window.location.origin) return;
           if (e.data?.type !== 'yarhi-schedule-init') return;
-          parentInit = true;
           skipPersistRef.current = true;
           setJobs(Array.isArray(e.data.jobs) ? e.data.jobs : []);
           setStorageMode('parent');
@@ -137,25 +135,10 @@
           }
         };
         notifyParent();
-        const retryTimer = window.setInterval(notifyParent, 500);
-
-        const fallbackTimer = window.setTimeout(() => {
-          window.clearInterval(retryTimer);
-          if (parentInit) return;
-          try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) setJobs(JSON.parse(saved));
-          } catch (error) {
-            console.error('Load local schedule error:', error);
-          }
-          setStorageMode('local');
-          setLocalReady(true);
-          setLoading(false);
-        }, 1200);
+        const retryTimer = window.setInterval(notifyParent, 700);
 
         return () => {
           window.clearInterval(retryTimer);
-          window.clearTimeout(fallbackTimer);
           window.removeEventListener('message', onMessage);
         };
       }, []);
@@ -402,7 +385,7 @@
           return (
               <div dir="rtl" className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
                   <div className="loader mb-4 border-indigo-600"></div>
-                  <p className="text-slate-600 text-lg font-medium">טוען את המערכת של ירחי אלומיניום...</p>
+                  <p className="text-slate-600 text-lg font-medium">{isEmbed ? 'מסנכרן נתוני לו"ז מהענן...' : 'טוען את המערכת של ירחי אלומיניום...'}</p>
               </div>
           );
       }
