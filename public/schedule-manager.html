@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ירחי אלומיניום - ניהול עבודות ולו"ז</title>
+  
+  <!-- שילוב של העיצוב (Tailwind) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- אייקונים -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- ספריות React שיאפשרו לקוד לעבוד מתוך ה-HTML -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    /* אנימציית טעינה */
+    .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #4f46e5;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body class="bg-slate-50">
+  <!-- כאן המערכת תיטען -->
+  <div id="root">
+    <div class="min-h-screen flex flex-col items-center justify-center">
+        <div class="loader mb-4"></div>
+        <p class="text-slate-600 text-lg font-medium">טוען את המערכת...</p>
+    </div>
+  </div>
+
+  <!-- הכנת תשתית לענן (אם רץ מתוך הפלטפורמה) -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.FirebaseMods = {
+        initializeApp,
+        getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+        getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, updateDoc
+    };
+
+    window.dispatchEvent(new Event('firebase-loaded'));
+  </script>
+
+  <!-- קוד המערכת עצמה -->
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'yarhi-alum-app';
+    const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1';
+
+    const addDays = (dateStr, days) => {
+      const date = new Date(dateStr);
+      date.setDate(date.getDate() + Number(days));
+      return date.toISOString().split('T')[0];
+    };
+
+    const subtractDays = (dateStr, days) => {
+      const date = new Date(dateStr);
+      date.setDate(date.getDate() - Number(days));
+      return date.toISOString().split('T')[0];
+    };
+
+    /** תאריך תחילת עבודה — תומך גם בעבודות ישנות שנשמרו רק עם תאריך התקנה */
+    const getWorkStartDate = (job) => {
+      if (job.workStartDate) return job.workStartDate;
+      if (job.installationDate && job.productionDays) {
+        return subtractDays(job.installationDate, job.productionDays);
+      }
+      return job.installationDate || '';
+    };
+
+    const getInstallationDate = (job) => {
+      const start = getWorkStartDate(job);
+      if (start && job.productionDays) return addDays(start, job.productionDays);
+      return job.installationDate || '';
+    };
+
+    const STORAGE_KEY = 'yarhi_jobs';
+
+    function App() {
+      const [firebaseReady, setFirebaseReady] = useState(false);
+      const [db, setDb] = useState(null);
+      const [auth, setAuth] = useState(null);
+      
+      const [jobs, setJobs] = useState([]);
+      const [activeTab, setActiveTab] = useState('jobs');
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [showForm, setShowForm] = useState(false);
+      const [editingJob, setEditingJob] = useState(null);
+      const [storageMode, setStorageMode] = useState(isEmbed ? 'parent' : 'local');
+      const [localReady, setLocalReady] = useState(false);
+      const skipPersistRef = useRef(false);
+      
+      const [formData, setFormData] = useState({
+        clientName: '',
+        description: '',
+        installationAddress: '',
+        dateClosed: new Date().toISOString().split('T')[0],
+        productionDays: '',
+        workStartDate: '',
+      });
+
+      /** בתוך Yarhi Pro — טעינה ושמירה דרך המערכת הראשית (ענן) */
+      useEffect(() => {
+        if (!isEmbed) return;
+
+        let parentInit = false;
+        const onMessage = (e) => {
+          if (e.origin !== window.location.origin) return;
+          if (e.data?.type !== 'yarhi-schedule-init') return;
+          parentInit = true;
+          skipPersistRef.current = true;
+          setJobs(Array.isArray(e.data.jobs) ? e.data.jobs : []);
+          setStorageMode('parent');
+          setLocalReady(true);
+          setLoading(false);
+        };
+
+        window.addEventListener('message', onMessage);
+        const notifyParent = () => {
+          if (window.parent !== window) {
+            window.parent.postMessage({ type: 'yarhi-schedule-ready' }, window.location.origin);
+          }
+        };
+        notifyParent();
+        const retryTimer = window.setInterval(notifyParent, 500);
+
+        const fallbackTimer = window.setTimeout(() => {
+          window.clearInterval(retryTimer);
+          if (parentInit) return;
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) setJobs(JSON.parse(saved));
+          } catch (error) {
+            console.error('Load local schedule error:', error);
+          }
+          setStorageMode('local');
+          setLocalReady(true);
+          setLoading(false);
+        }, 1200);
+
+        return () => {
+          window.clearInterval(retryTimer);
+          window.clearTimeout(fallbackTimer);
+          window.removeEventListener('message', onMessage);
+        };
+      }, []);
+
+      useEffect(() => {
+        if (isEmbed) return;
+
+        const initFirebase = () => {
+          if (window.FirebaseMods) {
+            const app = Object.keys(firebaseConfig).length > 0 ? window.FirebaseMods.initializeApp(firebaseConfig) : null;
+            if (app) {
+              setAuth(window.FirebaseMods.getAuth(app));
+              setDb(window.FirebaseMods.getFirestore(app));
+            }
+            setFirebaseReady(true);
+          }
+        };
+
+        if (window.FirebaseMods) {
+          initFirebase();
+        } else {
+          window.addEventListener('firebase-loaded', initFirebase);
+          return () => window.removeEventListener('firebase-loaded', initFirebase);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (isEmbed || !firebaseReady) return;
+        if (!auth || !db) {
+          try {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (saved) setJobs(JSON.parse(saved));
+          } catch (error) {
+            console.error('Load local schedule error:', error);
+          }
+          setLocalReady(true);
+          setLoading(false);
+          return;
+        }
+
+        const { signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.FirebaseMods;
+        
+        const initAuth = async () => {
+          try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+              await signInAnonymously(auth);
+            }
+          } catch (error) {
+            console.error("Auth error:", error);
+          }
+        };
+        initAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          setUser(currentUser);
+          if (!currentUser) {
+            setLocalReady(true);
+            setLoading(false);
+          }
+        });
+        return () => unsubscribe();
+      }, [firebaseReady, auth, db, isEmbed]);
+
+      useEffect(() => {
+        if (isEmbed || !user || !db) return;
+        setLoading(true);
+        
+        const { collection, onSnapshot } = window.FirebaseMods;
+        const jobsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'jobs');
+        
+        const unsubscribe = onSnapshot(jobsRef, 
+          (snapshot) => {
+            skipPersistRef.current = true;
+            const fetchedJobs = snapshot.docs.map(doc => ({
+              id: doc.id,
+              ...doc.data()
+            }));
+            setJobs(fetchedJobs);
+            setLocalReady(true);
+            setLoading(false);
+          },
+          (error) => {
+            console.error("Error:", error);
+            setLocalReady(true);
+            setLoading(false);
+          }
+        );
+        return () => unsubscribe();
+      }, [user, db, isEmbed]);
+
+      useEffect(() => {
+        if (!localReady) return;
+        if (skipPersistRef.current) {
+          skipPersistRef.current = false;
+          return;
+        }
+        if (storageMode === 'parent') {
+          if (window.parent !== window) {
+            window.parent.postMessage({ type: 'yarhi-schedule-save', jobs }, window.location.origin);
+          }
+          return;
+        }
+        if (!db) {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(jobs));
+          } catch (error) {
+            console.error('Save local schedule error:', error);
+          }
+        }
+      }, [jobs, localReady, storageMode, db]);
+
+      const handleInputChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        
+        const productionDays = Number(formData.productionDays);
+        const workStartDate = formData.workStartDate;
+        const installationDate = addDays(workStartDate, productionDays);
+
+        const newJob = {
+          ...formData,
+          workStartDate,
+          productionDays,
+          installationDate,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        };
+
+        if (db && user) {
+            const { collection, addDoc } = window.FirebaseMods;
+            try {
+              const jobsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'jobs');
+              await addDoc(jobsRef, newJob);
+            } catch (error) {
+              console.error("Error: ", error);
+            }
+        } else {
+            setJobs([...jobs, { ...newJob, id: Date.now().toString() }]);
+        }
+        
+        setFormData({
+          clientName: '',
+          description: '',
+          installationAddress: '',
+          dateClosed: new Date().toISOString().split('T')[0],
+          productionDays: '',
+          workStartDate: '',
+        });
+        setShowForm(false);
+      };
+
+      const toggleJobStatus = async (id, currentStatus) => {
+        const nextStatus = currentStatus === 'pending' ? 'in-progress' : currentStatus === 'in-progress' ? 'completed' : 'pending';
+        
+        if (db && user) {
+            const { doc, updateDoc } = window.FirebaseMods;
+            const jobRef = doc(db, 'artifacts', appId, 'users', user.uid, 'jobs', id);
+            try {
+              await updateDoc(jobRef, { status: nextStatus });
+            } catch (error) {
+              console.error("Error:", error);
+            }
+        } else {
+            setJobs(jobs.map(j => j.id === id ? { ...j, status: nextStatus } : j));
+        }
+      };
+
+      const deleteJob = async (id) => {
+        if (db && user) {
+            const { doc, deleteDoc } = window.FirebaseMods;
+            const jobRef = doc(db, 'artifacts', appId, 'users', user.uid, 'jobs', id);
+            try {
+                await deleteDoc(jobRef);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+        } else {
+            setJobs(jobs.filter(j => j.id !== id));
+        }
+      };
+
+      const handleEditChange = (e) => {
+        const { name, value } = e.target;
+        setEditingJob(prev => ({ ...prev, [name]: value }));
+      };
+
+      const saveEdit = async (e) => {
+        e.preventDefault();
+        const productionDays = Number(editingJob.productionDays);
+        const workStartDate = editingJob.workStartDate || getWorkStartDate(editingJob);
+        const updatedJob = {
+            ...editingJob,
+            workStartDate,
+            productionDays,
+            installationDate: addDays(workStartDate, productionDays),
+        };
+
+        if (db && user) {
+            const { doc, updateDoc } = window.FirebaseMods;
+            const jobRef = doc(db, 'artifacts', appId, 'users', user.uid, 'jobs', editingJob.id);
+            try {
+                await updateDoc(jobRef, updatedJob);
+            } catch (error) {
+                console.error("Error:", error);
+            }
+        } else {
+            setJobs(jobs.map(j => j.id === editingJob.id ? updatedJob : j));
+        }
+        setEditingJob(null);
+      };
+
+      const getStatusColor = (status) => {
+        switch(status) {
+          case 'completed': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+          case 'in-progress': return 'bg-blue-100 text-blue-800 border-blue-200';
+          default: return 'bg-orange-100 text-orange-800 border-orange-200';
+        }
+      };
+
+      const getStatusText = (status) => {
+        switch(status) {
+          case 'completed': return 'הושלם';
+          case 'in-progress': return 'בייצור';
+          default: return 'ממתין לייצור';
+        }
+      };
+
+      const sortedJobsByWorkStart = useMemo(() => {
+        return [...jobs].sort((a, b) => new Date(getWorkStartDate(a)) - new Date(getWorkStartDate(b)));
+      }, [jobs]);
+
+      const previewInstallationDate =
+        formData.workStartDate && formData.productionDays
+          ? addDays(formData.workStartDate, Number(formData.productionDays))
+          : '';
+
+      if (loading) {
+          return (
+              <div dir="rtl" className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+                  <div className="loader mb-4 border-indigo-600"></div>
+                  <p className="text-slate-600 text-lg font-medium">טוען את המערכת של ירחי אלומיניום...</p>
+              </div>
+          );
+      }
+
+      return (
+        <div dir="rtl" className={`${isEmbed ? 'min-h-full' : 'min-h-screen'} bg-slate-50 font-sans text-slate-800`}>
+          {!isEmbed && (
+          <header className="bg-indigo-600 text-white shadow-md">
+            <div className="max-w-5xl mx-auto px-4 py-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <i className="fa-solid fa-hammer text-3xl"></i>
+                  <h1 className="text-2xl font-bold">ירחי אלומיניום - ניהול עבודות ולו"ז</h1>
+                </div>
+                {user && <div className="text-sm opacity-80 flex items-center gap-2">מחובר לענן <div className="w-2 h-2 rounded-full bg-green-400"></div></div>}
+                {!user && <div className="text-sm opacity-80 flex items-center gap-2">מצב מקומי <div className="w-2 h-2 rounded-full bg-yellow-400"></div></div>}
+              </div>
+            </div>
+          </header>
+          )}
+
+          <main className={`max-w-5xl mx-auto px-4 ${isEmbed ? 'py-4' : 'py-8'}`}>
+            <div className="flex gap-2 mb-8 bg-slate-200 p-1 rounded-xl w-fit">
+              <button 
+                onClick={() => setActiveTab('jobs')}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium transition-all ${activeTab === 'jobs' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300'}`}
+              >
+                <i className="fa-regular fa-file-lines"></i>
+                כל העבודות
+              </button>
+              <button 
+                onClick={() => setActiveTab('schedule')}
+                className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium transition-all ${activeTab === 'schedule' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-300'}`}
+              >
+                <i className="fa-regular fa-calendar-days"></i>
+                לוח זמנים חכם
+              </button>
+            </div>
+
+            {activeTab === 'jobs' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-slate-100">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-800">רשימת עבודות</h2>
+                    <p className="text-sm text-slate-500">נהל את כל העבודות שסגרת כאן</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowForm(!showForm)}
+                    className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                  >
+                    {showForm ? 'ביטול' : <><i className="fa-solid fa-plus"></i> עבודה חדשה</>}
+                  </button>
+                </div>
+
+                {showForm && (
+                  <div className="bg-white p-6 rounded-xl shadow-md border border-indigo-100 mb-6">
+                    <h3 className="text-lg font-bold mb-4 text-indigo-900 border-b pb-2">פרטי עבודה חדשה</h3>
+                    <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-user"></i> שם לקוח</label>
+                        <input required type="text" name="clientName" value={formData.clientName} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="לדוגמה: משפחת לוי" />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-file-lines"></i> תיאור העבודה</label>
+                        <input required type="text" name="description" value={formData.description} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="לדוגמה: ויטרינות לסלון, חלונות בלגיים..." />
+                      </div>
+
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-solid fa-location-dot"></i> כתובת התקנה</label>
+                        <input required type="text" name="installationAddress" value={formData.installationAddress || ''} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="לדוגמה: הרצל 15, תל אביב" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-calendar-check"></i> תאריך סגירה</label>
+                        <input required type="date" name="dateClosed" value={formData.dateClosed} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-calendar"></i> תאריך תחילת עבודה</label>
+                        <input required type="date" name="workStartDate" value={formData.workStartDate} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-clock"></i> ימי ייצור דרושים (משוער)</label>
+                        <input required type="number" min="1" name="productionDays" value={formData.productionDays} onChange={handleInputChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="כמה ימי עבודה?" />
+                      </div>
+
+                      {previewInstallationDate && (
+                        <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                          <span className="font-bold">תאריך התקנה משוער (מחושב):</span>{' '}
+                          {new Date(previewInstallationDate).toLocaleDateString('he-IL')}
+                          <span className="text-indigo-700 mr-1"> — {formData.productionDays} ימי עבודה מתאריך ההתחלה</span>
+                        </div>
+                      )}
+
+                      <div className="md:col-span-2 pt-4">
+                        <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition-colors">
+                          שמור עבודה חדשה
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {jobs.length === 0 ? (
+                    <div className="col-span-full text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
+                      <i className="fa-regular fa-file-lines text-5xl text-slate-300 mb-3 block"></i>
+                      <p className="text-slate-500 text-lg">אין עבודות כרגע. הוסף עבודה חדשה כדי להתחיל.</p>
+                    </div>
+                  ) : (
+                    jobs.map(job => (
+                      <div key={job.id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative group">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-800">{job.clientName}</h3>
+                            <p className="text-slate-600 text-sm">{job.description}</p>
+                            {job.installationAddress && (
+                              <p className="text-slate-500 text-sm mt-1 flex items-center gap-1">
+                                <i className="fa-solid fa-location-dot text-xs"></i> {job.installationAddress}
+                              </p>
+                            )}
+                          </div>
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(job.status)} cursor-pointer hover:opacity-80 transition-opacity`} onClick={() => toggleJobStatus(job.id, job.status)} title="לחץ לשינוי סטטוס">
+                            {getStatusText(job.status)}
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-2 mt-4 text-sm text-slate-600 bg-slate-50 p-3 rounded-lg">
+                          <div className="flex justify-between">
+                            <span className="flex items-center gap-1"><i className="fa-regular fa-calendar-check text-slate-400"></i> סגירה:</span>
+                            <span className="font-medium text-slate-800">{new Date(job.dateClosed).toLocaleDateString('he-IL')}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="flex items-center gap-1"><i className="fa-regular fa-clock text-slate-400"></i> זמן ייצור:</span>
+                            <span className="font-medium text-slate-800">{job.productionDays} ימים</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="flex items-center gap-1 text-blue-700 font-bold"><i className="fa-regular fa-calendar"></i> תחילת עבודה:</span>
+                            <span className="font-bold text-blue-700">{new Date(getWorkStartDate(job)).toLocaleDateString('he-IL')}</span>
+                          </div>
+                          <div className="flex justify-between pt-2 border-t border-slate-200 mt-2">
+                            <span className="flex items-center gap-1 text-indigo-700 font-bold"><i className="fa-regular fa-calendar-check"></i> התקנה משוערת:</span>
+                            <span className="font-bold text-indigo-700">{new Date(getInstallationDate(job)).toLocaleDateString('he-IL')}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="absolute bottom-4 left-4 flex gap-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={() => setEditingJob({ ...job, workStartDate: getWorkStartDate(job) })}
+                            className="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+                          >
+                            <i className="fa-solid fa-pen"></i> ערוך
+                          </button>
+                          <button 
+                            onClick={() => deleteJob(job.id)}
+                            className="text-sm text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
+                          >
+                            <i className="fa-regular fa-trash-can"></i> מחק
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'schedule' && (
+              <div className="space-y-6">
+                <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 mb-6">
+                  <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-2">
+                    <i className="fa-regular fa-calendar-days text-indigo-600"></i>
+                    לוח זמנים והיערכות לייצור
+                  </h2>
+                  <p className="text-slate-600 text-sm">
+                    הזן תאריך תחילת עבודה וימי ייצור — המערכת מחשבת קדימה את תאריך ההתקנה המשוער לכל עבודה.
+                  </p>
+                </div>
+
+                <div className="relative border-r-4 border-indigo-200 pr-6 space-y-8">
+                  {sortedJobsByWorkStart.length === 0 ? (
+                    <p className="text-slate-500">אין עבודות בלוח הזמנים.</p>
+                  ) : (
+                    sortedJobsByWorkStart.map(job => {
+                      const workStartDate = getWorkStartDate(job);
+                      const installationDate = getInstallationDate(job);
+                      const isCompleted = job.status === 'completed';
+                      
+                      return (
+                        <div key={job.id} className={`relative bg-white p-5 rounded-xl border shadow-sm ${isCompleted ? 'border-emerald-200 opacity-70' : 'border-indigo-100'}`}>
+                          <div className={`absolute top-6 -right-[35px] w-5 h-5 rounded-full border-4 border-slate-50 ${isCompleted ? 'bg-emerald-500' : 'bg-indigo-500'}`}></div>
+                          
+                          <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-4">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                {job.clientName}
+                                {isCompleted && <i className="fa-solid fa-circle-check text-emerald-500"></i>}
+                              </h3>
+                              <p className="text-slate-600">{job.description}</p>
+                              {job.installationAddress && (
+                                <p className="text-slate-500 text-sm mt-1 flex items-center gap-1">
+                                  <i className="fa-solid fa-location-dot text-indigo-400"></i> {job.installationAddress}
+                                </p>
+                              )}
+                            </div>
+                            
+                            <div className="text-left bg-blue-50 text-blue-800 px-4 py-2 rounded-lg inline-block border border-blue-100 w-fit md:w-auto">
+                              <p className="text-xs font-semibold mb-1 uppercase tracking-wider text-blue-600">תחילת עבודה</p>
+                              <p className="font-bold text-lg flex items-center justify-end gap-2">
+                                <i className="fa-regular fa-calendar"></i>
+                                {new Date(workStartDate).toLocaleDateString('he-IL')}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className={`p-4 rounded-lg flex items-start gap-3 ${isCompleted ? 'bg-emerald-50 text-emerald-800' : 'bg-orange-50 text-orange-900 border border-orange-100'}`}>
+                            {isCompleted ? <i className="fa-solid fa-circle-check text-2xl mt-0.5"></i> : <i className="fa-solid fa-circle-exclamation text-2xl mt-0.5 text-orange-600"></i>}
+                            <div>
+                              <p className="font-bold text-sm">
+                                {isCompleted ? 'העבודה הושלמה!' : 'תאריך התקנה משוער:'}
+                              </p>
+                              {!isCompleted && (
+                                <p className="text-lg font-black mt-1">
+                                  {new Date(installationDate).toLocaleDateString('he-IL')} 
+                                  <span className="text-sm font-normal text-orange-700 mr-2 block sm:inline">
+                                    (לאחר {job.productionDays} ימי עבודה מתאריך ההתחלה)
+                                  </span>
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* מודל עריכה */}
+            {editingJob && (
+              <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-indigo-100">
+                  <div className="p-6">
+                    <div className="flex justify-between items-center mb-6 border-b pb-4">
+                      <h3 className="text-xl font-bold text-indigo-900">עריכת עבודה: {editingJob.clientName}</h3>
+                      <button onClick={() => setEditingJob(null)} className="text-slate-400 hover:text-slate-700">
+                        <i className="fa-solid fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    
+                    <form onSubmit={saveEdit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-user"></i> שם לקוח</label>
+                        <input required type="text" name="clientName" value={editingJob.clientName} onChange={handleEditChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-file-lines"></i> תיאור העבודה</label>
+                        <input required type="text" name="description" value={editingJob.description} onChange={handleEditChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-solid fa-location-dot"></i> כתובת התקנה</label>
+                        <input required type="text" name="installationAddress" value={editingJob.installationAddress || ''} onChange={handleEditChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-calendar-check"></i> תאריך סגירה</label>
+                        <input required type="date" name="dateClosed" value={editingJob.dateClosed} onChange={handleEditChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-calendar"></i> תאריך תחילת עבודה</label>
+                        <input required type="date" name="workStartDate" value={editingJob.workStartDate || getWorkStartDate(editingJob)} onChange={handleEditChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-sm font-medium text-slate-700 flex items-center gap-1"><i className="fa-regular fa-clock"></i> ימי ייצור דרושים (משוער)</label>
+                        <input required type="number" min="1" name="productionDays" value={editingJob.productionDays} onChange={handleEditChange} className="w-full border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" />
+                      </div>
+
+                      {editingJob.workStartDate && editingJob.productionDays ? (
+                        <div className="md:col-span-2 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                          <span className="font-bold">תאריך התקנה משוער (מחושב):</span>{' '}
+                          {new Date(addDays(editingJob.workStartDate || getWorkStartDate(editingJob), editingJob.productionDays)).toLocaleDateString('he-IL')}
+                        </div>
+                      ) : null}
+
+                      <div className="md:col-span-2 pt-4 flex gap-3">
+                        <button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition-colors">
+                          שמור שינויים
+                        </button>
+                        <button type="button" onClick={() => setEditingJob(null)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-lg transition-colors border border-slate-300">
+                          ביטול
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </main>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

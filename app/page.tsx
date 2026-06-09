@@ -15,6 +15,7 @@ import {
   sanitizeForFirestore,
   trimWorkspaceForSize,
   USER_WORKSPACE_FIELD,
+  type ScheduleJob,
 } from "@/lib/user-workspace-firestore";
 import type { CrmStatus } from "@/lib/crm-status";
 import {
@@ -41,13 +42,14 @@ import {
 import { EMPTY_FENCE_RESULT, type FenceCalcResult } from "@/lib/types/fence-calc";
 import { EMPTY_PERGOLA_RESULT, type PergolaCalcResult } from "@/lib/types/pergola-calc";
 
-type ViewId = "dashboard" | "data" | "fences" | "3d" | "settings" | "business";
-const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "3d", "settings", "business"];
+type ViewId = "dashboard" | "data" | "fences" | "3d" | "schedule" | "settings" | "business";
+const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "3d", "schedule", "settings", "business"];
 function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
 const SIM_VERSION = "frame-ribs-left-dual-face-v1";
+const SCHEDULE_VERSION = "schedule-v4";
 
 // --- Constants: RAL colors (same order as original) ---
 const RAL_OPTIONS = [
@@ -420,8 +422,12 @@ function AuthenticatedPageContent() {
   }>(null);
   const [crmDealAmountRaw, setCrmDealAmountRaw] = useState("");
   const [businessTransactions, setBusinessTransactions] = useState<Transaction[]>([]);
+  const [scheduleJobs, setScheduleJobs] = useState<ScheduleJob[]>([]);
   /** אחרי טעינה ראשונה מ-Firestore (או אם אין ענן) – מאפשר שמירה ללא דריסת נתונים לפני הטעינה */
   const [workspaceCloudHydrated, setWorkspaceCloudHydrated] = useState(false);
+  const scheduleIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const scheduleJobsRef = useRef<ScheduleJob[]>([]);
+  const workspaceCloudHydratedRef = useRef(false);
 
   const crmStaleFollowUpCount = useMemo(() => countCrmStaleAlerts(crmData), [crmData]);
 
@@ -838,6 +844,7 @@ function AuthenticatedPageContent() {
 
       setCrmData([]);
       setBusinessTransactions([]);
+      setScheduleJobs([]);
       setLogoDataUrl(null);
 
       setSysContractorName("");
@@ -1009,6 +1016,7 @@ function AuthenticatedPageContent() {
 
           setCrmData([]);
           setBusinessTransactions([]);
+          setScheduleJobs([]);
           setLogoDataUrl(null);
 
           setSysContractorName("");
@@ -1040,6 +1048,7 @@ function AuthenticatedPageContent() {
           parsed.pergolaCalcDraft !== undefined ||
           parsed.fenceCalcDraft !== undefined ||
           parsed.businessTransactions !== undefined ||
+          parsed.scheduleJobs !== undefined ||
           parsed.businessSettings !== undefined ||
           Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl");
         if (!hasWorkspaceChunk) {
@@ -1056,6 +1065,7 @@ function AuthenticatedPageContent() {
 
           setCrmData([]);
           setBusinessTransactions([]);
+          setScheduleJobs([]);
           setLogoDataUrl(null);
 
           setSysContractorName("");
@@ -1083,6 +1093,7 @@ function AuthenticatedPageContent() {
         }
         if (parsed.crmProjects !== undefined) setCrmData(parsed.crmProjects);
         if (parsed.businessTransactions !== undefined) setBusinessTransactions(parsed.businessTransactions);
+        if (parsed.scheduleJobs !== undefined) setScheduleJobs(parsed.scheduleJobs);
         if (Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl")) {
           setLogoDataUrl(parsed.logoDataUrl ?? null);
         }
@@ -2945,6 +2956,7 @@ ${logoBlock}
         pergolaCalcDraft,
         fenceCalcDraft,
         businessTransactions,
+        scheduleJobs,
         logoDataUrl,
         businessSettings,
       }) as Record<string, unknown>;
@@ -2959,6 +2971,7 @@ ${logoBlock}
     firebaseUser?.uid,
     crmData,
     businessTransactions,
+    scheduleJobs,
     logoDataUrl,
     custName,
     custPhone,
@@ -3116,6 +3129,41 @@ ${logoBlock}
     simCaption,
   ]);
 
+  scheduleJobsRef.current = scheduleJobs;
+  workspaceCloudHydratedRef.current = workspaceCloudHydrated;
+
+  const pushScheduleToIframe = useCallback(() => {
+    scheduleIframeRef.current?.contentWindow?.postMessage(
+      { type: "yarhi-schedule-init", jobs: scheduleJobsRef.current },
+      window.location.origin
+    );
+  }, []);
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type === "yarhi-schedule-ready") {
+        if (!workspaceCloudHydratedRef.current) return;
+        pushScheduleToIframe();
+      }
+      if (e.data?.type === "yarhi-schedule-save" && Array.isArray(e.data.jobs)) {
+        setScheduleJobs(e.data.jobs as ScheduleJob[]);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [pushScheduleToIframe]);
+
+  useEffect(() => {
+    if (!workspaceCloudHydrated) return;
+    pushScheduleToIframe();
+  }, [workspaceCloudHydrated, pushScheduleToIframe]);
+
+  useEffect(() => {
+    if (currentView !== "schedule" || !workspaceCloudHydrated) return;
+    pushScheduleToIframe();
+  }, [currentView, scheduleJobs, workspaceCloudHydrated, pushScheduleToIframe]);
+
   useEffect(() => {
     setMobileMoreOpen(false);
   }, [searchString]);
@@ -3202,6 +3250,9 @@ ${logoBlock}
           <Link href="/?view=3d" className={navCls("3d")}>
             <span className="text-xl">🎨</span>הדמיית 3D מורחבת
           </Link>
+          <Link href="/?view=schedule" className={navCls("schedule")}>
+            <span className="text-xl">📅</span>ניהול לו&quot;ז
+          </Link>
           <Link href="/?view=settings" className={navCls("settings")}>
             <span className="text-xl">⚙️</span>הגדרות עסק
           </Link>
@@ -3232,7 +3283,7 @@ ${logoBlock}
         ref={mainScrollRef}
         className={
           "relative z-10 flex min-h-0 min-w-0 flex-1 flex-col bg-slate-100 pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] lg:pb-0 " +
-          (currentView === "3d" ? "overflow-hidden" : "overflow-y-auto")
+          (currentView === "3d" || currentView === "schedule" ? "overflow-hidden" : "overflow-y-auto")
         }
       >
         {alertMsg && (
@@ -4029,6 +4080,29 @@ ${logoBlock}
             </div>
           </section>
         )}
+        {/* VIEW: SCHEDULE MANAGER */}
+        {currentView === "schedule" && (
+          <section className="flex min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden">
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2 sm:px-4 sm:py-3">
+              <div className="min-w-0">
+                <h2 className="text-xl font-black text-slate-800 sm:text-2xl lg:text-3xl">ניהול עבודות ולו&quot;ז</h2>
+                <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">מעקב עבודות, תאריכי התקנה וחישוב תחילת ייצור.</p>
+              </div>
+              <button type="button" onClick={() => switchView("dashboard")} className="shrink-0 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700">
+                חזור ללוח בקרה
+              </button>
+            </header>
+            <div className="relative min-h-0 flex-1 w-full overflow-hidden bg-slate-50">
+              <iframe
+                title="Yarhi PRO - ניהול לו״ז"
+                src={`/schedule-manager.html?v=${SCHEDULE_VERSION}&embed=1`}
+                className="absolute inset-0 h-full w-full border-0 bg-slate-50"
+                referrerPolicy="no-referrer"
+                ref={scheduleIframeRef}
+              />
+            </div>
+          </section>
+        )}
         {/* VIEW: 3D SIMULATION */}
         {currentView === "3d" && (
           <section className="flex min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden">
@@ -4262,7 +4336,7 @@ ${logoBlock}
           <button
             type="button"
             className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 px-0.5 text-[10px] font-bold leading-tight sm:text-[11px] ${
-              mobileMoreOpen || currentView === "settings" || currentView === "business"
+              mobileMoreOpen || currentView === "settings" || currentView === "business" || currentView === "schedule"
                 ? "bg-slate-700 text-white"
                 : "text-slate-400 active:bg-slate-800"
             }`}
@@ -4305,6 +4379,13 @@ ${logoBlock}
               </button>
             </div>
             <div className="flex flex-col gap-2">
+              <Link
+                href="/?view=schedule"
+                className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                📅 ניהול לו&quot;ז
+              </Link>
               <Link
                 href="/?view=settings"
                 className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"

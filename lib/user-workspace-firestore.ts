@@ -5,6 +5,19 @@ export const USER_WORKSPACE_FIELD = "yarhiWorkspace";
 
 export type FenceSegmentDraft = { id: number; L: number; H: number; P?: number };
 
+export type ScheduleJob = {
+  id: string;
+  clientName: string;
+  description: string;
+  installationAddress: string;
+  dateClosed: string;
+  productionDays: number;
+  workStartDate?: string;
+  installationDate: string;
+  status: "pending" | "in-progress" | "completed";
+  createdAt: string;
+};
+
 /** שדות מסך «הגדרות עסק» – נשמרים בענן יחד עם שאר ה-workspace */
 export const BUSINESS_SETTINGS_KEYS = [
   "sysContractorName",
@@ -59,6 +72,7 @@ export type UserWorkspaceSnapshot = {
     fenceSlatColor: string;
   };
   businessTransactions: Transaction[];
+  scheduleJobs?: ScheduleJob[];
   logoDataUrl: string | null;
   businessSettings?: BusinessSettingsRecord;
 };
@@ -90,6 +104,7 @@ export function parseWorkspaceFromFirestore(raw: unknown): Partial<UserWorkspace
   if (w.fenceCalcDraft && typeof w.fenceCalcDraft === "object")
     out.fenceCalcDraft = w.fenceCalcDraft as UserWorkspaceSnapshot["fenceCalcDraft"];
   if (Array.isArray(w.businessTransactions)) out.businessTransactions = w.businessTransactions as Transaction[];
+  if (Array.isArray(w.scheduleJobs)) out.scheduleJobs = w.scheduleJobs as ScheduleJob[];
   if ("logoDataUrl" in w) {
     out.logoDataUrl = typeof w.logoDataUrl === "string" ? w.logoDataUrl : null;
   }
