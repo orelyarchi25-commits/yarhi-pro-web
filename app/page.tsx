@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import BusinessView, { loadTransactions, type CrmProject, type Transaction } from "@/app/components/BusinessView";
+import ScheduleView from "@/app/components/ScheduleView";
 import { useAuth } from "@/components/AuthProvider";
 import { useSearchString } from "@/hooks/useSearchString";
 import { getFirebaseDb } from "@/lib/firebase";
@@ -49,7 +50,6 @@ function parseView(v: string | null): ViewId {
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
 const SIM_VERSION = "frame-ribs-left-dual-face-v1";
-const SCHEDULE_VERSION = "schedule-v6";
 
 function scheduleLocalStorageKey(uid: string) {
   return `yarhi_schedule_${uid}`;
@@ -441,9 +441,8 @@ function AuthenticatedPageContent() {
   const [scheduleJobs, setScheduleJobs] = useState<ScheduleJob[]>([]);
   /** אחרי טעינה ראשונה מ-Firestore (או אם אין ענן) – מאפשר שמירה ללא דריסת נתונים לפני הטעינה */
   const [workspaceCloudHydrated, setWorkspaceCloudHydrated] = useState(false);
-  const scheduleIframeRef = useRef<HTMLIFrameElement | null>(null);
   const scheduleJobsRef = useRef<ScheduleJob[]>([]);
-  const workspaceCloudHydratedRef = useRef(false);
+  const scheduleJobsCloudRef = useRef<ScheduleJob[]>([]);
 
   const crmStaleFollowUpCount = useMemo(() => countCrmStaleAlerts(crmData), [crmData]);
 
@@ -1109,14 +1108,21 @@ function AuthenticatedPageContent() {
         }
         if (parsed.crmProjects !== undefined) setCrmData(parsed.crmProjects);
         if (parsed.businessTransactions !== undefined) setBusinessTransactions(parsed.businessTransactions);
-        if (parsed.scheduleJobs !== undefined) {
-          setScheduleJobs(parsed.scheduleJobs);
+        const cloudSchedule = Array.isArray(rawWs?.scheduleJobs)
+          ? (rawWs.scheduleJobs as ScheduleJob[])
+          : parsed?.scheduleJobs;
+        if (cloudSchedule !== undefined) {
+          scheduleJobsCloudRef.current = cloudSchedule;
+          setScheduleJobs(cloudSchedule);
           try {
-            localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(parsed.scheduleJobs));
+            localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(cloudSchedule));
           } catch {}
         } else {
           const localSchedule = readScheduleJobsFromLocal(uid);
-          if (localSchedule.length > 0) setScheduleJobs(localSchedule);
+          if (localSchedule.length > 0) {
+            scheduleJobsCloudRef.current = localSchedule;
+            setScheduleJobs(localSchedule);
+          }
         }
         if (Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl")) {
           setLogoDataUrl(parsed.logoDataUrl ?? null);
@@ -2980,7 +2986,10 @@ ${logoBlock}
         pergolaCalcDraft,
         fenceCalcDraft,
         businessTransactions,
-        scheduleJobs,
+        scheduleJobs:
+          scheduleJobsRef.current.length > 0
+            ? scheduleJobsRef.current
+            : scheduleJobsCloudRef.current,
         logoDataUrl,
         businessSettings,
       }) as Record<string, unknown>;
@@ -3154,19 +3163,12 @@ ${logoBlock}
   ]);
 
   scheduleJobsRef.current = scheduleJobs;
-  workspaceCloudHydratedRef.current = workspaceCloudHydrated;
-
-  const pushScheduleToIframe = useCallback(() => {
-    scheduleIframeRef.current?.contentWindow?.postMessage(
-      { type: "yarhi-schedule-init", jobs: scheduleJobsRef.current },
-      window.location.origin
-    );
-  }, []);
 
   const applyScheduleJobs = useCallback(
     (jobs: ScheduleJob[]) => {
       setScheduleJobs(jobs);
       scheduleJobsRef.current = jobs;
+      scheduleJobsCloudRef.current = jobs;
       const uid = firebaseUser?.uid;
       if (!uid) return;
       try {
@@ -3179,7 +3181,7 @@ ${logoBlock}
   const persistScheduleJobsToCloud = useCallback(
     async (jobs: ScheduleJob[]) => {
       const uid = firebaseUser?.uid;
-      if (!uid || !workspaceCloudHydratedRef.current) return;
+      if (!uid || !workspaceCloudHydrated) return;
       const db = getFirebaseDb();
       if (!db) return;
       const cleaned = sanitizeForFirestore(jobs);
@@ -3188,6 +3190,7 @@ ${logoBlock}
         await updateDoc(userRef, {
           [`${USER_WORKSPACE_FIELD}.scheduleJobs`]: cleaned,
         });
+        scheduleJobsCloudRef.current = jobs;
         return;
       } catch {
         /* yarhiWorkspace עדיין לא קיים — מיזוג מלא בלי למחוק שדות אחרים */
@@ -3202,51 +3205,21 @@ ${logoBlock}
         await updateDoc(userRef, {
           [USER_WORKSPACE_FIELD]: sanitizeForFirestore({ ...base, scheduleJobs: cleaned }),
         });
+        scheduleJobsCloudRef.current = jobs;
       } catch (err) {
         console.error("[Yarhi Pro] שמירת scheduleJobs לענן:", err);
       }
     },
-    [firebaseUser?.uid]
+    [firebaseUser?.uid, workspaceCloudHydrated]
   );
 
-  useEffect(() => {
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin !== window.location.origin) return;
-      if (e.data?.type === "yarhi-schedule-ready") {
-        if (!workspaceCloudHydratedRef.current) return;
-        pushScheduleToIframe();
-      }
-      if (e.data?.type === "yarhi-schedule-save" && Array.isArray(e.data.jobs)) {
-        const jobs = e.data.jobs as ScheduleJob[];
-        applyScheduleJobs(jobs);
-        void persistScheduleJobsToCloud(jobs);
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [pushScheduleToIframe, applyScheduleJobs, persistScheduleJobsToCloud]);
-
-  useEffect(() => {
-    const uid = firebaseUser?.uid;
-    if (!uid || !workspaceCloudHydrated) return;
-    try {
-      localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(scheduleJobs));
-    } catch {}
-    const t = window.setTimeout(() => {
-      void persistScheduleJobsToCloud(scheduleJobs);
-    }, 400);
-    return () => window.clearTimeout(t);
-  }, [scheduleJobs, workspaceCloudHydrated, firebaseUser?.uid, persistScheduleJobsToCloud]);
-
-  useEffect(() => {
-    if (!workspaceCloudHydrated) return;
-    pushScheduleToIframe();
-  }, [workspaceCloudHydrated, pushScheduleToIframe]);
-
-  useEffect(() => {
-    if (currentView !== "schedule" || !workspaceCloudHydrated) return;
-    pushScheduleToIframe();
-  }, [currentView, scheduleJobs, workspaceCloudHydrated, pushScheduleToIframe]);
+  const handleScheduleJobsChange = useCallback(
+    (jobs: ScheduleJob[]) => {
+      applyScheduleJobs(jobs);
+      void persistScheduleJobsToCloud(jobs);
+    },
+    [applyScheduleJobs, persistScheduleJobsToCloud]
+  );
 
   useEffect(() => {
     setMobileMoreOpen(false);
@@ -4176,13 +4149,11 @@ ${logoBlock}
                 חזור ללוח בקרה
               </button>
             </header>
-            <div className="relative min-h-0 flex-1 w-full overflow-hidden bg-slate-50">
-              <iframe
-                title="Yarhi PRO - ניהול לו״ז"
-                src={`/schedule-manager.html?v=${SCHEDULE_VERSION}&embed=1`}
-                className="absolute inset-0 h-full w-full border-0 bg-slate-50"
-                referrerPolicy="no-referrer"
-                ref={scheduleIframeRef}
+            <div className="relative min-h-0 flex-1 w-full overflow-y-auto bg-slate-50">
+              <ScheduleView
+                jobs={scheduleJobs}
+                onJobsChange={handleScheduleJobsChange}
+                loading={!workspaceCloudHydrated}
               />
             </div>
           </section>
