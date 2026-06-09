@@ -49,7 +49,23 @@ function parseView(v: string | null): ViewId {
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
 const SIM_VERSION = "frame-ribs-left-dual-face-v1";
-const SCHEDULE_VERSION = "schedule-v5";
+const SCHEDULE_VERSION = "schedule-v6";
+
+function scheduleLocalStorageKey(uid: string) {
+  return `yarhi_schedule_${uid}`;
+}
+
+function readScheduleJobsFromLocal(uid: string): ScheduleJob[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(scheduleLocalStorageKey(uid));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as ScheduleJob[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 // --- Constants: RAL colors (same order as original) ---
 const RAL_OPTIONS = [
@@ -1093,7 +1109,15 @@ function AuthenticatedPageContent() {
         }
         if (parsed.crmProjects !== undefined) setCrmData(parsed.crmProjects);
         if (parsed.businessTransactions !== undefined) setBusinessTransactions(parsed.businessTransactions);
-        if (parsed.scheduleJobs !== undefined) setScheduleJobs(parsed.scheduleJobs);
+        if (parsed.scheduleJobs !== undefined) {
+          setScheduleJobs(parsed.scheduleJobs);
+          try {
+            localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(parsed.scheduleJobs));
+          } catch {}
+        } else {
+          const localSchedule = readScheduleJobsFromLocal(uid);
+          if (localSchedule.length > 0) setScheduleJobs(localSchedule);
+        }
         if (Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl")) {
           setLogoDataUrl(parsed.logoDataUrl ?? null);
         }
@@ -3139,16 +3163,48 @@ ${logoBlock}
     );
   }, []);
 
-  const persistScheduleJobsToCloud = useCallback(
+  const applyScheduleJobs = useCallback(
     (jobs: ScheduleJob[]) => {
+      setScheduleJobs(jobs);
+      scheduleJobsRef.current = jobs;
       const uid = firebaseUser?.uid;
       if (!uid) return;
+      try {
+        localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(jobs));
+      } catch {}
+    },
+    [firebaseUser?.uid]
+  );
+
+  const persistScheduleJobsToCloud = useCallback(
+    async (jobs: ScheduleJob[]) => {
+      const uid = firebaseUser?.uid;
+      if (!uid || !workspaceCloudHydratedRef.current) return;
       const db = getFirebaseDb();
       if (!db) return;
       const cleaned = sanitizeForFirestore(jobs);
-      void updateDoc(doc(db, "users", uid), {
-        [`${USER_WORKSPACE_FIELD}.scheduleJobs`]: cleaned,
-      }).catch((err) => console.error("[Yarhi Pro] שמירת scheduleJobs לענן:", err));
+      const userRef = doc(db, "users", uid);
+      try {
+        await updateDoc(userRef, {
+          [`${USER_WORKSPACE_FIELD}.scheduleJobs`]: cleaned,
+        });
+        return;
+      } catch {
+        /* yarhiWorkspace עדיין לא קיים — מיזוג מלא בלי למחוק שדות אחרים */
+      }
+      try {
+        const snap = await getDoc(userRef);
+        const existingWs = snap.exists() ? snap.data()?.[USER_WORKSPACE_FIELD] : undefined;
+        const base =
+          existingWs && typeof existingWs === "object" && !Array.isArray(existingWs)
+            ? (existingWs as Record<string, unknown>)
+            : {};
+        await updateDoc(userRef, {
+          [USER_WORKSPACE_FIELD]: sanitizeForFirestore({ ...base, scheduleJobs: cleaned }),
+        });
+      } catch (err) {
+        console.error("[Yarhi Pro] שמירת scheduleJobs לענן:", err);
+      }
     },
     [firebaseUser?.uid]
   );
@@ -3162,14 +3218,25 @@ ${logoBlock}
       }
       if (e.data?.type === "yarhi-schedule-save" && Array.isArray(e.data.jobs)) {
         const jobs = e.data.jobs as ScheduleJob[];
-        setScheduleJobs(jobs);
-        scheduleJobsRef.current = jobs;
-        persistScheduleJobsToCloud(jobs);
+        applyScheduleJobs(jobs);
+        void persistScheduleJobsToCloud(jobs);
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [pushScheduleToIframe, persistScheduleJobsToCloud]);
+  }, [pushScheduleToIframe, applyScheduleJobs, persistScheduleJobsToCloud]);
+
+  useEffect(() => {
+    const uid = firebaseUser?.uid;
+    if (!uid || !workspaceCloudHydrated) return;
+    try {
+      localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(scheduleJobs));
+    } catch {}
+    const t = window.setTimeout(() => {
+      void persistScheduleJobsToCloud(scheduleJobs);
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [scheduleJobs, workspaceCloudHydrated, firebaseUser?.uid, persistScheduleJobsToCloud]);
 
   useEffect(() => {
     if (!workspaceCloudHydrated) return;

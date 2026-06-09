@@ -237,10 +237,7 @@
           skipPersistRef.current = false;
           return;
         }
-        if (storageMode === 'parent') {
-          if (window.parent !== window) {
-            window.parent.postMessage({ type: 'yarhi-schedule-save', jobs }, window.location.origin);
-          }
+        if (isEmbed && storageMode === 'parent') {
           return;
         }
         if (!db) {
@@ -251,6 +248,14 @@
           }
         }
       }, [jobs, localReady, storageMode, db]);
+
+      const syncJobsToParent = (nextJobs) => {
+        setJobs(nextJobs);
+        if (isEmbed && window.parent !== window) {
+          skipPersistRef.current = true;
+          window.parent.postMessage({ type: 'yarhi-schedule-save', jobs: nextJobs }, window.location.origin);
+        }
+      };
 
       const handleInputChange = (e) => {
         const { name, value } = e.target;
@@ -282,7 +287,7 @@
               console.error("Error: ", error);
             }
         } else {
-            setJobs([...jobs, { ...newJob, id: Date.now().toString() }]);
+            syncJobsToParent([...jobs, { ...newJob, id: Date.now().toString() }]);
         }
         
         setFormData({
@@ -308,7 +313,7 @@
               console.error("Error:", error);
             }
         } else {
-            setJobs(jobs.map(j => j.id === id ? { ...j, status: nextStatus } : j));
+            syncJobsToParent(jobs.map(j => j.id === id ? { ...j, status: nextStatus } : j));
         }
       };
 
@@ -322,7 +327,7 @@
                 console.error("Error:", error);
             }
         } else {
-            setJobs(jobs.filter(j => j.id !== id));
+            syncJobsToParent(jobs.filter(j => j.id !== id));
         }
       };
 
@@ -351,7 +356,7 @@
                 console.error("Error:", error);
             }
         } else {
-            setJobs(jobs.map(j => j.id === editingJob.id ? updatedJob : j));
+            syncJobsToParent(jobs.map(j => j.id === editingJob.id ? updatedJob : j));
         }
         setEditingJob(null);
       };
