@@ -389,25 +389,48 @@ export default function BusinessView({
       .map((p) => {
         const paid = transactions.filter((t) => t.projectId === p.id && t.type === "income").reduce((s, t) => s + t.amount, 0);
         const debt = (p.sellingPriceInc ?? 0) - paid;
-        return { source: "project" as const, key: `project-${p.id}`, projectId: p.id, customer: p.customer, sellingPriceInc: p.sellingPriceInc ?? 0, paid, debt };
+        const subtitle = p.isExternal ? "פרויקט חיצוני" : p.isFence ? "גדר" : p.isLead ? "ליד" : "פרויקט";
+        return {
+          source: "project" as const,
+          key: `project-${p.id}`,
+          projectId: p.id,
+          customer: p.customer,
+          subtitle: `${subtitle} · ${new Date(p.date).toLocaleDateString("he-IL")}`,
+          sellingPriceInc: p.sellingPriceInc ?? 0,
+          paid,
+          debt,
+          incomeTxIds: [] as number[],
+        };
       })
       .filter((p) => p.debt > 0);
 
-    const extraByCustomer = new Map<string, { sellingPriceInc: number; paid: number; debt: number }>();
+    const projectDebtorIds = new Set(projectDebtors.map((p) => p.projectId));
+    const projectCustomerKeys = new Set(
+      projectDebtors.map((p) => (p.customer || "").trim().toLowerCase()).filter(Boolean)
+    );
+
+    const extraByCustomer = new Map<
+      string,
+      { sellingPriceInc: number; paid: number; debt: number; txIds: number[] }
+    >();
     transactions
       .filter((t) => t.type === "income" && (t.incomeOutstandingAmount ?? 0) > 0)
       .forEach((t) => {
+        if (t.projectId != null && projectDebtorIds.has(t.projectId)) return;
         const customer =
           (t.incomeCustomerName || "").trim() ||
           (t.linkedCustomerName || "").trim() ||
           crmData.find((p) => p.id === t.projectId)?.customer?.trim() ||
           "לקוח ללא שם";
-        const due = Math.max(0, t.incomeOutstandingAmount ?? 0);
-        const paid = Math.max(0, t.amount ?? 0);
-        const agg = extraByCustomer.get(customer) ?? { sellingPriceInc: 0, paid: 0, debt: 0 };
+        const customerKey = customer.toLowerCase();
+        if (projectCustomerKeys.has(customerKey)) return;
+        const due = Math.max(0, Number(t.incomeOutstandingAmount) || 0);
+        const paid = Math.max(0, Number(t.amount) || 0);
+        const agg = extraByCustomer.get(customer) ?? { sellingPriceInc: 0, paid: 0, debt: 0, txIds: [] };
         agg.sellingPriceInc += paid + due;
         agg.paid += paid;
         agg.debt += due;
+        agg.txIds.push(t.id);
         extraByCustomer.set(customer, agg);
       });
 
@@ -416,9 +439,11 @@ export default function BusinessView({
       key: `income-${customer}`,
       projectId: null as number | null,
       customer,
+      subtitle: v.txIds.length > 1 ? `${v.txIds.length} תנועות הכנסה` : "יתרה מהכנסה",
       sellingPriceInc: v.sellingPriceInc,
       paid: v.paid,
       debt: v.debt,
+      incomeTxIds: v.txIds,
     }));
 
     const totalDebt =
@@ -532,6 +557,40 @@ export default function BusinessView({
       addToast("הפרויקט נמחק מהמערכת", "error");
     },
     [transactions, persistTx, setCrmData, addToast]
+  );
+
+  const clearIncomeOutstanding = useCallback(
+    (txIds: number[], customerName: string) => {
+      if (txIds.length === 0) return;
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm(`לאפס את היתרה לגבייה של ${customerName}? הלקוח יוסר מרשימת החייבים.`)
+      )
+        return;
+      persistTx(
+        transactions.map((t) =>
+          txIds.includes(t.id) ? { ...t, incomeOutstandingAmount: undefined } : t
+        )
+      );
+      addToast("היתרה אופסה — הלקוח הוסר מהחייבים", "success");
+    },
+    [transactions, persistTx, addToast]
+  );
+
+  const openDebtorIncomeEdit = useCallback(
+    (txIds: number[]) => {
+      const tx = transactions.find((t) => txIds.includes(t.id));
+      if (tx) openTxEdit(tx);
+    },
+    [transactions]
+  );
+
+  const openDebtorProject = useCallback(
+    (projectId: number) => {
+      const p = crmData.find((x) => x.id === projectId);
+      if (p) setProjectEditModal(p);
+    },
+    [crmData]
   );
 
   const prevMonth = () => {
@@ -739,22 +798,70 @@ export default function BusinessView({
               <div className="flex overflow-x-auto gap-4 pb-3">
                 {stats.debtors.map((d) => (
                   <div key={d.key} className="min-w-[240px] bg-slate-50 border border-slate-200 p-4 rounded-2xl flex flex-col justify-between shrink-0 shadow-sm hover:border-red-300 transition-colors">
-                    <div className="font-bold text-slate-800 text-lg mb-2 truncate" title={d.customer}>{d.customer}</div>
-                    <div className="text-sm text-slate-500 flex justify-between">סך עסקה: <span className="font-bold">{formatCurrency(d.sellingPriceInc ?? 0)}</span></div>
-                    <div className="text-sm text-emerald-600 flex justify-between">שולם (מקדמות): <span className="font-bold">{formatCurrency(d.paid)}</span></div>
-                    <div className="mt-3 pt-3 border-t border-slate-200 flex justify-between items-center">
-                      <span className="text-sm font-bold text-slate-700">יתרה לגבייה:</span>
-                      <span className="font-black text-red-600 text-lg">{formatCurrency(d.debt)}</span>
+                    <div>
+                      <div className="font-bold text-slate-800 text-lg mb-1 truncate" title={d.customer}>{d.customer}</div>
+                      {"subtitle" in d && d.subtitle ? (
+                        <p className="mb-2 text-xs font-medium text-slate-500">{d.subtitle}</p>
+                      ) : null}
+                      <div className="text-sm text-slate-500 flex justify-between">סך עסקה: <span className="font-bold">{formatCurrency(d.sellingPriceInc ?? 0)}</span></div>
+                      <div className="text-sm text-emerald-600 flex justify-between">שולם (מקדמות): <span className="font-bold">{formatCurrency(d.paid)}</span></div>
+                      <div className="mt-3 pt-3 border-t border-slate-200 flex justify-between items-center">
+                        <span className="text-sm font-bold text-slate-700">יתרה לגבייה:</span>
+                        <span className="font-black text-red-600 text-lg">{formatCurrency(d.debt)}</span>
+                      </div>
                     </div>
-                    {d.projectId != null ? (
-                      <button type="button" onClick={() => openTxForProject(d.projectId as number, "income")} className="mt-3 w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold py-2 rounded-xl text-xs transition-colors">
-                        קבל תשלום
-                      </button>
-                    ) : (
-                      <button type="button" onClick={() => openTxAdd("income")} className="mt-3 w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold py-2 rounded-xl text-xs transition-colors">
-                        הוסף גבייה
-                      </button>
-                    )}
+                    <div className="mt-3 flex flex-col gap-2">
+                      {d.projectId != null ? (
+                        <>
+                          <button type="button" onClick={() => openTxForProject(d.projectId as number, "income")} className="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold py-2 rounded-xl text-xs transition-colors">
+                            קבל תשלום
+                          </button>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => openDebtorProject(d.projectId as number)} className="flex-1 border border-slate-200 bg-white py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100">
+                              ערוך
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteProject(d.projectId as number)}
+                              className="flex-1 border border-red-200 bg-red-50 py-2 rounded-xl text-xs font-bold text-red-700 hover:bg-red-100"
+                            >
+                              מחק
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => openTxAdd("income")} className="w-full bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold py-2 rounded-xl text-xs transition-colors">
+                            הוסף גבייה
+                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openDebtorIncomeEdit(d.incomeTxIds)}
+                              className="flex-1 border border-slate-200 bg-white py-2 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100"
+                            >
+                              ערוך
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => clearIncomeOutstanding(d.incomeTxIds, d.customer)}
+                              className="flex-1 border border-amber-200 bg-amber-50 py-2 rounded-xl text-xs font-bold text-amber-900 hover:bg-amber-100"
+                            >
+                              איפוס יתרה
+                            </button>
+                          </div>
+                          {d.incomeTxIds.length === 1 && (
+                            <button
+                              type="button"
+                              onClick={() => deleteTransaction(d.incomeTxIds[0])}
+                              className="w-full border border-red-200 bg-red-50 py-2 rounded-xl text-xs font-bold text-red-700 hover:bg-red-100"
+                            >
+                              מחק תנועה
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
