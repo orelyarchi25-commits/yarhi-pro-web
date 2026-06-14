@@ -1,4 +1,4 @@
-import type { ScheduleJob } from "@/lib/user-workspace-firestore";
+import type { ScheduleJob, ScheduleJobType } from "@/lib/user-workspace-firestore";
 
 export function addDays(dateStr: string, days: number): string {
   const date = new Date(dateStr);
@@ -12,9 +12,17 @@ export function subtractDays(dateStr: string, days: number): string {
   return date.toISOString().split("T")[0];
 }
 
+export function isFieldJob(job: ScheduleJob): boolean {
+  return job.jobType === "field" || job.productionDays === 0;
+}
+
+export function getJobType(job: ScheduleJob): ScheduleJobType {
+  return isFieldJob(job) ? "field" : "project";
+}
+
 export function getWorkStartDate(job: ScheduleJob): string {
   if (job.workStartDate) return job.workStartDate;
-  if (job.installationDate && job.productionDays) {
+  if (job.installationDate && job.productionDays > 0) {
     return subtractDays(job.installationDate, job.productionDays);
   }
   return job.installationDate || "";
@@ -22,8 +30,10 @@ export function getWorkStartDate(job: ScheduleJob): string {
 
 export function getInstallationDate(job: ScheduleJob): string {
   const start = getWorkStartDate(job);
-  if (start && job.productionDays) return addDays(start, job.productionDays);
-  return job.installationDate || "";
+  if (!start) return job.installationDate || "";
+  if (isFieldJob(job)) return start;
+  if (job.productionDays > 0) return addDays(start, job.productionDays);
+  return job.installationDate || start;
 }
 
 export function getInstallationDays(job: ScheduleJob): number {
@@ -32,7 +42,7 @@ export function getInstallationDays(job: ScheduleJob): number {
   return 1;
 }
 
-/** סיום התקנה — אותה לוגיקה כמו ייצור: תחילת שלב + מספר ימים (10.6 + 3 ייצור → 13.6, 13.6 + 3 התקנה → 16.6) */
+/** סיום התקנה — תחילת שלב + מספר ימים (10.6 + 3 ייצור → 13.6, 13.6 + 3 התקנה → 16.6) */
 export function getInstallationEndDate(job: ScheduleJob): string {
   const start = getInstallationDate(job);
   if (!start) return "";
@@ -41,14 +51,28 @@ export function getInstallationEndDate(job: ScheduleJob): string {
   return addDays(start, days);
 }
 
+export function formatFieldTimeRange(job: ScheduleJob): string {
+  const { fieldStartTime, fieldEndTime } = job;
+  if (fieldStartTime && fieldEndTime) return `${fieldStartTime} – ${fieldEndTime}`;
+  if (fieldStartTime) return `מ-${fieldStartTime}`;
+  if (fieldEndTime) return `עד ${fieldEndTime}`;
+  return "";
+}
+
 export function formatInstallationRange(job: ScheduleJob): string {
   const start = getInstallationDate(job);
   if (!start) return "";
   const end = getInstallationEndDate(job);
   const days = getInstallationDays(job);
+  const time = formatFieldTimeRange(job);
   const fmt = (d: string) => new Date(d).toLocaleDateString("he-IL");
-  if (start === end) return `${fmt(start)} (${days === 1 ? "יום אחד" : `${days} ימים`})`;
-  return `${fmt(start)} – ${fmt(end)} (${days} ימים)`;
+  let range: string;
+  if (start === end) {
+    range = `${fmt(start)} (${days === 1 ? "יום אחד" : `${days} ימים`})`;
+  } else {
+    range = `${fmt(start)} – ${fmt(end)} (${days} ימים)`;
+  }
+  return time ? `${range} · ${time}` : range;
 }
 
 export function scheduleStatusColor(status: ScheduleJob["status"]): string {
@@ -62,14 +86,15 @@ export function scheduleStatusColor(status: ScheduleJob["status"]): string {
   }
 }
 
-export function scheduleStatusText(status: ScheduleJob["status"]): string {
-  switch (status) {
+export function scheduleStatusText(job: ScheduleJob): string {
+  const field = isFieldJob(job);
+  switch (job.status) {
     case "completed":
       return "הושלם";
     case "in-progress":
-      return "בייצור";
+      return field ? "בביצוע" : "בייצור";
     default:
-      return "ממתין לייצור";
+      return field ? "מתוזמן" : "ממתין לייצור";
   }
 }
 
@@ -77,4 +102,64 @@ export function nextScheduleStatus(status: ScheduleJob["status"]): ScheduleJob["
   if (status === "pending") return "in-progress";
   if (status === "in-progress") return "completed";
   return "pending";
+}
+
+export function jobTypeLabel(job: ScheduleJob): string {
+  return isFieldJob(job) ? "עבודת שטח" : "פרויקט";
+}
+
+/** מיון ללוח: תאריך, ואז שעות לעבודות שטח */
+export function compareScheduleJobs(a: ScheduleJob, b: ScheduleJob): number {
+  const dateA = getInstallationDate(a) || getWorkStartDate(a);
+  const dateB = getInstallationDate(b) || getWorkStartDate(b);
+  const diff = new Date(dateA).getTime() - new Date(dateB).getTime();
+  if (diff !== 0) return diff;
+  if (isFieldJob(a) && isFieldJob(b) && a.fieldStartTime && b.fieldStartTime) {
+    return a.fieldStartTime.localeCompare(b.fieldStartTime);
+  }
+  return 0;
+}
+
+export type ScheduleJobFormInput = {
+  jobType: ScheduleJobType;
+  clientName: string;
+  description: string;
+  installationAddress: string;
+  dateClosed: string;
+  productionDays: string;
+  installationDays: string;
+  workStartDate: string;
+  fieldStartTime: string;
+  fieldEndTime: string;
+};
+
+export function buildScheduleJobFromForm(
+  input: ScheduleJobFormInput,
+  existing?: Partial<ScheduleJob> & { id: string }
+): ScheduleJob {
+  const isField = input.jobType === "field";
+  const workStartDate = input.workStartDate;
+  const productionDays = isField ? 0 : Math.max(1, Number(input.productionDays) || 1);
+  const installationDays = Math.max(1, Number(input.installationDays) || 1);
+  const installationDate = isField ? workStartDate : addDays(workStartDate, productionDays);
+
+  const job: ScheduleJob = {
+    id: existing?.id ?? Date.now().toString(),
+    jobType: input.jobType,
+    clientName: input.clientName.trim(),
+    description: input.description.trim(),
+    installationAddress: input.installationAddress.trim(),
+    productionDays,
+    installationDays,
+    workStartDate,
+    installationDate,
+    status: existing?.status ?? "pending",
+    createdAt: existing?.createdAt ?? new Date().toISOString(),
+  };
+
+  if (input.dateClosed.trim()) job.dateClosed = input.dateClosed.trim();
+  if (isField && input.fieldStartTime.trim()) job.fieldStartTime = input.fieldStartTime.trim();
+  if (isField && input.fieldEndTime.trim()) job.fieldEndTime = input.fieldEndTime.trim();
+
+  return job;
 }

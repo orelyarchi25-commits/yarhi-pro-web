@@ -5,17 +5,25 @@ export const USER_WORKSPACE_FIELD = "yarhiWorkspace";
 
 export type FenceSegmentDraft = { id: number; L: number; H: number; P?: number };
 
+export type ScheduleJobType = "project" | "field";
+
 export type ScheduleJob = {
   id: string;
+  /** פרויקט עם ייצור (ברירת מחדל) | תיקון / עבודת שטח */
+  jobType?: ScheduleJobType;
   clientName: string;
   description: string;
   installationAddress: string;
-  dateClosed: string;
+  /** אופציונלי לעבודות שטח */
+  dateClosed?: string;
   productionDays: number;
   /** ימי עבודה בשטח — ברירת מחדל 1 לעבודות ישנות */
   installationDays?: number;
   workStartDate?: string;
   installationDate: string;
+  /** טווח שעות אופציונלי — לעבודות שטח (HH:mm) */
+  fieldStartTime?: string;
+  fieldEndTime?: string;
   status: "pending" | "in-progress" | "completed";
   createdAt: string;
 };
