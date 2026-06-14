@@ -4387,6 +4387,7 @@ ${logoBlock}
               transactions={businessTransactions}
               persistTransactions={persistTransactions}
               businessVatRate={businessVatDecimal}
+              businessName={sysContractorName}
             />
           </section>
         )}

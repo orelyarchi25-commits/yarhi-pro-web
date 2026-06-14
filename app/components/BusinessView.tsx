@@ -13,6 +13,18 @@ import {
   parseCrmStatus,
 } from "@/lib/crm-status";
 import { DEFAULT_VAT_DECIMAL, formatBusinessVatPercentLabel } from "@/lib/vat";
+import {
+  buildBusinessReportCsv,
+  computeReportStats,
+  downloadBusinessReportCsv,
+  filterTransactionsByDateRange,
+  formatReportDateHe,
+  getMonthDateRange,
+  openBusinessReportPrint,
+  reportFilename,
+  resolveReportRange,
+  type ReportRangeMode,
+} from "@/lib/business-report";
 
 const STORAGE_TX = "yarchiTransactions";
 const STORAGE_CRM = "yarhi_crm_data";
@@ -225,14 +237,22 @@ export function loadTransactions(): Transaction[] {
     const parsed = JSON.parse(raw) as Transaction[];
     if (!Array.isArray(parsed)) return [];
     return parsed.map((t) => {
-      if (t.baseAmount != null && t.vatAmount != null && t.hasVat != null) return t;
-      return {
+      const amount = Number(t.amount) || 0;
+      const baseAmount = t.baseAmount != null ? Number(t.baseAmount) || 0 : undefined;
+      const vatAmount = t.vatAmount != null ? Number(t.vatAmount) || 0 : undefined;
+      const incomeOutstandingAmount =
+        t.incomeOutstandingAmount != null ? Number(t.incomeOutstandingAmount) || undefined : undefined;
+      const normalized = {
         ...t,
-        baseAmount: t.baseAmount ?? t.amount,
-        vatAmount: t.vatAmount ?? 0,
+        amount,
+        baseAmount: baseAmount ?? amount,
+        vatAmount: vatAmount ?? 0,
         hasVat: t.hasVat ?? false,
         category: t.category ?? (t.type === "income" ? "תשלום מפרויקט פרגולה" : "תפעול שוטף ושונות"),
+        incomeOutstandingAmount,
       };
+      if (baseAmount != null && vatAmount != null && t.hasVat != null) return normalized;
+      return normalized;
     });
   } catch {
     return [];
@@ -248,6 +268,8 @@ type Props = {
   persistTransactions: (next: Transaction[]) => void;
   /** שיעור מע״מ עשרוני (0.18) מתוך הגדרות העסק */
   businessVatRate?: number;
+  /** שם העסק — לדוחות PDF/Excel */
+  businessName?: string;
 };
 
 export default function BusinessView({
@@ -257,6 +279,7 @@ export default function BusinessView({
   transactions,
   persistTransactions,
   businessVatRate = DEFAULT_VAT_DECIMAL,
+  businessName = "",
 }: Props) {
   const vatPercentLabel = formatBusinessVatPercentLabel(businessVatRate);
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
@@ -273,6 +296,10 @@ export default function BusinessView({
   }>({ open: false, mode: "expense", edit: null, projectId: "", defaultDesc: "" });
   const [projectEditModal, setProjectEditModal] = useState<CrmProject | null>(null);
   const [externalModal, setExternalModal] = useState(false);
+  const [reportMode, setReportMode] = useState<ReportRangeMode>("month");
+  const monthBounds = getMonthDateRange(currentYear, currentMonth);
+  const [reportFrom, setReportFrom] = useState(monthBounds.from);
+  const [reportTo, setReportTo] = useState(monthBounds.to);
 
   const addToast = useCallback((message: string, type: "success" | "error" = "success") => {
     const id = Date.now();
@@ -520,6 +547,40 @@ export default function BusinessView({
     } else setCurrentMonth((m) => m + 1);
   };
 
+  useEffect(() => {
+    if (reportMode !== "month") return;
+    const { from, to } = getMonthDateRange(currentYear, currentMonth);
+    setReportFrom(from);
+    setReportTo(to);
+  }, [reportMode, currentMonth, currentYear]);
+
+  const getReportData = useCallback(() => {
+    const range = resolveReportRange(reportMode, currentYear, currentMonth, reportFrom, reportTo);
+    const txs = filterTransactionsByDateRange(transactions, range.from, range.to);
+    const stats = computeReportStats(txs);
+    return { range, txs, stats };
+  }, [reportMode, currentYear, currentMonth, reportFrom, reportTo, transactions]);
+
+  const exportReportExcel = useCallback(() => {
+    const { range, txs, stats } = getReportData();
+    if (txs.length === 0) {
+      addToast("אין תנועות בתקופה שנבחרה", "error");
+      return;
+    }
+    const csv = buildBusinessReportCsv(txs, crmData, range, stats, businessName);
+    downloadBusinessReportCsv(csv, reportFilename(range, "csv"));
+    addToast("הדוח יוצא ל-Excel");
+  }, [getReportData, crmData, businessName, addToast]);
+
+  const exportReportPdf = useCallback(() => {
+    const { range, txs, stats } = getReportData();
+    if (txs.length === 0) {
+      addToast("אין תנועות בתקופה שנבחרה", "error");
+      return;
+    }
+    openBusinessReportPrint(txs, crmData, range, stats, businessName);
+  }, [getReportData, crmData, businessName, addToast]);
+
   return (
     <div className="bg-[#f8fafc] min-h-screen p-6 md:p-8 text-right">
       <header className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 gap-4">
@@ -587,6 +648,78 @@ export default function BusinessView({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+        </div>
+      </div>
+
+      {/* דוחות וייצוא */}
+      <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">📊 דוחות וייצוא</h3>
+            <p className="text-sm text-slate-500">דוח מרוכז של הכנסות והוצאות לתקופה שנבחרה</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={exportReportExcel}
+              className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700"
+            >
+              📥 ייצוא Excel
+            </button>
+            <button
+              type="button"
+              onClick={exportReportPdf}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              🖨️ הדפס / PDF
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-6">
+          <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => setReportMode("month")}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${reportMode === "month" ? "bg-white text-blue-800 shadow-sm" : "text-slate-600"}`}
+            >
+              חודש בודד
+            </button>
+            <button
+              type="button"
+              onClick={() => setReportMode("custom")}
+              className={`rounded-lg px-4 py-2 text-sm font-bold transition ${reportMode === "custom" ? "bg-white text-blue-800 shadow-sm" : "text-slate-600"}`}
+            >
+              טווח תאריכים
+            </button>
+          </div>
+          {reportMode === "month" ? (
+            <p className="text-sm font-medium text-slate-600">
+              התקופה: <span className="font-bold text-slate-800">{MONTHS[currentMonth]} {currentYear}</span>
+              <span className="mx-2 text-slate-400">·</span>
+              {formatReportDateHe(monthBounds.from)} – {formatReportDateHe(monthBounds.to)}
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm font-medium text-slate-600">
+                מתאריך
+                <input
+                  type="date"
+                  value={reportFrom}
+                  onChange={(e) => setReportFrom(e.target.value)}
+                  className="mr-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-800"
+                />
+              </label>
+              <label className="text-sm font-medium text-slate-600">
+                עד תאריך
+                <input
+                  type="date"
+                  value={reportTo}
+                  onChange={(e) => setReportTo(e.target.value)}
+                  className="mr-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-800"
+                />
+              </label>
+            </div>
+          )}
         </div>
       </div>
 
