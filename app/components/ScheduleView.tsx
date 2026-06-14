@@ -8,6 +8,7 @@ import {
   compareScheduleJobs,
   formatFieldTimeRange,
   formatInstallationRange,
+  formatScheduleDate,
   getInstallationDate,
   getInstallationDays,
   getInstallationEndDate,
@@ -282,7 +283,7 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                       {formData.workStartDate && (
                         <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-950 md:col-span-2">
                           <span className="font-bold">ביקור בשטח:</span>{" "}
-                          {new Date(formData.workStartDate).toLocaleDateString("he-IL")}
+                          {formatScheduleDate(formData.workStartDate)}
                           {(formData.fieldStartTime || formData.fieldEndTime) && (
                             <span>
                               {" "}
@@ -320,14 +321,14 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                         <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 md:col-span-2">
                           <p>
                             <span className="font-bold">תחילת התקנה משוערת:</span>{" "}
-                            {new Date(previewInstallationDate).toLocaleDateString("he-IL")}
+                            {formatScheduleDate(previewInstallationDate)}
                             <span className="mr-1 text-indigo-700"> — לאחר {formData.productionDays} ימי ייצור</span>
                           </p>
                           <p className="mt-1">
                             <span className="font-bold">חלון התקנה:</span>{" "}
                             {previewInstallationDays === 1
-                              ? new Date(previewInstallationDate).toLocaleDateString("he-IL")
-                              : `${new Date(previewInstallationDate).toLocaleDateString("he-IL")} – ${new Date(previewInstallationEndDate).toLocaleDateString("he-IL")}`}
+                              ? formatScheduleDate(previewInstallationDate)
+                              : `${formatScheduleDate(previewInstallationDate)} – ${formatScheduleDate(previewInstallationEndDate)}`}
                             <span className="mr-1 text-indigo-700"> ({previewInstallationDays} {previewInstallationDays === 1 ? "יום" : "ימים"} בשטח)</span>
                           </p>
                         </div>
@@ -385,7 +386,7 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                         {job.dateClosed && (
                           <div className="flex justify-between">
                             <span>סגירה:</span>
-                            <span className="font-medium text-slate-800">{new Date(job.dateClosed).toLocaleDateString("he-IL")}</span>
+                            <span className="font-medium text-slate-800">{formatScheduleDate(job.dateClosed)}</span>
                           </div>
                         )}
                         {field ? (
@@ -404,7 +405,7 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                             </div>
                             <div className="flex justify-between font-bold text-blue-700">
                               <span>תחילת עבודה:</span>
-                              <span>{new Date(getWorkStartDate(job)).toLocaleDateString("he-IL")}</span>
+                              <span>{formatScheduleDate(getWorkStartDate(job))}</span>
                             </div>
                             <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-bold text-indigo-700">
                               <span>חלון התקנה:</span>
@@ -472,7 +473,7 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                             {field ? "ביקור בשטח" : "תחילת עבודה"}
                           </p>
                           <p className="flex items-center justify-end gap-2 text-lg font-bold">
-                            📅 {new Date(field ? installationDate : workStartDate).toLocaleDateString("he-IL")}
+                            📅 {formatScheduleDate(field ? installationDate : workStartDate)}
                           </p>
                           {field && timeRange && <p className="mt-1 text-sm font-medium">🕐 {timeRange}</p>}
                         </div>
@@ -489,15 +490,15 @@ export default function ScheduleView({ jobs, onJobsChange, loading = false }: Pr
                             <p className="mt-1 text-lg font-black">
                               {field ? (
                                 <>
-                                  {new Date(installationDate).toLocaleDateString("he-IL")}
+                                  {formatScheduleDate(installationDate)}
                                   {timeRange && <span className="mr-2 text-base font-semibold"> · {timeRange}</span>}
                                   <span className="mr-2 block text-sm font-normal text-amber-800 sm:inline">(ללא ייצור במפעל)</span>
                                 </>
                               ) : (
                                 <>
                                   {installDays === 1
-                                    ? new Date(installationDate).toLocaleDateString("he-IL")
-                                    : `${new Date(installationDate).toLocaleDateString("he-IL")} – ${new Date(installationEndDate).toLocaleDateString("he-IL")}`}
+                                    ? formatScheduleDate(installationDate)
+                                    : `${formatScheduleDate(installationDate)} – ${formatScheduleDate(installationEndDate)}`}
                                   <span className="mr-2 block text-sm font-normal text-orange-700 sm:inline">
                                     ({installDays} {installDays === 1 ? "יום" : "ימים"} בשטח · לאחר {job.productionDays} ימי ייצור)
                                   </span>

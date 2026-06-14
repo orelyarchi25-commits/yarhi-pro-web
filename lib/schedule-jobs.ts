@@ -51,6 +51,14 @@ export function getInstallationEndDate(job: ScheduleJob): string {
   return addDays(start, days);
 }
 
+export function formatScheduleDate(dateStr: string): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  const day = date.toLocaleDateString("he-IL");
+  const weekday = date.toLocaleDateString("he-IL", { weekday: "short" });
+  return `${day} · ${weekday}`;
+}
+
 export function formatFieldTimeRange(job: ScheduleJob): string {
   const { fieldStartTime, fieldEndTime } = job;
   if (fieldStartTime && fieldEndTime) return `${fieldStartTime} – ${fieldEndTime}`;
@@ -65,7 +73,7 @@ export function formatInstallationRange(job: ScheduleJob): string {
   const end = getInstallationEndDate(job);
   const days = getInstallationDays(job);
   const time = formatFieldTimeRange(job);
-  const fmt = (d: string) => new Date(d).toLocaleDateString("he-IL");
+  const fmt = (d: string) => formatScheduleDate(d);
   let range: string;
   if (start === end) {
     range = `${fmt(start)} (${days === 1 ? "יום אחד" : `${days} ימים`})`;
