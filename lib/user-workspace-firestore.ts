@@ -1,4 +1,7 @@
 import type { CrmProject, Transaction } from "@/app/components/BusinessView";
+import type { FieldWindowRecord } from "@/lib/field-windows";
+
+export type { FieldWindowRecord } from "@/lib/field-windows";
 
 /** מפתח אחד תחת users/{uid} — לא לדרוס שדות פרופיל בשורש */
 export const USER_WORKSPACE_FIELD = "yarhiWorkspace";
@@ -83,6 +86,7 @@ export type UserWorkspaceSnapshot = {
   };
   businessTransactions: Transaction[];
   scheduleJobs?: ScheduleJob[];
+  fieldWindowRecords?: FieldWindowRecord[];
   logoDataUrl: string | null;
   businessSettings?: BusinessSettingsRecord;
 };
@@ -115,6 +119,7 @@ export function parseWorkspaceFromFirestore(raw: unknown): Partial<UserWorkspace
     out.fenceCalcDraft = w.fenceCalcDraft as UserWorkspaceSnapshot["fenceCalcDraft"];
   if (Array.isArray(w.businessTransactions)) out.businessTransactions = w.businessTransactions as Transaction[];
   if (Array.isArray(w.scheduleJobs)) out.scheduleJobs = w.scheduleJobs as ScheduleJob[];
+  if (Array.isArray(w.fieldWindowRecords)) out.fieldWindowRecords = w.fieldWindowRecords as FieldWindowRecord[];
   if ("logoDataUrl" in w) {
     out.logoDataUrl = typeof w.logoDataUrl === "string" ? w.logoDataUrl : null;
   }

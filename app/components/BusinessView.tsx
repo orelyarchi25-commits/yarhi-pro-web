@@ -12,6 +12,7 @@ import {
   getCrmStatusLabel,
   parseCrmStatus,
 } from "@/lib/crm-status";
+import { getFieldWindowRecordIdFromProject } from "@/lib/field-windows";
 import { DEFAULT_VAT_DECIMAL, formatBusinessVatPercentLabel } from "@/lib/vat";
 import {
   buildBusinessReportCsv,
@@ -162,6 +163,8 @@ export type CrmProject = {
   isFence?: boolean;
   totalLength?: number;
   isExternal?: boolean;
+  /** פרויקט מקושר למידות שטח חלונות */
+  isFieldWindows?: boolean;
   /** ליד שנכנס מהלוח בקרה (לא מפרגולה/גדר) */
   isLead?: boolean;
   /** שלב במעקב — קובע הופעה ברשימת חייבים */
@@ -169,6 +172,10 @@ export type CrmProject = {
   /** מתי הוגדר crmStatus הנוכחי (ISO) — למעקב 48 שעות בלוח הבקרה */
   crmStatusSince?: string;
 };
+
+function projectIsFieldWindows(p: CrmProject): boolean {
+  return Boolean(p.isFieldWindows || getFieldWindowRecordIdFromProject(p.formState));
+}
 
 /** למילוי אוטומטי בפרטי לקוח במודל תשלום — ליד / פרגולה / גדר */
 function getIncomePrefillFromCrmProject(p: CrmProject): { name: string; phone: string; address: string } {
@@ -187,6 +194,13 @@ function getIncomePrefillFromCrmProject(p: CrmProject): { name: string; phone: s
       name: fromForm || fallbackName,
       phone: String(fs.fenceCustPhone ?? "").trim(),
       address: String(fs.fenceCustAddress ?? "").trim(),
+    };
+  }
+  if (p.isFieldWindows || getFieldWindowRecordIdFromProject(p.formState)) {
+    return {
+      name: (p.customer ?? "").trim(),
+      phone: String(fs.clientPhone ?? "").trim(),
+      address: String(fs.clientAddress ?? "").trim(),
     };
   }
   const custName = String(fs.custName ?? "").trim();
@@ -389,7 +403,15 @@ export default function BusinessView({
       .map((p) => {
         const paid = transactions.filter((t) => t.projectId === p.id && t.type === "income").reduce((s, t) => s + t.amount, 0);
         const debt = (p.sellingPriceInc ?? 0) - paid;
-        const subtitle = p.isExternal ? "פרויקט חיצוני" : p.isFence ? "גדר" : p.isLead ? "ליד" : "פרויקט";
+        const subtitle = projectIsFieldWindows(p)
+          ? "מידות שטח חלונות"
+          : p.isExternal
+            ? "פרויקט חיצוני"
+            : p.isFence
+              ? "גדר"
+              : p.isLead
+                ? "ליד"
+                : "פרויקט";
         return {
           source: "project" as const,
           key: `project-${p.id}`,
@@ -939,7 +961,8 @@ export default function BusinessView({
                         <div className="flex flex-wrap items-center gap-2 mb-1">
                           <h4 className="font-black text-xl text-slate-800">{p.customer}</h4>
                           {isFullyPaid && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full">שולם במלואו</span>}
-                          {p.isExternal && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">פרויקט חיצוני</span>}
+                          {projectIsFieldWindows(p) && <span className="bg-violet-100 text-violet-800 text-[10px] font-bold px-2 py-0.5 rounded-full">מידות שטח</span>}
+                          {p.isExternal && !projectIsFieldWindows(p) && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">פרויקט חיצוני</span>}
                           {crmProjectShowsLifecycleLeadClientPill(p) &&
                             (crmLeadEntryShowsAsClient(p.crmStatus) ? (
                               <span className="bg-emerald-100 text-emerald-900 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">לקוח</span>
@@ -959,11 +982,15 @@ export default function BusinessView({
                         </div>
                         <p className="text-xs text-slate-400 mb-3">{p.date}</p>
                         <div className="flex flex-wrap gap-2">
-                          {!p.isExternal && (
+                          {projectIsFieldWindows(p) ? (
+                            <button type="button" onClick={() => onLoadProject(p.id)} className="text-xs text-slate-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
+                              ערוך מידות
+                            </button>
+                          ) : !p.isExternal ? (
                             <button type="button" onClick={() => onLoadProject(p.id)} className="text-xs text-slate-600 hover:text-indigo-700 bg-slate-100 hover:bg-indigo-50 border border-slate-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
                               {p.isLead ? (crmLeadEntryShowsAsClient(p.crmStatus) ? "פתח עריכת לקוח" : "פתח עריכת ליד") : "טען מידות ו-3D"}
                             </button>
-                          )}
+                          ) : null}
                           <button type="button" onClick={() => setProjectEditModal(p)} className="text-xs text-slate-600 hover:text-blue-700 bg-slate-100 hover:bg-blue-50 border border-slate-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
                             עריכה
                           </button>

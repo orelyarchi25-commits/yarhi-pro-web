@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import BusinessView, { loadTransactions, type CrmProject, type Transaction } from "@/app/components/BusinessView";
+import FieldWindowsView from "@/app/components/FieldWindowsView";
 import ScheduleView from "@/app/components/ScheduleView";
 import { useAuth } from "@/components/AuthProvider";
 import { useSearchString } from "@/hooks/useSearchString";
@@ -17,7 +18,13 @@ import {
   trimWorkspaceForSize,
   USER_WORKSPACE_FIELD,
   type ScheduleJob,
+  type FieldWindowRecord,
 } from "@/lib/user-workspace-firestore";
+import {
+  fieldWindowsLocalStorageKey,
+  getFieldWindowRecordIdFromProject,
+  readFieldWindowsFromLocal,
+} from "@/lib/field-windows";
 import type { CrmStatus } from "@/lib/crm-status";
 import {
   CRM_STATUS_LABELS,
@@ -43,8 +50,8 @@ import {
 import { EMPTY_FENCE_RESULT, type FenceCalcResult } from "@/lib/types/fence-calc";
 import { EMPTY_PERGOLA_RESULT, type PergolaCalcResult } from "@/lib/types/pergola-calc";
 
-type ViewId = "dashboard" | "data" | "fences" | "3d" | "schedule" | "settings" | "business";
-const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "3d", "schedule", "settings", "business"];
+type ViewId = "dashboard" | "data" | "fences" | "field-windows" | "3d" | "schedule" | "settings" | "business";
+const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "field-windows", "3d", "schedule", "settings", "business"];
 function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
@@ -73,6 +80,20 @@ function resolveScheduleJobsOnLoad(uid: string, rawWs: unknown, parsed: ReturnTy
     ? ((rawWs as Record<string, unknown>).scheduleJobs as ScheduleJob[])
     : parsed?.scheduleJobs;
   const fromLocal = readScheduleJobsFromLocal(uid);
+  if (fromCloud && fromCloud.length > 0) return fromCloud;
+  if (fromLocal.length > 0) return fromLocal;
+  return fromCloud ?? [];
+}
+
+function resolveFieldWindowsOnLoad(
+  uid: string,
+  rawWs: unknown,
+  parsed: ReturnType<typeof parseWorkspaceFromFirestore>
+): FieldWindowRecord[] {
+  const fromCloud = Array.isArray((rawWs as Record<string, unknown> | undefined)?.fieldWindowRecords)
+    ? ((rawWs as Record<string, unknown>).fieldWindowRecords as FieldWindowRecord[])
+    : parsed?.fieldWindowRecords;
+  const fromLocal = readFieldWindowsFromLocal(uid);
   if (fromCloud && fromCloud.length > 0) return fromCloud;
   if (fromLocal.length > 0) return fromLocal;
   return fromCloud ?? [];
@@ -450,10 +471,14 @@ function AuthenticatedPageContent() {
   const [crmDealAmountRaw, setCrmDealAmountRaw] = useState("");
   const [businessTransactions, setBusinessTransactions] = useState<Transaction[]>([]);
   const [scheduleJobs, setScheduleJobs] = useState<ScheduleJob[]>([]);
+  const [fieldWindowRecords, setFieldWindowRecords] = useState<FieldWindowRecord[]>([]);
+  const [fieldWindowsOpenRecordId, setFieldWindowsOpenRecordId] = useState<string | null>(null);
   /** אחרי טעינה ראשונה מ-Firestore (או אם אין ענן) – מאפשר שמירה ללא דריסת נתונים לפני הטעינה */
   const [workspaceCloudHydrated, setWorkspaceCloudHydrated] = useState(false);
   const scheduleJobsRef = useRef<ScheduleJob[]>([]);
   const scheduleJobsCloudRef = useRef<ScheduleJob[]>([]);
+  const fieldWindowRecordsRef = useRef<FieldWindowRecord[]>([]);
+  const fieldWindowRecordsCloudRef = useRef<FieldWindowRecord[]>([]);
 
   const crmStaleFollowUpCount = useMemo(() => countCrmStaleAlerts(crmData), [crmData]);
 
@@ -1048,6 +1073,12 @@ function AuthenticatedPageContent() {
             scheduleJobsRef.current = localSchedule;
             setScheduleJobs(localSchedule);
           }
+          {
+            const localFieldWindows = readFieldWindowsFromLocal(uid);
+            fieldWindowRecordsCloudRef.current = localFieldWindows;
+            fieldWindowRecordsRef.current = localFieldWindows;
+            setFieldWindowRecords(localFieldWindows);
+          }
           setLogoDataUrl(null);
 
           setSysContractorName("");
@@ -1080,6 +1111,7 @@ function AuthenticatedPageContent() {
           parsed.fenceCalcDraft !== undefined ||
           parsed.businessTransactions !== undefined ||
           parsed.scheduleJobs !== undefined ||
+          parsed.fieldWindowRecords !== undefined ||
           parsed.businessSettings !== undefined ||
           Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl");
         if (!hasWorkspaceChunk) {
@@ -1101,6 +1133,12 @@ function AuthenticatedPageContent() {
             scheduleJobsCloudRef.current = localSchedule;
             scheduleJobsRef.current = localSchedule;
             setScheduleJobs(localSchedule);
+          }
+          {
+            const localFieldWindows = readFieldWindowsFromLocal(uid);
+            fieldWindowRecordsCloudRef.current = localFieldWindows;
+            fieldWindowRecordsRef.current = localFieldWindows;
+            setFieldWindowRecords(localFieldWindows);
           }
           setLogoDataUrl(null);
 
@@ -1137,6 +1175,17 @@ function AuthenticatedPageContent() {
           if (loadedSchedule.length > 0) {
             try {
               localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(loadedSchedule));
+            } catch {}
+          }
+        }
+        {
+          const loadedFieldWindows = resolveFieldWindowsOnLoad(uid, rawWs, parsed);
+          fieldWindowRecordsCloudRef.current = loadedFieldWindows;
+          fieldWindowRecordsRef.current = loadedFieldWindows;
+          setFieldWindowRecords(loadedFieldWindows);
+          if (loadedFieldWindows.length > 0) {
+            try {
+              localStorage.setItem(fieldWindowsLocalStorageKey(uid), JSON.stringify(loadedFieldWindows));
             } catch {}
           }
         }
@@ -2807,6 +2856,15 @@ ${logoBlock}
       switchView("fences");
       return;
     }
+    const fieldRecordId = getFieldWindowRecordIdFromProject(state);
+    if (proj.isFieldWindows || fieldRecordId) {
+      setPergolaCrmEditId(null);
+      setHasVitrines(false);
+      setVitrineOpenings([createVitrineOpening(1)]);
+      setFieldWindowsOpenRecordId(fieldRecordId);
+      switchView("field-windows");
+      return;
+    }
     setPergolaCrmEditId(proj.id);
     PERGOLA_IDS.forEach((fieldKey) => {
       const v = state[fieldKey];
@@ -3008,6 +3066,12 @@ ${logoBlock}
             : scheduleJobsCloudRef.current.length > 0
               ? scheduleJobsCloudRef.current
               : scheduleJobs,
+        fieldWindowRecords:
+          fieldWindowRecordsRef.current.length > 0
+            ? fieldWindowRecordsRef.current
+            : fieldWindowRecordsCloudRef.current.length > 0
+              ? fieldWindowRecordsCloudRef.current
+              : fieldWindowRecords,
         logoDataUrl,
         businessSettings,
       }) as Record<string, unknown>;
@@ -3023,6 +3087,7 @@ ${logoBlock}
     crmData,
     businessTransactions,
     scheduleJobs,
+    fieldWindowRecords,
     logoDataUrl,
     custName,
     custPhone,
@@ -3182,6 +3247,77 @@ ${logoBlock}
 
   scheduleJobsRef.current = scheduleJobs;
 
+  fieldWindowRecordsRef.current = fieldWindowRecords;
+
+  const applyFieldWindowRecords = useCallback(
+    (records: FieldWindowRecord[]) => {
+      setFieldWindowRecords(records);
+      fieldWindowRecordsRef.current = records;
+      fieldWindowRecordsCloudRef.current = records;
+      const uid = firebaseUser?.uid;
+      if (!uid) return;
+      try {
+        localStorage.setItem(fieldWindowsLocalStorageKey(uid), JSON.stringify(records));
+      } catch {}
+    },
+    [firebaseUser?.uid]
+  );
+
+  const persistFieldWindowRecordsToCloud = useCallback(
+    async (records: FieldWindowRecord[]) => {
+      const uid = firebaseUser?.uid;
+      if (!uid) return;
+      const db = getFirebaseDb();
+      if (!db) return;
+      const cleaned = sanitizeForFirestore(records);
+      const userRef = doc(db, "users", uid);
+      try {
+        await updateDoc(userRef, {
+          [`${USER_WORKSPACE_FIELD}.fieldWindowRecords`]: cleaned,
+        });
+        fieldWindowRecordsCloudRef.current = records;
+        return;
+      } catch {
+        /* yarhiWorkspace עדיין לא קיים */
+      }
+      try {
+        const snap = await getDoc(userRef);
+        const existingWs = snap.exists() ? snap.data()?.[USER_WORKSPACE_FIELD] : undefined;
+        const base =
+          existingWs && typeof existingWs === "object" && !Array.isArray(existingWs)
+            ? (existingWs as Record<string, unknown>)
+            : {};
+        await updateDoc(userRef, {
+          [USER_WORKSPACE_FIELD]: sanitizeForFirestore({ ...base, fieldWindowRecords: cleaned }),
+        });
+        fieldWindowRecordsCloudRef.current = records;
+      } catch (err) {
+        console.error("[Yarhi Pro] שמירת fieldWindowRecords לענן:", err);
+      }
+    },
+    [firebaseUser?.uid]
+  );
+
+  const handleFieldWindowRecordsChange = useCallback(
+    (records: FieldWindowRecord[]) => {
+      applyFieldWindowRecords(records);
+      void persistFieldWindowRecordsToCloud(records);
+    },
+    [applyFieldWindowRecords, persistFieldWindowRecordsToCloud]
+  );
+
+  const handleFieldWindowCrmLink = useCallback(
+    (recordId: string, project: CrmProject) => {
+      setCrmData((prev) => [project, ...prev]);
+      handleFieldWindowRecordsChange(
+        fieldWindowRecordsRef.current.map((r) =>
+          r.id === recordId ? { ...r, crmProjectId: project.id } : r
+        )
+      );
+    },
+    [handleFieldWindowRecordsChange]
+  );
+
   const applyScheduleJobs = useCallback(
     (jobs: ScheduleJob[]) => {
       setScheduleJobs(jobs);
@@ -3242,11 +3378,11 @@ ${logoBlock}
 
   useEffect(() => {
     const uid = firebaseUser?.uid;
-    if (!uid || scheduleJobs.length === 0) return;
+    if (!uid || fieldWindowRecords.length === 0) return;
     try {
-      localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(scheduleJobs));
+      localStorage.setItem(fieldWindowsLocalStorageKey(uid), JSON.stringify(fieldWindowRecords));
     } catch {}
-  }, [scheduleJobs, firebaseUser?.uid]);
+  }, [fieldWindowRecords, firebaseUser?.uid]);
 
   useEffect(() => {
     setMobileMoreOpen(false);
@@ -3330,6 +3466,9 @@ ${logoBlock}
           </Link>
           <Link href="/?view=fences" className={navCls("fences")}>
             <span className="text-xl">🪟</span>גדרות
+          </Link>
+          <Link href="/?view=field-windows" className={navCls("field-windows")}>
+            <span className="text-xl">📐</span>מידות שטח חלונות
           </Link>
           <Link href="/?view=3d" className={navCls("3d")}>
             <span className="text-xl">🎨</span>הדמיית 3D מורחבת
@@ -4185,6 +4324,20 @@ ${logoBlock}
             </div>
           </section>
         )}
+        {currentView === "field-windows" && (
+          <section className="p-0">
+            <FieldWindowsView
+              records={fieldWindowRecords}
+              onRecordsChange={handleFieldWindowRecordsChange}
+              crmData={crmData}
+              onCreateCrmLink={handleFieldWindowCrmLink}
+              businessName={sysContractorName}
+              loading={!workspaceCloudHydrated}
+              openRecordId={fieldWindowsOpenRecordId}
+              onOpenRecordConsumed={() => setFieldWindowsOpenRecordId(null)}
+            />
+          </section>
+        )}
         {/* VIEW: 3D SIMULATION */}
         {currentView === "3d" && (
           <section className="flex min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden">
@@ -4419,7 +4572,7 @@ ${logoBlock}
           <button
             type="button"
             className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 px-0.5 text-[10px] font-bold leading-tight sm:text-[11px] ${
-              mobileMoreOpen || currentView === "settings" || currentView === "business" || currentView === "schedule"
+              mobileMoreOpen || currentView === "settings" || currentView === "business" || currentView === "schedule" || currentView === "field-windows"
                 ? "bg-slate-700 text-white"
                 : "text-slate-400 active:bg-slate-800"
             }`}
@@ -4462,6 +4615,13 @@ ${logoBlock}
               </button>
             </div>
             <div className="flex flex-col gap-2">
+              <Link
+                href="/?view=field-windows"
+                className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                📐 מידות שטח חלונות
+              </Link>
               <Link
                 href="/?view=schedule"
                 className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"
