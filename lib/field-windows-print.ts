@@ -1,5 +1,5 @@
 import type { FieldWindowRecord } from "@/lib/field-windows";
-import { totalItemsSqm } from "@/lib/field-windows";
+import { formatFieldWindowDimensions, totalItemsSqm } from "@/lib/field-windows";
 
 function esc(s: string) {
   return String(s)
@@ -12,18 +12,23 @@ function esc(s: string) {
 export function printFieldWindowRecord(record: FieldWindowRecord, businessName: string) {
   const rows = record.items
     .map(
-      (item, idx) => `
+      (item, idx) => {
+        const dims = formatFieldWindowDimensions(item.width, item.height);
+        return `
       <tr>
         <td>${idx + 1}</td>
         <td><b>${esc(item.location || "—")}</b><br><small>${esc(item.profile)}</small></td>
-        <td style="text-align:center">${item.width}×${item.height}</td>
-        <td style="text-align:center">${esc(item.sqm)}</td>
+        <td style="text-align:center"><b>רוחב</b><br>${item.width} ס"מ</td>
+        <td style="text-align:center"><b>גובה</b><br>${item.height} ס"מ</td>
+        <td style="text-align:center">${esc(dims.sqmLabel)}</td>
         <td style="text-align:center">${item.qty}</td>
         <td>${esc(item.glass)}</td>
         <td><small>${esc(item.components)}<br>${esc(item.tracks)} · ${esc(item.overlap)}<br>${esc(item.lockInfo)}</small></td>
         <td class="text-indigo-800"><small>${esc(item.trimDescription || "ללא הלבשות")}</small></td>
+        <td><small>${esc(item.notes || "—")}</small></td>
         <td>${esc(item.color || "—")}</td>
-      </tr>`
+      </tr>`;
+      }
     )
     .join("");
 
@@ -43,7 +48,7 @@ ${record.clientAddress ? `<p><b>כתובת:</b> ${esc(record.clientAddress)}</p>
 ${record.notes ? `<p style="background:#ecfdf5;border:1px solid #a7f3d0;padding:10px;border-radius:8px">${esc(record.notes)}</p>` : ""}
 <table>
 <thead><tr>
-<th>#</th><th>מיקום / פרופיל</th><th>מידות (ס"מ)</th><th>מ"ר</th><th>כמ'</th><th>זכוכית</th><th>טכני</th><th>הלבשות</th><th>צבע</th>
+<th>#</th><th>מיקום / פרופיל</th><th>רוחב (ס"מ)</th><th>גובה (ס"מ)</th><th>מ"ר</th><th>כמ'</th><th>זכוכית</th><th>טכני</th><th>הלבשות</th><th>הערות</th><th>צבע</th>
 </tr></thead>
 <tbody>${rows}</tbody>
 </table>

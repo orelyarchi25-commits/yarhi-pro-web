@@ -13,11 +13,13 @@ import {
   calcSuggestedTracks,
   defaultFieldWindowTrimState,
   formatFieldWindowDate,
+  formatFieldWindowDimensions,
   formatTrimString,
   formatTracksLabel,
   inferScreenModeFromItem,
   newFieldWindowItemId,
   newFieldWindowRecordId,
+  normalizeOverlapValue,
   parseTracksCount,
   resolveItemTrimState,
   totalItemsSqm,
@@ -313,9 +315,7 @@ export default function FieldWindowsView({
       location: item.location,
       color: item.color,
       tracks: Number.isFinite(trackNum) ? trackNum : 2,
-      overlap: OVERLAP_OPTIONS.includes(item.overlap as (typeof OVERLAP_OPTIONS)[number])
-        ? item.overlap
-        : OVERLAP_OPTIONS[0],
+      overlap: normalizeOverlapValue(item.overlap),
       lockHeight: "",
       lockSide: LOCK_SIDES[2],
       isFrameOnly: item.isFrameOnly,
@@ -502,7 +502,12 @@ export default function FieldWindowsView({
                   </div>
                 </div>
                 {draft.width && draft.height ? (
-                  <p className="text-xs font-bold text-blue-700">שטח: {calcSqm(parseFloat(draft.width) || 0, parseFloat(draft.height) || 0)} מ&quot;ר</p>
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+                    <p className="font-bold">{formatFieldWindowDimensions(parseFloat(draft.width) || 0, parseFloat(draft.height) || 0).inline}</p>
+                    <p className="mt-0.5 font-medium text-blue-700">
+                      שטח: {formatFieldWindowDimensions(parseFloat(draft.width) || 0, parseFloat(draft.height) || 0).sqmLabel}
+                    </p>
+                  </div>
                 ) : null}
                 <div>
                   <label className={labelCls}>מיקום בבית</label>
@@ -568,7 +573,7 @@ export default function FieldWindowsView({
                       ) : null}
                     </div>
                     <div>
-                      <label className={labelCls}>חפיפה</label>
+                      <label className={labelCls}>חפיפת כנפיים (להזזה)</label>
                       <select className={inputCls} value={draft.overlap} onChange={(e) => setDraft({ ...draft, overlap: e.target.value })}>
                         {OVERLAP_OPTIONS.map((o) => (
                           <option key={o} value={o}>{o}</option>
@@ -644,24 +649,31 @@ export default function FieldWindowsView({
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px] border-collapse text-right text-sm">
+                  <table className="w-full min-w-[720px] border-collapse text-right text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-100 text-slate-600">
                         <th className="p-2">מיקום</th>
-                        <th className="p-2">מידות</th>
+                        <th className="p-2">רוחב (ס&quot;מ)</th>
+                        <th className="p-2">גובה (ס&quot;מ)</th>
+                        <th className="p-2">מ&quot;ר</th>
                         <th className="p-2">פרופיל</th>
                         <th className="p-2">זכוכית</th>
                         <th className="p-2">מסילות</th>
                         <th className="p-2">הלבשות</th>
+                        <th className="p-2">הערות</th>
                         <th className="p-2">כמות</th>
                         <th className="p-2">פעולות</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((item) => (
+                      {items.map((item) => {
+                        const dims = formatFieldWindowDimensions(item.width, item.height);
+                        return (
                         <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                           <td className="p-2 font-medium">{item.location || "—"}</td>
-                          <td className="p-2">{item.width}×{item.height} <span className="text-xs text-slate-400">({item.sqm} מ&quot;ר)</span></td>
+                          <td className="p-2 font-bold text-slate-800">{item.width}</td>
+                          <td className="p-2 font-bold text-slate-800">{item.height}</td>
+                          <td className="p-2 font-medium text-blue-700">{dims.sqmLabel}</td>
                           <td className="p-2 text-xs">{item.profile}</td>
                           <td className="p-2 text-xs">{item.glass}</td>
                           <td className="p-2 text-xs font-medium text-indigo-800">{item.tracks}</td>
@@ -670,13 +682,15 @@ export default function FieldWindowsView({
                               <span key={line} className="block">{line}</span>
                             ))}
                           </td>
+                          <td className="p-2 text-xs text-amber-900">{item.notes || "—"}</td>
                           <td className="p-2 font-bold text-blue-700">{item.qty}</td>
                           <td className="p-2">
                             <button type="button" onClick={() => editItem(item)} className="ml-1 text-xs font-bold text-blue-600">ערוך</button>
                             <button type="button" onClick={() => setItems((prev) => prev.filter((r) => r.id !== item.id))} className="text-xs font-bold text-red-500">מחק</button>
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -711,6 +725,24 @@ export default function FieldWindowsView({
                       ) : (
                         <span className="mt-1 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">לא מקושר ל-CRM</span>
                       )}
+                      <ul className="mt-3 space-y-1.5 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                        {record.items.map((item) => {
+                          const dims = formatFieldWindowDimensions(item.width, item.height);
+                          return (
+                            <li key={item.id} className="text-xs text-slate-700">
+                              <span className="font-bold text-slate-800">{item.location || "ללא מיקום"}</span>
+                              <span className="mx-1 text-slate-400">·</span>
+                              <span>{dims.inline}</span>
+                              <span className="mx-1 text-slate-400">·</span>
+                              <span className="font-medium text-blue-700">{dims.sqmLabel}</span>
+                              {item.qty > 1 ? <span className="text-slate-500"> · כמות {item.qty}</span> : null}
+                              {item.notes ? (
+                                <p className="mt-0.5 font-medium text-amber-800">הערות: {item.notes}</p>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => loadRecord(record)} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-bold text-white">ערוך מידות</button>

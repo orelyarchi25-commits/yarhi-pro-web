@@ -149,7 +149,14 @@ export type TracksSuggestionState = {
   screenMode: FieldWindowScreenMode;
 };
 
-export const OVERLAP_OPTIONS = ["רגיל", "חופף", "ללא חפיפה"] as const;
+export const OVERLAP_OPTIONS = ["לא רלוונטי", "ימין פנים", "שמאל פנים"] as const;
+
+export function normalizeOverlapValue(value: string | undefined): (typeof OVERLAP_OPTIONS)[number] {
+  if (value && (OVERLAP_OPTIONS as readonly string[]).includes(value)) {
+    return value as (typeof OVERLAP_OPTIONS)[number];
+  }
+  return OVERLAP_OPTIONS[0];
+}
 
 export const LOCK_SIDES = ["ימין", "שמאל", "ללא"] as const;
 
@@ -164,6 +171,16 @@ export function formatFieldWindowDate(d = new Date()) {
 export function calcSqm(width: number, height: number) {
   if (width <= 0 || height <= 0) return "0.00";
   return ((width * height) / 10000).toFixed(2);
+}
+
+/** תצוגת מידות מפורשת לסיכום — רוחב וגובה בנפרד */
+export function formatFieldWindowDimensions(width: number, height: number) {
+  return {
+    widthLabel: `רוחב: ${width} ס"מ`,
+    heightLabel: `גובה: ${height} ס"מ`,
+    sqmLabel: `${calcSqm(width, height)} מ"ר`,
+    inline: `רוחב: ${width} ס"מ · גובה: ${height} ס"מ`,
+  };
 }
 
 export function newFieldWindowItemId() {
