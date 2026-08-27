@@ -554,8 +554,9 @@
             reader.onload = function(e) {
                 const container = document.getElementById('canvas-container');
                 container.style.backgroundImage = `url(${e.target.result})`;
-                container.style.backgroundSize = '100% 100%'; 
+                container.style.backgroundSize = 'cover';
                 container.style.backgroundPosition = 'center';
+                container.style.backgroundRepeat = 'no-repeat';
                 
                 const wallToggle = document.getElementById('input-wall-toggle');
                 if (wallToggle) wallToggle.checked = false;

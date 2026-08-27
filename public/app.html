@@ -266,7 +266,7 @@
                     <span class="text-xl">🪟</span> גדרות
                 </div>
                 <div class="nav-item" onclick="switchView('3d', this)">
-                    <span class="text-xl">🎨</span> הדמיית 3D מורחבת
+                    <span class="text-xl">🎨</span> הדמיית פרגולה
                 </div>
                 <div class="nav-item" onclick="switchView('settings', this)">
                     <span class="text-xl">⚙️</span> הגדרות עסק
@@ -766,7 +766,7 @@
                                 <button onclick="document.getElementById('fence-3d-container').classList.add('hidden')" class="text-red-500 font-bold">סגור X</button>
                             </div>
                         </div>
-                        <div id="fence-sim-wrapper" style="position: relative; width: 100%; height: 500px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; cursor: grab; background: #e2e8f0; background-size: 100% 100%; background-position: center;">
+                        <div id="fence-sim-wrapper" style="position: relative; width: 100%; height: 500px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); border: 1px solid #cbd5e1; cursor: grab; background: #e2e8f0; background-size: cover; background-position: center; background-repeat: no-repeat;">
                             <div id="fence-sim-canvas" style="position: absolute; inset: 0; z-index: 1; outline: none;"></div>
                         </div>
                         <div class="flex gap-4 mt-2 flex-wrap items-center">
@@ -1628,7 +1628,7 @@
                     const fw = fieldWidths.find(f => f.isShort === isShort);
                     if (fw) {
                         const yMid = isShort ? lD_val + (W - lD_val)/2 : W/2;
-                        let qtyText = shadingP === 'mix' ? `${fw.nShadeSets} סטים` : `${fw.nShadeSets} יח'`;
+                        const nSetSketch = fw.nShadeSets || 0; let qtyText = shadingP === 'mix' ? `${nSetSketch} יח' 20/70 + ${nSetSketch * 2} יח' 20/40` : `${nSetSketch} יח'`;
                         innerTextSvg += `
                             <text x="${xCenter}" y="${yMid - fSize*1.1}" text-anchor="middle" font-size="${fSize*0.75}" fill="#475569" font-weight="bold">שבלונה נטו: ${fw.net.toFixed(1)}</text>
                             <text x="${xCenter}" y="${yMid - fSize*0.2}" text-anchor="middle" font-size="${fSize*0.95}" fill="#1d4ed8" font-weight="bold">חיתוך: ${fw.shadeCutLen.toFixed(1)}</text>
@@ -1921,14 +1921,22 @@
                     if (t40 > 0) cuttingHtml += `<tr class="bg-blue-50"><td class="p-2 border font-bold text-blue-800">הצללה 20/40${nameSuffix}</td><td class="p-2 border text-blue-700 text-xs">שלבים</td><td class="p-2 border text-center font-bold">X ${t40}</td><td class="p-2 border text-center highlight">${fw.shadeCutLen.toFixed(1)}</td></tr>`;
                     if (t70 > 0) cuttingHtml += `<tr class="bg-blue-50"><td class="p-2 border font-bold text-blue-800">הצללה 20/70${nameSuffix}</td><td class="p-2 border text-blue-700 text-xs">שלבים</td><td class="p-2 border text-center font-bold">X ${t70}</td><td class="p-2 border text-center highlight">${fw.shadeCutLen.toFixed(1)}</td></tr>`;
                     
-                    const txtSet = shadingP==='mix' ? 'סטים' : "יח'";
+                    const nSet = fw.nShadeSets || 0;
+                    let fieldDetail = '';
+                    if (shadingP === 'mix') {
+                        fieldDetail = `בכל שדה: ${nSet} יח' 20/70, ${nSet * 2} יח' 20/40 (סה"כ ${nSet * 3} שלבים לשדה · משולב 70+40+40)`;
+                    } else if (shadingP === '20x40') {
+                        fieldDetail = `בכל שדה: ${nSet} יח' 20/40 (סה"כ ${nSet} שלבים לשדה)`;
+                    } else {
+                        fieldDetail = `בכל שדה: ${nSet} יח' 20/70 (סה"כ ${nSet} שלבים לשדה)`;
+                    }
                     if (isL) {
                         instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 shadow-sm mt-1 mb-1 w-full">
-                            שדות <strong>${fw.name}</strong> (${fw.count}): שבלונה <span class="text-lg mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך <span class="text-lg mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span> (${fw.nShadeSets} ${txtSet} לשדה).
+                            שדות <strong>${fw.name}</strong> (${fw.count}): שבלונה <span class="text-lg mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך <span class="text-lg mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span><br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">${fieldDetail}.</span>
                         </div>`;
                     } else {
                         instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 shadow-sm mt-1 mb-1 w-full">
-                            מידות הצללה (שדות): שבלונה נטו <span class="text-xl mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך שלבים <span class="text-xl mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span> (${fw.nShadeSets} ${txtSet} לשדה).
+                            מידות הצללה (שדות): שבלונה נטו <span class="text-xl mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך שלבים <span class="text-xl mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span><br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">${fieldDetail}.</span>
                         </div>`;
                     }
                 });
@@ -3754,7 +3762,7 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 f_hasBg = true; f_scene.background = null;
-                const w = document.getElementById('fence-sim-wrapper'); if(w) { w.style.backgroundImage = 'url('+e.target.result+')'; w.style.backgroundSize = '100% 100%'; w.style.backgroundPosition = 'center'; }
+                const w = document.getElementById('fence-sim-wrapper'); if(w) { w.style.backgroundImage = 'url('+e.target.result+')'; w.style.backgroundSize = 'cover'; w.style.backgroundPosition = 'center'; w.style.backgroundRepeat = 'no-repeat'; }
             };
             reader.readAsDataURL(file); event.target.value = '';
         }

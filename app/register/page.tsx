@@ -7,6 +7,8 @@ import { createUserWithEmailAndPassword, deleteUser } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/components/AuthProvider";
 import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from "@/lib/firebase";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import { signInContractorOnSupabase, supabaseAuthErrorMessageHe } from "@/lib/supabase-profile";
 import { TERMS_VERSION } from "@/lib/terms";
 import { firebaseAuthErrorMessageHe, getFirebaseErrorCode } from "@/lib/auth-errors-he";
 import { normalizeLoginEmail } from "@/lib/normalize-email";
@@ -45,8 +47,8 @@ export default function RegisterPage() {
 
   const buildWhatsAppMessage = () => {
     const planLabel =
-      selectedPlan === "monthly" ? "מסלול חודשי — 399 ₪ + מע\"מ"
-      : selectedPlan === "annual" ? "מסלול שנתי — 3,990 ₪ + מע\"מ"
+      selectedPlan === "monthly" ? "מסלול חודשי — 250 ₪ + מע\"מ"
+      : selectedPlan === "annual" ? "מסלול שנתי — 2,400 ₪ + מע\"מ"
       : "מסלול ניסיון — 7 ימים חינם";
     const paymentLabel = paymentMethod === "bank" ? "העברה בנקאית" : "ביט (Bit)";
     const lines = [
@@ -94,31 +96,91 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!isFirebaseConfigured()) {
-      setOkMsg("ההרשמה בוצעה בהצלחה (מצב לוקאלי ללא ענן). מעביר…");
-      login({ acceptedTerms: true });
-      setTimeout(() => router.push("/"), 500);
-      return;
-    }
-
-    const auth = getFirebaseAuth();
-    const db = getFirebaseDb();
-    if (!auth || !db) {
-      setError("הגדרות Firebase חסרות. בדוק קובץ .env.local");
-      return;
-    }
-
     const emailNorm = normalizeLoginEmail(email);
     if (!emailNorm) {
       setError("נא להזין אימייל תקין.");
       return;
     }
 
+    if (!isSupabaseConfigured() && !isFirebaseConfigured()) {
+      setOkMsg("ההרשמה בוצעה בהצלחה (מצב לוקאלי ללא ענן). מעביר…");
+      login({ acceptedTerms: true });
+      setTimeout(() => router.push("/"), 500);
+      return;
+    }
+
     setSubmitting(true);
     try {
       const doRegister = async () => {
-        const cred = await createUserWithEmailAndPassword(auth, emailNorm, password);
         let notifySuffix = "";
+
+        // קבלנים חדשים — הרשמה בשרת (Supabase) + מייל למנהל מיד
+        if (isSupabaseConfigured()) {
+          try {
+            const regRes = await fetch("/api/register-contractor", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email: emailNorm,
+                password,
+                businessName: businessName.trim(),
+                contractorName: contractorName.trim(),
+                phone: phone.trim(),
+                registrationPlan: selectedPlan,
+                paymentMethod,
+                paymentProofFileName: proofFile?.name ?? null,
+              }),
+            });
+            const regData = (await regRes.json().catch(() => ({}))) as {
+              error?: string;
+              message?: string;
+              notify?: { sent?: boolean; message?: string; missing?: string[] };
+            };
+
+            if (!regRes.ok) {
+              if (regData.error === "email_exists") {
+                setError("האימייל כבר רשום. נסה להתחבר או «שכחתי סיסמה».");
+              } else {
+                setError(
+                  supabaseAuthErrorMessageHe(regData.message || regData.error || "שגיאת הרשמה")
+                );
+              }
+              return;
+            }
+
+            // מתחברים לסשן בדפדפן אחרי יצירה בשרת
+            try {
+              await signInContractorOnSupabase(emailNorm, password);
+            } catch (signErr) {
+              console.warn("[Yarhi Pro] התחברות אחרי הרשמה:", signErr);
+            }
+
+            if (regData.notify && regData.notify.sent === false) {
+              const detail = regData.notify.message || (regData.notify.missing || []).join(", ");
+              notifySuffix =
+                " שימו לב: מייל התראה למנהל לא נשלח" + (detail ? ` (${detail})` : "") + ".";
+            }
+
+            setOkMsg(
+              "ההרשמה נשמרה. החשבון ממתין לאישור מנהל — מעביר לדף הבית…" + notifySuffix
+            );
+            router.push("/");
+            return;
+          } catch (sbErr: unknown) {
+            const msg = sbErr instanceof Error ? sbErr.message : String(sbErr);
+            setError(supabaseAuthErrorMessageHe(msg));
+            return;
+          }
+        }
+
+        const auth = getFirebaseAuth();
+        const db = getFirebaseDb();
+        if (!auth || !db) {
+          setError("הגדרות Firebase חסרות. בדוק קובץ .env.local");
+          return;
+        }
+
+        const cred = await createUserWithEmailAndPassword(auth, emailNorm, password);
         try {
           await setDoc(doc(db, "users", cred.user.uid), {
             businessName: businessName.trim(),
@@ -130,7 +192,6 @@ export default function RegisterPage() {
             paymentProofFileName: proofFile?.name ?? null,
             termsAcceptedAt: serverTimestamp(),
             termsVersion: TERMS_VERSION,
-            /** עד שמנהל יאשר ב-Firestore (accountApproved: true) — אין גישה לאפליקציה */
             accountApproved: false,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
@@ -189,16 +250,8 @@ export default function RegisterPage() {
     } catch (err: unknown) {
       if (err instanceof Error && err.message === "REGISTER_TIMEOUT") {
         console.error("[Yarhi Pro] הרשמה timeout");
-        const u = auth.currentUser;
-        if (u) {
-          try {
-            await deleteUser(u);
-          } catch (delErr) {
-            console.error("[Yarhi Pro] אחרי timeout – מחיקת משתמש:", delErr);
-          }
-        }
         setError(
-          "ההרשמה ארכה יותר מדי. בדוק אינטרנט ו-Firestore Rules. אם נוצר חשבון חלקי – נסה «שכחתי סיסמה» אחרי שתיקנת את ההגדרות."
+          "ההרשמה ארכה יותר מדי. בדוק אינטרנט והגדרות ענן, ונסה שוב."
         );
       } else {
         const code = getFirebaseErrorCode(err);
@@ -234,7 +287,7 @@ export default function RegisterPage() {
             }
           >
             <p className="mb-1 text-xs font-semibold tracking-wide text-amber-200">מסלול חודשי</p>
-            <p className="text-2xl font-extrabold text-white">399 ₪ + מע&quot;מ</p>
+            <p className="text-2xl font-extrabold text-white">250 ₪ + מע&quot;מ</p>
             <p className="mt-1 text-sm font-medium text-slate-300">ללא התחייבות שנתית.</p>
             {selectedPlan === "monthly" && (
               <p className="mt-3 text-sm font-semibold text-blue-300">נבחר ✓</p>
@@ -251,8 +304,8 @@ export default function RegisterPage() {
             }
           >
             <p className="mb-1 text-xs font-semibold tracking-wide text-emerald-200">מסלול שנתי משתלם</p>
-            <p className="text-2xl font-extrabold text-white">3,990 ₪ + מע&quot;מ</p>
-            <p className="mt-1 text-sm font-medium text-slate-300">משלמים על 10 חודשים ומקבלים 12 חודשים מלאים.</p>
+            <p className="text-2xl font-extrabold text-white">2,400 ₪ + מע&quot;מ</p>
+            <p className="mt-1 text-sm font-medium text-slate-300">משלמים על פחות מ-10 חודשים ומקבלים שנה מלאה.</p>
             {selectedPlan === "annual" && (
               <p className="mt-3 text-sm font-semibold text-blue-300">נבחר ✓</p>
             )}

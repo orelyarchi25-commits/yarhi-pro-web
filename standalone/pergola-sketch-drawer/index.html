@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>שרטוט קווים — A B C + מידות</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="card no-print">
+        <span class="badge">עצמאי — לא מחובר ל-Yarhi Pro</span>
+        <h1>שרטוט קווים עצמאיים + מידות</h1>
+        <p class="hint">
+          <strong>כל קו בנפרד</strong> — לא מחובר לקודם. לחץ וגרור על הסקיצה ליצירת קו חדש.
+          לכל קו שם: <strong>A, B, C…</strong> ולמטה מזינים את המידה האמיתית.
+        </p>
+      </header>
+
+      <section class="card no-print">
+        <div class="grid-2">
+          <label>שם פרויקט <input id="project-title" type="text" placeholder="מרפסת כהן" /></label>
+          <label>סוג פרגולה <input id="pergola-type" type="text" placeholder="דאבל טי 140/40" /></label>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="row between no-print">
+          <h2>השרטוט</h2>
+          <div class="toolbar">
+            <button type="button" id="btn-undo" class="primary">מחק קו אחרון</button>
+            <button type="button" id="btn-clear" class="danger">נקה הכל</button>
+            <button type="button" id="btn-print" class="accent">הדפס</button>
+          </div>
+        </div>
+        <p class="hint no-print">גרור קו חדש בכל מקום — כל קו עומד לבד. קו מקווקו = עדיין אין מידה בטבלה.</p>
+        <div class="canvas-wrap" id="canvas-wrap">
+          <svg id="sketch-svg" viewBox="0 0 900 520" aria-label="סקיצה"></svg>
+        </div>
+        <div id="status-bar" class="status-bar">גרור על הסקיצה כדי ליצור קו A</div>
+      </section>
+
+      <section class="card no-print">
+        <h2>מידות לפי שם קו</h2>
+        <table class="edges-table">
+          <thead>
+            <tr>
+              <th>קו</th>
+              <th>אורך (ס"מ)</th>
+              <th>קיר</th>
+              <th>עמודים</th>
+              <th>הערה</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="edges-body">
+            <tr><td colspan="6" class="empty-cell">גרור קו ראשון על הסקיצה</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section class="card">
+        <h2>רשימת חיתוכים</h2>
+        <table class="output-table">
+          <thead>
+            <tr><th>קו</th><th>אורך (ס"מ)</th><th>עמודים</th><th>הערות</th></tr>
+          </thead>
+          <tbody id="cutting-body">
+            <tr><td colspan="4" class="empty-cell">הזן מידות בטבלה</td></tr>
+          </tbody>
+        </table>
+        <div class="summary-grid" id="summary-grid"></div>
+      </section>
+
+      <section class="card no-print">
+        <h2>שמירה</h2>
+        <div class="toolbar">
+          <button type="button" id="btn-export" class="primary">העתק JSON</button>
+          <button type="button" id="btn-import">טען JSON</button>
+        </div>
+        <textarea id="json-box" class="json-box" rows="5"></textarea>
+      </section>
+    </main>
+    <script src="./app.js"></script>
+  </body>
+</html>

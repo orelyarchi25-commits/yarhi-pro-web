@@ -1,21 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { Resend } from "resend";
 import { getFirebaseAdminApp } from "@/lib/firebase-admin";
 import {
   canSendRegistrationNotify,
   getNotifyRegistrationMissing,
-  getNotifyResendApiKey,
-  parseAdminNotifyEmails,
+  hasFirebaseAdminForNotify,
 } from "@/lib/notify-registration";
+import { sendAdminRegistrationEmail } from "@/lib/send-registration-email";
 
 function publicBaseUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (explicit) return explicit.replace(/\/$/, "");
   const vercel = process.env.VERCEL_URL?.trim();
   if (vercel) return `https://${vercel.replace(/\/$/, "")}`;
-  return "";
+  return "https://yarhi-pro-web.vercel.app";
 }
 
 async function getUserDocWithRetry(
@@ -52,106 +51,106 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const idToken =
-    typeof body === "object" &&
-    body !== null &&
-    "idToken" in body &&
-    typeof (body as { idToken: unknown }).idToken === "string"
-      ? (body as { idToken: string }).idToken
-      : null;
+  const o = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  const idToken = typeof o.idToken === "string" ? o.idToken : null;
+  const supabaseAccessToken = typeof o.supabaseAccessToken === "string" ? o.supabaseAccessToken : null;
+  const profilePayload =
+    o.profile && typeof o.profile === "object" ? (o.profile as Record<string, unknown>) : null;
 
-  if (!idToken) {
+  if (!idToken && !supabaseAccessToken && !profilePayload) {
     return NextResponse.json({ error: "missing idToken" }, { status: 400 });
   }
 
   try {
-    const app = getFirebaseAdminApp();
-    const decoded = await getAuth(app).verifyIdToken(idToken);
-    const uid = decoded.uid;
+    let uid = "";
+    let businessName = "";
+    let contractorName = "";
+    let phone = "";
+    let email = "";
+    let registrationPlan = "";
+    let paymentMethod = "";
+    let paymentProofFileName = "";
+    let backendNote = "";
 
-    const db = getFirestore(app);
-    const raw = await getUserDocWithRetry(db, uid);
-    const data = (raw ?? {}) as Record<string, unknown>;
+    if (supabaseAccessToken || (profilePayload && !idToken)) {
+      try {
+        const { getSupabaseAdmin } = await import("@/lib/supabase-admin");
+        const admin = getSupabaseAdmin();
+        if (supabaseAccessToken && admin) {
+          const { data: userData, error } = await admin.auth.getUser(supabaseAccessToken);
+          if (!error && userData.user) {
+            uid = userData.user.id;
+            email = userData.user.email ?? "";
+          }
+        }
+      } catch (e) {
+        console.warn("[notify-new-registration] supabase token check skipped:", e);
+      }
+      businessName = String(profilePayload?.businessName ?? "");
+      contractorName = String(profilePayload?.contractorName ?? "");
+      phone = String(profilePayload?.phone ?? "");
+      email = email || String(profilePayload?.email ?? "");
+      registrationPlan = String(profilePayload?.registrationPlan ?? "");
+      paymentMethod = String(profilePayload?.paymentMethod ?? "");
+      paymentProofFileName = String(profilePayload?.paymentProofFileName ?? "");
+      uid = uid || "supabase-new";
+      backendNote = "מקור: Supabase (profiles). לאישור: " + publicBaseUrl() + "/admin/approve";
+    } else {
+      if (!hasFirebaseAdminForNotify()) {
+        return NextResponse.json(
+          {
+            error: "server_misconfigured",
+            message: "חסר FIREBASE_SERVICE_ACCOUNT לאימות הרשמת Firebase",
+          },
+          { status: 503 }
+        );
+      }
+      const app = getFirebaseAdminApp();
+      const decoded = await getAuth(app).verifyIdToken(idToken!);
+      uid = decoded.uid;
 
-    const businessName = String(data.businessName ?? "");
-    const contractorName = String(data.contractorName ?? "");
-    const phone = String(data.phone ?? "");
-    const email = String(data.email ?? decoded.email ?? "");
-    const registrationPlan = String(data.registrationPlan ?? "");
-    const paymentMethod = String(data.paymentMethod ?? "");
-    const paymentProofFileName = String(data.paymentProofFileName ?? "");
+      const db = getFirestore(app);
+      const raw = await getUserDocWithRetry(db, uid);
+      const data = (raw ?? {}) as Record<string, unknown>;
 
-    const subject = `רישום קבלן חדש — ${businessName || email || uid}`;
-
-    const base = publicBaseUrl();
-    const approveLink = base ? `${base}/admin/approve` : "";
-
-    const text = [
-      "נרשם קבלן חדש במערכת Yarhi Pro",
-      "",
-      "סטטוס: ממתין לאישור.",
-      "לאישור + הקצאת תוקף (שבוע / חודש / שנה / תאריך / ללא הגבלה) השתמש בדף המנהל (סיסמה מהשרת):",
-      approveLink || "(הגדר NEXT_PUBLIC_APP_URL ב-Vercel כדי שיופיע קישור ישיר)",
-      "",
-      "או ידנית ב-Firestore: users/" + uid + " — accountApproved=true ו-accessValidUntil (Timestamp) אופציונלי.",
-      "",
-      `שם עסק: ${businessName || "—"}`,
-      `שם קבלן: ${contractorName || "—"}`,
-      `טלפון: ${phone || "—"}`,
-      `אימייל: ${email || "—"}`,
-      `מסלול: ${
-        registrationPlan === "monthly"
-          ? "חודשי"
-          : registrationPlan === "annual"
-            ? "שנתי"
-            : registrationPlan === "trial_7d"
-              ? "ניסיון 7 ימים"
-              : "—"
-      }`,
-      `אמצעי תשלום שדווח: ${paymentMethod === "bank" ? "העברה בנקאית" : paymentMethod === "bit" ? "ביט (Bit)" : "—"}`,
-      `צילום אישור תשלום: ${paymentProofFileName || "לא צורף"}`,
-      `מזהה משתמש (UID): ${uid}`,
-    ].join("\n");
-
-    const html = `<pre dir="rtl" style="font-family:system-ui,sans-serif;white-space:pre-wrap">${text.replace(
-      /</g,
-      "&lt;"
-    )}</pre>`;
-
-    const resendApiKey = getNotifyResendApiKey();
-    if (!resendApiKey) {
-      return NextResponse.json(
-        { ok: true, skipped: true, missing: ["resend"] as ("resend")[] },
-        { status: 200 }
-      );
-    }
-    const resend = new Resend(resendApiKey);
-    const from =
-      process.env.EMAIL_FROM?.trim() || "Yarhi Pro <onboarding@resend.dev>";
-    const to = parseAdminNotifyEmails();
-    if (to.length === 0) {
-      return NextResponse.json(
-        { ok: true, skipped: true, missing: ["admin_email"] as ("admin_email")[] },
-        { status: 200 }
-      );
+      businessName = String(data.businessName ?? "");
+      contractorName = String(data.contractorName ?? "");
+      phone = String(data.phone ?? "");
+      email = String(data.email ?? decoded.email ?? "");
+      registrationPlan = String(data.registrationPlan ?? "");
+      paymentMethod = String(data.paymentMethod ?? "");
+      paymentProofFileName = String(data.paymentProofFileName ?? "");
+      backendNote =
+        "או ידנית ב-Firestore: users/" +
+        uid +
+        " — accountApproved=true. דף אישור: " +
+        publicBaseUrl() +
+        "/admin/approve";
     }
 
-    const { error } = await resend.emails.send({
-      from,
-      to,
-      subject,
-      text,
-      html,
+    const mail = await sendAdminRegistrationEmail({
+      uid,
+      email,
+      businessName,
+      contractorName,
+      phone,
+      registrationPlan,
+      paymentMethod,
+      paymentProofFileName: paymentProofFileName || undefined,
+      backendNote,
     });
 
-    if (error) {
-      console.error("[notify-new-registration] Resend:", error);
-      return NextResponse.json({ error: "email_failed" }, { status: 502 });
+    if (!mail.ok) {
+      if (mail.skipped) {
+        return NextResponse.json({ ok: true, skipped: true, missing: mail.missing }, { status: 200 });
+      }
+      return NextResponse.json({ error: "email_failed", message: mail.message }, { status: 502 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, id: mail.id });
   } catch (e) {
     console.error("[notify-new-registration]", e);
-    return NextResponse.json({ error: "server_error" }, { status: 500 });
+    const msg = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ error: "server_error", message: msg }, { status: 500 });
   }
 }

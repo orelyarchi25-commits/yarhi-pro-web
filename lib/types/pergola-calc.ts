@@ -12,6 +12,7 @@ export type PergolaCalcResult = {
   profit: number;
   profitMargin: number;
   cuttingHtml: string;
+  shadeSlatPlanHtml: string;
   bomHtml: string;
   hardwareHtml: string;
   wasteHtml: string;
@@ -45,6 +46,7 @@ export const EMPTY_PERGOLA_RESULT: PergolaCalcResult = {
   profit: 0,
   profitMargin: 0,
   cuttingHtml: "",
+  shadeSlatPlanHtml: "",
   bomHtml: "",
   hardwareHtml: "",
   wasteHtml: "",

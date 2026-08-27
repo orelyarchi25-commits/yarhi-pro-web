@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>הדמיה — תוכנית חיתוך חכמה לפרגולה</title>
+  <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Assistant, sans-serif; background: #f1f5f9; color: #0f172a; line-height: 1.55; }
+    .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 48px; }
+    .badge { display: inline-block; background: #dbeafe; color: #1d4ed8; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; margin-bottom: 8px; }
+    h1 { margin: 0 0 8px; font-size: 28px; font-weight: 800; }
+    .lead { color: #475569; margin: 0 0 20px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+    .card h2 { margin: 0 0 12px; font-size: 18px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    .stat { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; }
+    .stat .lbl { font-size: 11px; color: #64748b; font-weight: 700; }
+    .stat .val { font-size: 18px; font-weight: 800; margin-top: 4px; }
+    .info { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; font-size: 14px; color: #1e40af; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border: 1px solid #e2e8f0; padding: 10px; text-align: center; }
+    th { background: #f8fafc; font-weight: 700; }
+    tr.active { background: #eff6ff; }
+    tr { cursor: pointer; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .tab, .toggle { border: 1px solid #cbd5e1; background: #fff; border-radius: 8px; padding: 8px 14px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .tab.active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+    .pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
+    .pill.ok { background: #dcfce7; color: #166534; }
+    .pill.warn { background: #fef3c7; color: #92400e; }
+    .bar-block { margin-top: 18px; padding: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; }
+    .bar-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .bar-head strong { font-size: 15px; font-weight: 800; }
+    .bar-track { height: 30px; background: #fee2e2; border: 1px solid #fecaca; border-radius: 6px; overflow: hidden; display: flex; direction: ltr; margin-bottom: 10px; }
+    .seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #fff; min-width: 2px; }
+    .c1 { background: #2563eb; } .c2 { background: #16a34a; } .c3 { background: #7c3aed; } .c4 { background: #ea580c; }
+    .steps { list-style: none; margin: 0; padding: 0; }
+    .steps li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed #e2e8f0; font-size: 14px; align-items: flex-start; }
+    .steps li:last-child { border-bottom: none; }
+    .step-n { flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: #1e40af; color: #fff; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+    .step-n.waste { background: #dc2626; }
+    .step-n.start { background: #64748b; }
+    .step-body { flex: 1; }
+    .step-body strong { color: #0f172a; }
+    .step-sub { font-size: 12px; color: #64748b; margin-top: 2px; }
+    .cut-size { display: inline-block; background: #dbeafe; color: #1d4ed8; font-weight: 800; padding: 1px 8px; border-radius: 6px; }
+    .remain { color: #059669; font-weight: 700; }
+    .waste-txt { color: #dc2626; font-weight: 700; }
+    .success { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 12px; padding: 14px 16px; color: #065f46; font-weight: 600; }
+    .open-hint { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; font-size: 14px; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="open-hint">
+      <strong>הדמיה בלבד — לא מחובר לתוכנה.</strong>
+      פתח: <a href="/cutting-plan-demo.html">לחץ כאן</a> או <code>http://localhost:3000/cutting-plan-demo.html</code>
+    </div>
+
+    <span class="badge">הדמיית כיוון — לא מחובר לקוד הייצור</span>
+    <h1>תוכנית חיתוך חכמה לפרגולה</h1>
+    <p class="lead">לכל מוט — הוראות מפורשות: מאיזה מוט, באיזו מידה לחתוך, ומה נשאר אחרי כל חיתוך.</p>
+
+    <div class="card">
+      <h2>פרויקט לדוגמה — חזית הבית</h2>
+      <div class="stats">
+        <div class="stat"><div class="lbl">פרגולה</div><div class="val">400 × 350</div></div>
+        <div class="stat"><div class="lbl">מסגרת</div><div class="val">140/40 דאבל T</div></div>
+        <div class="stat"><div class="lbl">מחיר</div><div class="val">₪35,518</div></div>
+      </div>
+    </div>
+
+    <div class="info">
+      <strong>דוגמה למה שביקשת:</strong> «קח מוט 7 מ׳ → חתוך 346 → מהשארית חתוך עוד 346 → נשאר נפל 8 ס״מ».
+      כך ייראה לכל מוט ולכל פרופיל.
+    </div>
+
+    <div class="card">
+      <h2>השוואה לפי פרופיל</h2>
+      <table id="cmp-table">
+        <thead>
+          <tr><th>פרופיל</th><th>מוט מומלץ</th><th>נפל (מומלץ)</th><th>נפל (חלופה)</th><th>חיסכון</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="tabs" id="profile-tabs"></div>
+    <button type="button" class="toggle" id="toggle-alt">הצג חלופה (לא אופטימלית)</button>
+    <div class="card" id="plan-card"></div>
+
+    <div class="success">
+      זו רק הדמיה. כשתאשר את הפורמט — נחבר את זה לתוכנה בשלב נפרד.
+    </div>
+  </div>
+
+  <script>
+    const PROFILES = {
+      frame140: {
+        title: "מסגרת 140/40 דאבל T",
+        recM: 6,
+        reason: "חתיכות בודדות 353–403 ס״מ — עדיף מוט 6 מ׳ (פחות נפל מ-7 מ׳ לכל חתיכה).",
+        recWaste: 1.94, altWaste: 2.78, save: "0.84 מ׳", rec: "6 מ׳",
+        bars: [
+          { stock: 600, pieces: [{ label: "קיר אחורי", cm: 403, cls: "c1" }] },
+          { stock: 600, pieces: [{ label: "חזית", cm: 403, cls: "c1" }] },
+          { stock: 600, pieces: [{ label: "צד ימין", cm: 353, cls: "c2" }] },
+          { stock: 600, pieces: [{ label: "צד שמאל", cm: 353, cls: "c2" }] },
+        ],
+        altBars: [
+          { stock: 700, pieces: [{ label: "קיר אחורי", cm: 403, cls: "c1" }] },
+          { stock: 700, pieces: [{ label: "חזית", cm: 403, cls: "c1" }] },
+          { stock: 700, pieces: [{ label: "צד ימין", cm: 353, cls: "c2" }] },
+          { stock: 700, pieces: [{ label: "צד שמאל", cm: 353, cls: "c2" }] },
+        ],
+      },
+      shade2040: {
+        title: "הצללה 20/40",
+        recM: 7,
+        reason: "346 ס״מ × 2 על אותו מוט 7 מ׳ — חיתוך שני מהשארית, נפל קטן.",
+        recWaste: 0.08, altWaste: 3.04, save: "2.96 מ׳", rec: "7 מ׳",
+        bars: [
+          { stock: 700, pieces: [{ label: "שלב שדה 1", cm: 346, cls: "c1" }, { label: "שלב שדה 2", cm: 346, cls: "c2" }] },
+          { stock: 700, pieces: [{ label: "שלב שדה 3", cm: 346, cls: "c1" }, { label: "שלב שדה 4", cm: 346, cls: "c2" }] },
+          { stock: 700, pieces: [{ label: "שלב שדה 5", cm: 346, cls: "c1" }, { label: "שלב שדה 6", cm: 346, cls: "c2" }] },
+        ],
+        altBars: [
+          { stock: 600, pieces: [{ label: "שלב", cm: 346, cls: "c1" }] },
+          { stock: 600, pieces: [{ label: "שלב", cm: 346, cls: "c1" }] },
+          { stock: 600, pieces: [{ label: "שלב", cm: 346, cls: "c1" }] },
+        ],
+      },
+      divider120: {
+        title: "חציץ 120 חלק",
+        recM: 6,
+        reason: "חיתוך בודד 347 ס״מ — מוט 6 מ׳ מספיק.",
+        recWaste: 0.76, altWaste: 1.06, save: "0.30 מ׳", rec: "6 מ׳",
+        bars: [
+          { stock: 600, pieces: [{ label: "חציץ 1", cm: 347, cls: "c3" }] },
+          { stock: 600, pieces: [{ label: "חציץ 2", cm: 347, cls: "c3" }] },
+          { stock: 600, pieces: [{ label: "חציץ 3", cm: 347, cls: "c3" }] },
+        ],
+        altBars: [
+          { stock: 700, pieces: [{ label: "חציץ 1", cm: 347, cls: "c3" }] },
+          { stock: 700, pieces: [{ label: "חציץ 2", cm: 347, cls: "c3" }] },
+          { stock: 700, pieces: [{ label: "חציץ 3", cm: 347, cls: "c3" }] },
+        ],
+      },
+    };
+
+    let active = "shade2040";
+    let showAlt = false;
+
+    function buildSteps(bar) {
+      const stockM = bar.stock / 100;
+      const steps = [];
+      let remain = bar.stock;
+      let stepNum = 1;
+
+      steps.push({
+        type: "start",
+        html: '<strong>קח מוט מלא ' + stockM + ' מ׳</strong> (' + bar.stock + ' ס״מ)',
+        sub: "זה המוט שיוצא מהמחסן — לפני חיתוך",
+      });
+
+      bar.pieces.forEach(function (p, idx) {
+        const before = remain;
+        remain -= p.cm;
+        const fromRemain = idx > 0;
+        steps.push({
+          type: "cut",
+          html:
+            (fromRemain
+              ? '<strong>מהשארית (' + before + ' ס״מ) — חתוך </strong>'
+              : "<strong>חתוך </strong>") +
+            '<span class="cut-size">' +
+            p.cm +
+            ' ס״מ</span> → <strong>' +
+            p.label +
+            "</strong>",
+          sub: 'נשאר במוט: <span class="remain">' + remain + " ס״מ</span>",
+        });
+        stepNum++;
+      });
+
+      if (remain > 0) {
+        steps.push({
+          type: "waste",
+          html: '<strong>נפל / שארית סופית:</strong> <span class="waste-txt">' + remain + " ס״מ</span>",
+          sub: remain >= 50 ? "אפשר לשמור לתיקון קטן" : "שארית קטנה — לפח או למחזור",
+        });
+      }
+
+      return steps;
+    }
+
+    function renderBars(bars) {
+      return bars
+        .map(function (bar, i) {
+          const used = bar.pieces.reduce(function (s, p) {
+            return s + p.cm;
+          }, 0);
+          const waste = bar.stock - used;
+          const segs = bar.pieces
+            .map(function (p) {
+              return '<div class="seg ' + p.cls + '" style="width:' + (p.cm / bar.stock) * 100 + '%">' + p.cm + "</div>";
+            })
+            .join("");
+          const steps = buildSteps(bar)
+            .map(function (s, si) {
+              const cls = s.type === "waste" ? "waste" : s.type === "start" ? "start" : "";
+              return (
+                "<li>" +
+                '<span class="step-n ' +
+                cls +
+                '">' +
+                (si + 1) +
+                "</span>" +
+                '<div class="step-body"><div>' +
+                s.html +
+                "</div>" +
+                (s.sub ? '<div class="step-sub">' + s.sub + "</div>" : "") +
+                "</div></li>"
+              );
+            })
+            .join("");
+
+          return (
+            '<div class="bar-block">' +
+            '<div class="bar-head"><strong>מוט ' +
+            (i + 1) +
+            " — " +
+            bar.stock / 100 +
+            " מ׳</strong><span>נפל סופי: <strong class=" +
+            (waste > 100 ? "waste-txt" : "remain") +
+            '">' +
+            waste +
+            " ס״מ</strong></span></div>" +
+            '<div class="bar-track">' +
+            segs +
+            (waste > 0 ? '<div class="seg" style="width:' + (waste / bar.stock) * 100 + '%;background:#fecaca;color:#991b1b;font-size:9px">נפל</div>' : "") +
+            "</div>" +
+            '<ol class="steps">' +
+            steps +
+            "</ol></div>"
+          );
+        })
+        .join("");
+    }
+
+    function totalWaste(bars) {
+      return bars.reduce(function (sum, bar) {
+        const used = bar.pieces.reduce(function (s, p) {
+          return s + p.cm;
+        }, 0);
+        return sum + (bar.stock - used);
+      }, 0) / 100;
+    }
+
+    function render() {
+      const p = PROFILES[active];
+      const bars = showAlt ? p.altBars || p.bars : p.bars;
+      const waste = totalWaste(bars);
+      const pill = showAlt
+        ? '<span class="pill warn">חלופה: מוט ' + (active === "shade2040" ? 6 : 7) + " מ׳</span>"
+        : '<span class="pill ok">מומלץ: מוט ' + p.recM + " מ׳</span>";
+
+      document.getElementById("plan-card").innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px">' +
+        '<h2 style="margin:0">' +
+        p.title +
+        "</h2>" +
+        pill +
+        "</div>" +
+        '<p style="color:#475569;margin:0 0 12px">' +
+        p.reason +
+        "</p>" +
+        '<div class="stats" style="margin-bottom:14px">' +
+        '<div class="stat"><div class="lbl">מוטות נדרשים</div><div class="val">' +
+        bars.length +
+        "</div></div>" +
+        '<div class="stat"><div class="lbl">נפל כולל</div><div class="val">' +
+        waste.toFixed(2) +
+        " מ׳</div></div></div>" +
+        renderBars(bars);
+
+      document.getElementById("toggle-alt").textContent = showAlt ? "הצג תוכנית מומלצת" : "הצג חלופה (לא אופטימלית)";
+
+      const tbody = document.querySelector("#cmp-table tbody");
+      tbody.innerHTML = Object.keys(PROFILES)
+        .map(function (key) {
+          const row = PROFILES[key];
+          return (
+            '<tr class="' +
+            (key === active ? "active" : "") +
+            '" data-key="' +
+            key +
+            '"><td style="text-align:right;font-weight:700">' +
+            row.title +
+            "</td><td>" +
+            row.rec +
+            "</td><td>" +
+            row.recWaste.toFixed(2) +
+            " מ׳</td><td>" +
+            row.altWaste.toFixed(2) +
+            " מ׳</td><td>" +
+            row.save +
+            "</td></tr>"
+          );
+        })
+        .join("");
+
+      tbody.querySelectorAll("tr").forEach(function (tr) {
+        tr.onclick = function () {
+          active = tr.dataset.key;
+          render();
+        };
+      });
+
+      document.getElementById("profile-tabs").innerHTML = Object.keys(PROFILES)
+        .map(function (key) {
+          return (
+            '<button type="button" class="tab ' +
+            (key === active ? "active" : "") +
+            '" data-key="' +
+            key +
+            '">' +
+            PROFILES[key].title +
+            "</button>"
+          );
+        })
+        .join("");
+
+      document.querySelectorAll(".tab").forEach(function (btn) {
+        btn.onclick = function () {
+          active = btn.dataset.key;
+          render();
+        };
+      });
+    }
+
+    document.getElementById("toggle-alt").onclick = function () {
+      showAlt = !showAlt;
+      render();
+    };
+    render();
+  </script>
+</body>
+</html>

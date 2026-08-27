@@ -18,6 +18,12 @@
         position: absolute;
         inset: 0;
       }
+      #canvas-container canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+      }
       .hint {
         position: absolute;
         top: 12px;
@@ -35,7 +41,7 @@
       .hint b { font-weight: 800; }
       .record-btn {
         position: absolute;
-        top: 12px;
+        top: 52px;
         right: 12px;
         z-index: 20;
         border: 1px solid #be123c;
@@ -52,20 +58,124 @@
         border-color: #047857;
         background: #059669;
       }
+      body.view-only .hint,
+      body.view-only .record-btn,
+      body.view-only .env-bar { display: none !important; }
+      body.view-only #view-orbit-hint { display: block; }
+      #view-orbit-hint {
+        display: none;
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 30;
+        pointer-events: none;
+        background: rgba(15, 23, 42, 0.82);
+        color: #fff;
+        font-weight: 800;
+        font-size: 13px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        white-space: nowrap;
+        font-family: 'Assistant', sans-serif;
+      }
+      .env-bar {
+        position: absolute;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 20;
+        display: flex;
+        gap: 8px;
+        direction: rtl;
+      }
+      .env-chip {
+        border: 1px solid #e2e8f0;
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 14px;
+        padding: 8px 14px;
+        font-size: 12px;
+        font-weight: 800;
+        color: #334155;
+        cursor: pointer;
+        font-family: 'Assistant', sans-serif;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+        line-height: 1.25;
+        min-width: 118px;
+        text-align: center;
+      }
+      .env-chip small {
+        display: block;
+        font-size: 10px;
+        font-weight: 700;
+        color: #64748b;
+        margin-top: 2px;
+      }
+      .env-chip.active {
+        background: #1e3a5f;
+        border-color: #1e3a5f;
+        color: #fff;
+      }
+      .env-chip.active small { color: #bfdbfe; }
     </style>
   </head>
   <body>
     <div id="canvas-container"></div>
+    <div id="view-orbit-hint">גרור לסיבוב · צביטה לזום</div>
     <button id="btn-record-fence" class="record-btn">⏺️ התחל הקלטה</button>
+    <div class="env-bar" id="env-bar">
+      <button type="button" class="env-chip active" data-env="villa">🏡 וילה<small>דשא פתוח</small></button>
+      <button type="button" class="env-chip" data-env="garden">🌿 דירת גן<small>חצר אינטימית</small></button>
+    </div>
     <div class="hint">
       <b>הדמיית גדר</b><br />
-      מוצגת לפי העמודים והשלבים (ללא “מסגרת”) + מרווח ספייר.
+      מקטע = לוחצים שמאל או ימין. שער רק אם בחרתם בטופס. לחיצה על השער פותחת וסוגרת.
     </div>
     <script>
       let scene, camera, renderer, controls;
       let fenceGroup = null;
+      let envSceneryGroup = null;
+      let floorMesh = null;
+      let currentEnv = "villa";
+      let envYardL = 10;
+      let envYardW = 5;
+      let envGateX = 0;
+      /** מטרים של חצר קדמית — הגדר ממול הבית, לא צמודה לקיר */
+      const FRONT_YARD_M = 6.8;
+      const GATE_M = 1.5;
+      let pendingFenceConfig = null;
+      let lastFenceConfig = null;
       let fenceRecorder = null;
       let fenceRecChunks = [];
+      let fenceUserOrbited = false;
+      let gateRoot = null;
+      let gateLeftPivot = null;
+      let gateRightPivot = null;
+      let gateOpen = false;
+      let gateAngle = 0;
+      const GATE_OPEN_ANGLE = 1.52;
+      const gateRaycaster = new THREE.Raycaster();
+      const gatePointer = new THREE.Vector2();
+      let gatePtrDown = null;
+
+      function fitFenceRenderer() {
+        if (!renderer || !camera) return;
+        const container = document.getElementById("canvas-container");
+        const w = (container && container.clientWidth) || window.innerWidth;
+        const h = (container && container.clientHeight) || window.innerHeight;
+        if (w < 2 || h < 2) return;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      }
+
+      function notifyFenceReady() {
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: "simReady", k: "f" }, "*");
+          }
+        } catch (e) {}
+      }
 
       const CM_TO_M = 0.01;
 
@@ -89,6 +199,148 @@
           while (fenceGroup.children.length) fenceGroup.remove(fenceGroup.children[0]);
           fenceGroup = null;
         }
+        gateRoot = null;
+        gateLeftPivot = null;
+        gateRightPivot = null;
+      }
+
+      function applyGateAngle() {
+        if (gateLeftPivot) gateLeftPivot.rotation.y = gateAngle;
+        if (gateRightPivot) gateRightPivot.rotation.y = -gateAngle;
+      }
+
+      function toggleGate() {
+        if (!gateRoot) return;
+        gateOpen = !gateOpen;
+      }
+
+      function markGateMesh(mesh) {
+        mesh.userData.gate = true;
+        return mesh;
+      }
+
+      function buildGateHandle(parent, x, y, towardZ) {
+        const metal = new THREE.MeshStandardMaterial({
+          color: 0x4b5563,
+          metalness: 0.82,
+          roughness: 0.22,
+        });
+        const plate = markGateMesh(new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.24, 0.012), metal));
+        plate.position.set(x, y, towardZ * 0.048);
+        parent.add(plate);
+        const neck = markGateMesh(new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.014, 0.038), metal));
+        neck.position.set(x, y + 0.07, towardZ * 0.068);
+        parent.add(neck);
+        const grip = markGateMesh(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.17, 12), metal));
+        grip.position.set(x, y - 0.01, towardZ * 0.088);
+        parent.add(grip);
+        const knob = markGateMesh(new THREE.Mesh(new THREE.SphereGeometry(0.02, 14, 12), metal));
+        knob.position.set(x, y - 0.1, towardZ * 0.088);
+        parent.add(knob);
+        const ring = markGateMesh(new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.006, 8, 18), metal));
+        ring.rotation.y = Math.PI / 2;
+        ring.position.set(x, y + 0.055, towardZ * 0.07);
+        parent.add(ring);
+      }
+
+      function buildEntranceGate(opts) {
+        if (!fenceGroup || currentEnv === "garden") return;
+        const Hcm = Math.max(80, Number(opts.Hcm || 0));
+        const Hm = Hcm * CM_TO_M;
+        const gapCm = Number(opts.gapCm || 0);
+        const patternCm = getSlatPattern(opts.slatProfile);
+        const frameHex = opts.frameHex || "#555555";
+        const slatHex = opts.slatHex || "#ffffff";
+        const spacerHex = opts.spacerHex || frameHex;
+        const g = GATE_M / 2;
+        const hingeInset = postWm / 2 + 0.012;
+        const hingeL = -g + hingeInset;
+        const hingeR = g - hingeInset;
+        const opening = Math.max(0.4, hingeR - hingeL);
+        const midGap = 0.018;
+        const leafW = (opening - midGap) / 2;
+        const stile = 0.042;
+        const rail = 0.038;
+        const leafDepth = postDepth * 0.92;
+        const leaves = opts.leaves === "single" ? "single" : "double";
+
+        gateRoot = new THREE.Group();
+        gateRoot.position.set(0, 0, 0.01);
+        fenceGroup.add(gateRoot);
+
+        function fillLeaf(pivot, sign, width) {
+          const w = Math.max(0.2, width);
+          function addMesh(mesh, x, y, z) {
+            markGateMesh(mesh);
+            mesh.position.set(x, y, z);
+            pivot.add(mesh);
+          }
+          addMesh(createBox(stile, Hm, leafDepth, frameHex), sign * (stile / 2), Hm / 2, 0);
+          addMesh(createBox(stile, Hm, leafDepth, frameHex), sign * (w - stile / 2), Hm / 2, 0);
+          const railW = Math.max(0.02, w - stile);
+          addMesh(createBox(railW, rail, leafDepth, frameHex), sign * (w / 2), rail / 2 + 0.018, 0);
+          addMesh(createBox(railW, rail, leafDepth, frameHex), sign * (w / 2), Hm - rail / 2, 0);
+
+          const innerW = Math.max(0.02, w - stile * 2 - 0.004);
+          const netHcm = Math.max(0, Hcm - rail / CM_TO_M * 2 - 1.5);
+          const bottomOffsetCm = (rail / CM_TO_M) + 1.1;
+          let cumulativeCm = 0;
+          let stepIndex = 0;
+          const steps = [];
+          while (true) {
+            const tCm = patternCm[stepIndex % patternCm.length];
+            if (cumulativeCm + tCm > netHcm) break;
+            const centerCm = bottomOffsetCm + cumulativeCm + tCm / 2;
+            steps.push({ tCm, centerCm });
+            cumulativeCm += tCm + Math.max(0, gapCm);
+            stepIndex++;
+          }
+          const midX = sign * (w / 2);
+          steps.forEach(function (st) {
+            const h = st.tCm * CM_TO_M;
+            const y = st.centerCm * CM_TO_M;
+            addMesh(createBox(innerW, h, stepDepth, slatHex, 1), midX, y, 0);
+          });
+          if (steps.length >= 2 && gapCm > 0) {
+            const spacerH = Math.max(0.005, gapCm * CM_TO_M);
+            for (let i = 0; i < steps.length - 1; i++) {
+              const sy = ((steps[i].centerCm + steps[i + 1].centerCm) / 2) * CM_TO_M;
+              addMesh(createBox(0.018, spacerH, 0.03, spacerHex, 1), sign * (stile + 0.012), sy, 0);
+              addMesh(createBox(0.018, spacerH, 0.03, spacerHex, 1), sign * (w - stile - 0.012), sy, 0);
+            }
+          }
+          const hinge = markGateMesh(new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.012, 0.08, 10),
+            new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.7, roughness: 0.3 })
+          ));
+          hinge.position.set(0, Hm * 0.22, 0);
+          pivot.add(hinge);
+          const hinge2 = hinge.clone();
+          hinge2.position.set(0, Hm * 0.78, 0);
+          markGateMesh(hinge2);
+          pivot.add(hinge2);
+          buildGateHandle(pivot, sign * (w - stile * 0.45), Math.min(1.02, Hm * 0.55), 1);
+        }
+
+        if (leaves === "single") {
+          gateLeftPivot = new THREE.Group();
+          gateLeftPivot.position.set(hingeL, 0, 0);
+          gateRoot.add(gateLeftPivot);
+          fillLeaf(gateLeftPivot, 1, opening - 0.012);
+          gateRightPivot = null;
+        } else {
+          gateLeftPivot = new THREE.Group();
+          gateLeftPivot.position.set(hingeL, 0, 0);
+          gateRoot.add(gateLeftPivot);
+          fillLeaf(gateLeftPivot, 1, leafW);
+
+          gateRightPivot = new THREE.Group();
+          gateRightPivot.position.set(hingeR, 0, 0);
+          gateRoot.add(gateRightPivot);
+          fillLeaf(gateRightPivot, -1, leafW);
+        }
+
+        applyGateAngle();
       }
 
       function getSlatPattern(slatProfile) {
@@ -128,17 +380,289 @@
 
       function createBox(w, h, d, colorHex, opacity = 1) {
         const geom = new THREE.BoxGeometry(w, h, d);
+        const hex = hexToInt(colorHex);
+        const cr = (hex >> 16) & 255, cg = (hex >> 8) & 255, cb = hex & 255;
+        const isNearWhite = (cr * 0.299 + cg * 0.587 + cb * 0.114) > 220;
         const mat = new THREE.MeshStandardMaterial({
-          color: hexToInt(colorHex),
+          color: isNearWhite ? 0xe6eaef : hex,
           transparent: opacity < 1,
           opacity: opacity,
-          roughness: 0.6,
-          metalness: 0.05,
+          roughness: isNearWhite ? 0.38 : 0.45,
+          metalness: isNearWhite ? 0.28 : 0.28,
         });
         return new THREE.Mesh(geom, mat);
       }
 
+      function envBox(w, h, d, colorInt) {
+        const mat = new THREE.MeshStandardMaterial({
+          color: colorInt,
+          roughness: 0.78,
+          metalness: 0.04,
+        });
+        return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      }
+
+      function clearGroup(group) {
+        if (!group) return;
+        while (group.children.length) group.remove(group.children[0]);
+      }
+
+      function addBuildingWindows(parent, w, h, d, x, y, z, faceSign, winColor) {
+        const cols = Math.max(2, Math.round(w / 1.6));
+        const rows = Math.max(3, Math.round(h / 2.4));
+        const winW = Math.min(0.72, (w / (cols + 1)) * 0.58);
+        const winH = 0.92;
+        const mat = new THREE.MeshStandardMaterial({
+          color: winColor,
+          emissive: winColor,
+          emissiveIntensity: 0.12,
+          roughness: 0.15,
+          metalness: 0.15,
+        });
+        const face = faceSign == null ? 1 : faceSign;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const wx = x - w / 2 + (c + 1) * (w / (cols + 1));
+            const wy = y - h / 2 + 1.35 + r * ((h - 2.0) / Math.max(1, rows - 0.2));
+            const pane = new THREE.Mesh(new THREE.BoxGeometry(winW, winH, 0.05), mat);
+            pane.position.set(wx, wy, z + face * (d / 2 + 0.03));
+            parent.add(pane);
+          }
+        }
+      }
+
+      function addSideWindows(parent, w, h, d, x, y, z, xSign, winColor) {
+        const cols = Math.max(2, Math.round(d / 1.7));
+        const rows = Math.max(3, Math.round(h / 2.4));
+        const winW = Math.min(0.7, (d / (cols + 1)) * 0.5);
+        const winH = 0.9;
+        const mat = new THREE.MeshStandardMaterial({
+          color: winColor,
+          emissive: winColor,
+          emissiveIntensity: 0.12,
+          roughness: 0.15,
+          metalness: 0.15,
+        });
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const wz = z - d / 2 + (c + 1) * (d / (cols + 1));
+            const wy = y - h / 2 + 1.35 + r * ((h - 2.0) / Math.max(1, rows - 0.2));
+            const pane = new THREE.Mesh(new THREE.BoxGeometry(0.05, winH, winW), mat);
+            pane.position.set(x + xSign * (w / 2 + 0.03), wy, wz);
+            parent.add(pane);
+          }
+        }
+      }
+
+      function addPlanter(parent, x, z) {
+        const pot = envBox(0.52, 0.28, 0.32, 0xc4784a);
+        pot.position.set(x, 0.16, z);
+        parent.add(pot);
+        const leaf = envBox(0.46, 0.34, 0.26, 0x3d8c45);
+        leaf.position.set(x, 0.44, z);
+        parent.add(leaf);
+        const leaf2 = envBox(0.22, 0.22, 0.18, 0x2f6b36);
+        leaf2.position.set(x + 0.08, 0.58, z);
+        parent.add(leaf2);
+      }
+
+      function syncEnvChips() {
+        const chips = document.querySelectorAll(".env-chip");
+        for (let i = 0; i < chips.length; i++) {
+          chips[i].classList.toggle("active", chips[i].getAttribute("data-env") === currentEnv);
+        }
+      }
+
+      function applyEnvironmentLook() {
+        const grass = currentEnv === "garden" ? 0x5c7a32 : 0x4d7c0f;
+        const bg = currentEnv === "garden" ? 0xf3ebe0 : 0xf1f5f9;
+        if (scene) {
+          scene.background = new THREE.Color(bg);
+          if (renderer) renderer.setClearColor(bg, 1);
+        }
+        if (floorMesh && floorMesh.material && floorMesh.material.color) {
+          floorMesh.material.color.setHex(grass);
+          floorMesh.material.roughness = 0.95;
+        }
+      }
+
+      function rebuildEnvScenery() {
+        if (!envSceneryGroup) return;
+        clearGroup(envSceneryGroup);
+        const L = Math.max(8, envYardL);
+        const fenceDepth = Math.max(0.25, envYardW);
+        const hasSide = fenceDepth > 1.2;
+        const fenceFrontZ = fenceDepth / 2;
+        const houseFrontZ = hasSide ? -fenceDepth / 2 - 1.15 : -FRONT_YARD_M;
+        const yardLen = Math.max(2.2, fenceFrontZ - houseFrontZ);
+
+        if (currentEnv === "garden") {
+          const homeH = 16.5;
+          const homeD = 8.2;
+          const homeW = Math.max(L + 3.6, 9);
+          const homeZ = houseFrontZ - homeD / 2;
+          const home = envBox(homeW, homeH, homeD, 0xf3e2cc);
+          home.position.set(0, homeH / 2, homeZ);
+          envSceneryGroup.add(home);
+          addBuildingWindows(envSceneryGroup, homeW - 0.8, homeH - 3.8, homeD, 0, homeH / 2 + 1.6, homeZ, 1, 0x8ecae6);
+          addSideWindows(envSceneryGroup, homeW, homeH - 3.2, homeD, 0, homeH / 2 + 1.2, homeZ, 1, 0x8ecae6);
+          addSideWindows(envSceneryGroup, homeW, homeH - 3.2, homeD, 0, homeH / 2 + 1.2, homeZ, -1, 0x8ecae6);
+          const gDoor = envBox(1.05, 2.15, 0.08, 0x6b3f24);
+          gDoor.position.set(currentEnv === "garden" ? 0 : envGateX, 1.08, houseFrontZ + 0.05);
+          envSceneryGroup.add(gDoor);
+          if (currentEnv !== "garden") {
+            const gPath = envBox(1.15, 0.04, yardLen);
+            gPath.position.set(envGateX, 0.02, houseFrontZ + yardLen / 2);
+            envSceneryGroup.add(gPath);
+          }
+
+          const hedge = function (w, h, d, x, z) {
+            const m = envBox(w, h, d, 0x3f6b32);
+            m.position.set(x, h / 2, z);
+            envSceneryGroup.add(m);
+          };
+          hedge(0.38, 1.05, yardLen + 1.2, -L / 2 - 2.4, houseFrontZ + yardLen / 2);
+          hedge(0.38, 1.05, yardLen + 1.2, L / 2 + 2.4, houseFrontZ + yardLen / 2);
+          addPlanter(envSceneryGroup, -L / 2 - 1.35, fenceFrontZ - 0.35);
+          addPlanter(envSceneryGroup, L / 2 + 1.35, fenceFrontZ - 0.35);
+
+          const neighbors = [
+            { x: -13.2, z: -1.5, w: 6.0, d: 5.2, h: 11, c: 0xe8c9a8, win: 0x7eb8d4 },
+            { x: -12.5, z: -9.8, w: 5.6, d: 5.0, h: 14, c: 0xd9a066, win: 0xb8e0f0 },
+            { x: -6.5, z: -15.5, w: 6.4, d: 5.4, h: 12, c: 0xf7e6d0, win: 0x70b8d4 },
+            { x: 5.8, z: -15.0, w: 5.8, d: 5.0, h: 13, c: 0xc45c3e, win: 0xa8d8ea },
+            { x: 14.2, z: -8.5, w: 5.4, d: 4.8, h: 10, c: 0xead9c4, win: 0x9ad1e8 },
+            { x: 15.5, z: -1.2, w: 5.2, d: 4.6, h: 9, c: 0x88b089, win: 0xe8f8d8 },
+          ];
+          neighbors.forEach(function (b) {
+            const cy = b.h / 2;
+            const mesh = envBox(b.w, b.h, b.d, b.c);
+            mesh.position.set(b.x, cy, b.z);
+            envSceneryGroup.add(mesh);
+            addBuildingWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, 1, b.win);
+            if (b.x < -6) addSideWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, 1, b.win);
+            if (b.x > 6) addSideWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, -1, b.win);
+          });
+          return;
+        }
+
+        const vW = Math.max(L + 5.5, 11);
+        const vH = 6.4;
+        const vD = 7.4;
+        const vZ = houseFrontZ - vD / 2;
+        const house = envBox(vW, vH, vD, 0xf6ead6);
+        house.position.set(0, vH / 2, vZ);
+        envSceneryGroup.add(house);
+        const wing = envBox(3.6, 4.4, 5.2, 0xf0e0c8);
+        wing.position.set(vW / 2 + 1.1, 2.2, vZ - 0.6);
+        envSceneryGroup.add(wing);
+        const roofCol = 0xc45c3e;
+        const roofA = envBox(vW + 0.7, 0.16, vD * 0.78, roofCol);
+        roofA.rotation.x = 0.42;
+        roofA.position.set(0, vH + 0.85, vZ - vD * 0.16);
+        envSceneryGroup.add(roofA);
+        const roofB = envBox(vW + 0.7, 0.16, vD * 0.78, roofCol);
+        roofB.rotation.x = -0.42;
+        roofB.position.set(0, vH + 0.85, vZ + vD * 0.16);
+        envSceneryGroup.add(roofB);
+        const roofWing = envBox(4.2, 0.16, 4.4, roofCol);
+        roofWing.rotation.x = -0.38;
+        roofWing.position.set(vW / 2 + 1.1, 4.9, vZ - 0.3);
+        envSceneryGroup.add(roofWing);
+        const chim = envBox(0.42, 1.35, 0.42, 0xddd0c0);
+        chim.position.set(-vW * 0.22, vH + 1.55, vZ);
+        envSceneryGroup.add(chim);
+        addBuildingWindows(envSceneryGroup, vW - 1.2, 2.4, vD, 0, 4.55, vZ, 1, 0x9ad4ea);
+        addSideWindows(envSceneryGroup, vW, vH - 1.5, vD, 0, vH / 2 + 0.4, vZ, 1, 0x9ad4ea);
+        addSideWindows(envSceneryGroup, vW, vH - 1.5, vD, 0, vH / 2 + 0.4, vZ, -1, 0x9ad4ea);
+        const door = envBox(1.05, 2.15, 0.08, 0x6b3f24);
+        door.position.set(envGateX, 1.08, houseFrontZ + 0.05);
+        envSceneryGroup.add(door);
+        const path = envBox(1.2, 0.04, yardLen);
+        path.position.set(envGateX, 0.02, houseFrontZ + yardLen / 2);
+        envSceneryGroup.add(path);
+
+        const poolX = -L / 2 - 5.1;
+        const poolZ = Math.max(0.2, fenceFrontZ * 0.15);
+        const deck = envBox(6.6, 0.07, 4.4, 0xe6dccf);
+        deck.position.set(poolX, 0.02, poolZ);
+        envSceneryGroup.add(deck);
+        const water = new THREE.Mesh(
+          new THREE.BoxGeometry(4.9, 0.08, 2.85),
+          new THREE.MeshStandardMaterial({
+            color: 0x2f9fd4,
+            roughness: 0.06,
+            metalness: 0.35,
+            transparent: true,
+            opacity: 0.82,
+          })
+        );
+        water.position.set(poolX, 0.055, poolZ);
+        envSceneryGroup.add(water);
+        const copA = envBox(5.3, 0.1, 0.22, 0xd9d0c4);
+        copA.position.set(poolX, 0.08, poolZ + 1.52);
+        envSceneryGroup.add(copA);
+        const copB = envBox(5.3, 0.1, 0.22, 0xd9d0c4);
+        copB.position.set(poolX, 0.08, poolZ - 1.52);
+        envSceneryGroup.add(copB);
+        const copC = envBox(0.22, 0.1, 3.05, 0xd9d0c4);
+        copC.position.set(poolX - 2.55, 0.08, poolZ);
+        envSceneryGroup.add(copC);
+        const copD = envBox(0.22, 0.1, 3.05, 0xd9d0c4);
+        copD.position.set(poolX + 2.55, 0.08, poolZ);
+        envSceneryGroup.add(copD);
+        addPlanter(envSceneryGroup, poolX - 2.7, poolZ + 1.85);
+        addPlanter(envSceneryGroup, poolX + 2.7, poolZ + 1.85);
+        const hedgeV = envBox(0.35, 0.85, 3.2, 0x3f6b32);
+        hedgeV.position.set(poolX - 3.4, 0.425, poolZ);
+        envSceneryGroup.add(hedgeV);
+        const hedgeR = envBox(1.8, 0.7, 0.35, 0x3f6b32);
+        hedgeR.position.set(L / 2 + 2.3, 0.35, fenceFrontZ - 0.5);
+        envSceneryGroup.add(hedgeR);
+      }
+
+      function applyEnvironment(id) {
+        if (id !== "villa" && id !== "garden") return;
+        currentEnv = id;
+        syncEnvChips();
+        applyEnvironmentLook();
+        if (lastFenceConfig) {
+          buildFence(lastFenceConfig);
+        } else {
+          rebuildEnvScenery();
+        }
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: "simEnv", k: "f", env: currentEnv }, "*");
+          }
+        } catch (e) {}
+      }
+
+      function wireEnvChips() {
+        const bar = document.getElementById("env-bar");
+        if (!bar) return;
+        bar.addEventListener("click", function (ev) {
+          const btn = ev.target && ev.target.closest ? ev.target.closest(".env-chip") : null;
+          if (!btn) return;
+          applyEnvironment(btn.getAttribute("data-env"));
+        });
+      }
+
+      function yawFromDir(dx, dz) {
+        return Math.atan2(-dz, dx);
+      }
+
+      function placeOriented(mesh, x, y, z, yaw) {
+        mesh.position.set(x, y, z);
+        mesh.rotation.y = yaw;
+        fenceGroup.add(mesh);
+      }
+
       function buildFence(config) {
+        if (!scene) {
+          pendingFenceConfig = config;
+          return;
+        }
         const segments = Array.isArray(config?.segments) ? config.segments : [];
         const gapCm = Number(config?.gapCm ?? 0);
         const slatProfile = config?.slatProfile ?? "100";
@@ -146,6 +670,7 @@
         const slatHex = config?.slatHex ?? "#ffffff";
         const spacerHex = config?.spacerHex ?? frameHex;
         const inGround = !!config?.inGround;
+        if (segments.length) lastFenceConfig = config;
 
         clearFence();
         fenceGroup = new THREE.Group();
@@ -153,6 +678,7 @@
         scene.add(fenceGroup);
 
         const patternCm = getSlatPattern(slatProfile);
+        const isGarden = currentEnv === "garden";
 
         let totalLengthM = 0;
         let maxHeightM = 0;
@@ -160,52 +686,59 @@
           const Lm = Math.max(0, Number(s.L || 0)) * CM_TO_M;
           const Hm = Math.max(0, Number(s.H || 0)) * CM_TO_M;
           totalLengthM += Lm;
-          const extra = inGround ? 0.4 : 0; // 40 cm visualization into ground
+          const extra = inGround ? 0.4 : 0;
           maxHeightM = Math.max(maxHeightM, Hm + extra);
         });
 
-        let xCursorM = -totalLengthM / 2;
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
 
-        segments.forEach((seg) => {
-          const segmentStartX = xCursorM;
+        function consider(x, z) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minZ = Math.min(minZ, z);
+          maxZ = Math.max(maxZ, z);
+        }
+
+        function drawOneSegment(seg, originX, originZ, dx, dz, skipFirstPost, endAtCorner) {
           const Lcm = Math.max(0, Number(seg.L || 0));
           const Hcm = Math.max(0, Number(seg.H || 0));
           const posts = Math.max(0, Math.floor(Number(seg.P || 0)));
-
           const Lm = Lcm * CM_TO_M;
           const Hm = Hcm * CM_TO_M;
-
           const fields = Math.max(0, posts - 1);
           const fieldLenM = fields > 0 ? ((Lcm - posts * (postWm / CM_TO_M)) / fields) * CM_TO_M : 0;
-
           const postExtra = inGround ? 0.4 : 0;
           const postHeightM = Hm + postExtra;
+          const yaw = yawFromDir(dx, dz);
 
-          // Posts
+          const postCenters = [];
           for (let i = 0; i < posts; i++) {
-            const xCenter = segmentStartX + postWm / 2 + i * (fieldLenM + postWm);
-            const post = createBox(postWm, postHeightM, postDepth, frameHex);
-            // Put posts in the middle depth so fill looks like it sits between them.
-            post.position.set(xCenter, postHeightM / 2, 0);
-            fenceGroup.add(post);
-
-            // Rosette (base plate) under each post
-            const rosette = createBox(rosetteWm, rosetteThkM, rosetteDepth, frameHex, 1);
-            rosette.position.set(xCenter, rosetteThkM / 2, 0);
-            fenceGroup.add(rosette);
+            let along = postWm / 2 + i * (fieldLenM + postWm);
+            if (skipFirstPost && i === 0) along = 0;
+            if (endAtCorner && i === posts - 1) along = Lm;
+            const x = originX + dx * along;
+            const z = originZ + dz * along;
+            postCenters.push({ x, z });
+            consider(x, z);
           }
 
-          // Steps + spacers (only between posts)
+          for (let i = 0; i < posts; i++) {
+            if (skipFirstPost && i === 0) continue;
+            const c = postCenters[i];
+            const post = createBox(postWm, postHeightM, postDepth, frameHex);
+            placeOriented(post, c.x, postHeightM / 2, c.z, yaw);
+            const rosette = createBox(rosetteWm, rosetteThkM, rosetteDepth, frameHex, 1);
+            placeOriented(rosette, c.x, rosetteThkM / 2, c.z, yaw);
+          }
+
           if (fields > 0) {
-            // Same “net height” logic used in page.tsx instructions (approx).
             const netHcm = Math.max(0, Hcm - 1.5);
-            const bottomOffsetCm = 0.75; // split the 1.5 cm deduction into bottom/top
-            const bottomOffsetM = bottomOffsetCm * CM_TO_M;
+            const bottomOffsetCm = 0.75;
 
             for (let f = 0; f < fields; f++) {
-              const leftPostCenter = segmentStartX + postWm / 2 + f * (fieldLenM + postWm);
-              const rightPostCenter = leftPostCenter + (fieldLenM + postWm);
-              const xFieldCenter = (leftPostCenter + rightPostCenter) / 2;
+              const leftPost = postCenters[f];
+              const rightPost = postCenters[f + 1];
+              if (!leftPost || !rightPost) continue;
 
               let cumulativeCm = 0;
               let stepIndex = 0;
@@ -214,69 +747,200 @@
               while (true) {
                 const tCm = patternCm[stepIndex % patternCm.length];
                 if (cumulativeCm + tCm > netHcm) break;
-
                 const centerCm = bottomOffsetCm + cumulativeCm + tCm / 2;
                 steps.push({ tCm, centerCm });
-
                 cumulativeCm += tCm + Math.max(0, gapCm);
                 stepIndex++;
               }
 
-              // Draw steps
+              const dist = Math.hypot(rightPost.x - leftPost.x, rightPost.z - leftPost.z);
+              const clearWidthM = Math.max(0, dist - postWm);
+              const w = Math.max(0.001, clearWidthM - 0.002);
+              const midX = (leftPost.x + rightPost.x) / 2;
+              const midZ = (leftPost.z + rightPost.z) / 2;
+
               steps.forEach((st) => {
-                // Ensure steps are strictly between posts (no overlap)
-                const leftOuterEdge = leftPostCenter + postWm / 2;
-                const rightOuterEdge = rightPostCenter - postWm / 2;
-                const clearWidthM = Math.max(0, rightOuterEdge - leftOuterEdge);
-                const w = Math.max(0.001, clearWidthM - 0.002); // tiny inset for visual clarity
                 const h = st.tCm * CM_TO_M;
                 const y = st.centerCm * CM_TO_M;
-                const x = leftOuterEdge + clearWidthM / 2;
                 const step = createBox(w, h, stepDepth, slatHex, 1);
-                // Align steps to the middle depth so posts appear centered within the profile.
-                step.position.set(x, y, 0);
-                fenceGroup.add(step);
+                placeOriented(step, midX, y, midZ, yaw);
               });
 
-              // Draw spacers (“ספייר” color) between steps
               if (steps.length >= 2 && gapCm > 0) {
+                const spacerW = 0.03;
+                const spacerD = 0.04;
+                const spacerH = Math.max(0.005, gapCm * CM_TO_M);
                 for (let i = 0; i < steps.length - 1; i++) {
                   const prev = steps[i];
                   const next = steps[i + 1];
-
-                  const spacerCenterCm = (prev.centerCm + next.centerCm) / 2;
-                  const spacerH = gapCm * CM_TO_M;
-                  const spacerW = 0.03;
-                  const spacerD = 0.04;
-                  const spacer = (x) => createBox(spacerW, Math.max(0.005, spacerH), spacerD, spacerHex, 1);
-                  const leftOuterEdge = leftPostCenter + postWm / 2;
-                  const rightOuterEdge = rightPostCenter - postWm / 2;
-
-                  // Place spacers at the two inner edges of the posts (not in the center)
-                  const z = 0;
-                  const leftX = leftOuterEdge + spacerW / 2;
-                  const rightX = rightOuterEdge - spacerW / 2;
-
-                  const s1 = spacer(leftX);
-                  s1.position.set(leftX, spacerCenterCm * CM_TO_M, z);
-                  fenceGroup.add(s1);
-
-                  const s2 = spacer(rightX);
-                  s2.position.set(rightX, spacerCenterCm * CM_TO_M, z);
-                  fenceGroup.add(s2);
+                  const spacerY = ((prev.centerCm + next.centerCm) / 2) * CM_TO_M;
+                  const leftX = leftPost.x + dx * (postWm / 2 + spacerW / 2);
+                  const leftZ = leftPost.z + dz * (postWm / 2 + spacerW / 2);
+                  const rightX = rightPost.x - dx * (postWm / 2 + spacerW / 2);
+                  const rightZ = rightPost.z - dz * (postWm / 2 + spacerW / 2);
+                  const s1 = createBox(spacerW, spacerH, spacerD, spacerHex, 1);
+                  placeOriented(s1, leftX, spacerY, leftZ, yaw);
+                  const s2 = createBox(spacerW, spacerH, spacerD, spacerHex, 1);
+                  placeOriented(s2, rightX, spacerY, rightZ, yaw);
                 }
               }
             }
           }
+        }
 
-          xCursorM += Lm;
-        });
+        function collectYardRuns(segs) {
+          const runs = [];
+          let i = 0;
+          while (i < segs.length) {
+            const front = segs[i];
+            i += 1;
+            const sides = [];
+            while (i < segs.length && segs[i].connected) {
+              sides.push(segs[i]);
+              i += 1;
+            }
+            runs.push({ front: front, sides: sides });
+          }
+          return runs;
+        }
 
-        // Center camera + render scale
-        const camDist = Math.max(6, totalLengthM * 1.2, maxHeightM * 1.0);
-        camera.position.set(camDist, maxHeightM * 0.6 + 2.5, camDist);
-        controls.target.set(0, maxHeightM * 0.3 + 1, 0);
-        controls.update();
+        function drawYardSeg(seg, ox, oz, dx, dz, skipFirst, endCorner) {
+          if (!seg) return 0;
+          const Lm = Math.max(0, Number(seg.L || 0)) * CM_TO_M;
+          consider(ox, oz);
+          consider(ox + dx * Lm, oz + dz * Lm);
+          drawOneSegment(seg, ox, oz, dx, dz, skipFirst, endCorner);
+          return Lm;
+        }
+
+        function drawRunPolyline(front, sides, originX, originZ, dirs) {
+          let ox = originX;
+          let oz = originZ;
+          let heading = 0;
+          function turns90(seg) {
+            return !!seg && !!seg.connected && seg.corner !== false;
+          }
+          const nextTurns = sides.length > 0;
+          const Lm0 = drawYardSeg(front, ox, oz, dirs[0][0], dirs[0][1], false, nextTurns);
+          ox += dirs[0][0] * Lm0;
+          oz += dirs[0][1] * Lm0;
+          for (let s = 0; s < sides.length; s++) {
+            if (turns90(sides[s])) heading = (heading + 1) % 4;
+            const d = dirs[heading];
+            const next = s + 1 < sides.length;
+            const Lm = drawYardSeg(sides[s], ox, oz, d[0], d[1], true, next);
+            ox += d[0] * Lm;
+            oz += d[1] * Lm;
+          }
+          return { ox: ox, oz: oz, along: Math.max(0, Number(front.L || 0)) * CM_TO_M };
+        }
+
+        const LEFT_DIRS = [[-1, 0], [0, -1], [1, 0], [0, 1]];
+        const RIGHT_DIRS = [[1, 0], [0, -1], [-1, 0], [0, 1]];
+        const runs = collectYardRuns(segments);
+        function runYardSide(run, fallbackIdx) {
+          const s = run && run.front && run.front.side;
+          if (s === "left" || s === "right") return s;
+          return fallbackIdx === 0 ? "left" : "right";
+        }
+        const gateKind = config.gate === "single" || config.gate === "double" ? config.gate : "none";
+        const useOpening = !isGarden || gateKind !== "none";
+        /** עם בחירת צד — לא למרכז ב־X, כדי ששמאל יישאר משמאל לשביל וימין מימין */
+        let keepGateAtOriginX = false;
+
+        if (!useOpening) {
+          for (let r = 0; r < runs.length; r++) {
+            const run = runs[r];
+            if (!run || !run.front) continue;
+            const legacyU =
+              r === 0 &&
+              run.sides.length === 2 &&
+              run.sides.every(function (s) { return s.corner !== false; });
+            if (legacyU) {
+              const Lm = Math.max(0, Number(run.front.L || 0)) * CM_TO_M;
+              drawYardSeg(run.front, -Lm / 2, 0, 1, 0, false, true);
+              drawYardSeg(run.sides[0], -Lm / 2, 0, 0, -1, true, false);
+              drawYardSeg(run.sides[1], Lm / 2, 0, 0, -1, true, false);
+            } else {
+              const side = runYardSide(run, r);
+              keepGateAtOriginX = true;
+              let ox = 0;
+              if (r === 0) {
+                const straight = Math.max(0, Number(run.front.L || 0)) * CM_TO_M;
+                // שמאל משמאל למרכז, ימין מימין למרכז (לא ממורכז לתוך האמצע)
+                ox = side === "left" ? -straight : 0;
+              } else {
+                let base = Math.max(0, Number(runs[0].front.L || 0)) * CM_TO_M / 2 + 0.35;
+                ox = side === "left" ? -base : base;
+                for (let p = 1; p < r; p++) {
+                  if (runYardSide(runs[p], p) === side) {
+                    ox += (side === "left" ? -1 : 1) * (Math.max(0, Number(runs[p].front.L || 0)) * CM_TO_M + 0.35);
+                  }
+                }
+              }
+              drawRunPolyline(run.front, run.sides, ox, 0, side === "left" ? LEFT_DIRS : RIGHT_DIRS);
+            }
+          }
+        } else {
+          keepGateAtOriginX = true;
+          const g = GATE_M / 2;
+          let gateHcm = 0;
+          let leftCursor = -g;
+          let rightCursor = g;
+          let leftUsed = false;
+          let rightUsed = false;
+          for (let r = 0; r < runs.length; r++) {
+            const run = runs[r];
+            if (!run || !run.front) continue;
+            gateHcm = Math.max(gateHcm, Number(run.front.H || 0));
+            const side = runYardSide(run, r);
+            if (side === "left") {
+              if (leftUsed) leftCursor -= 0.35;
+              const drawn = drawRunPolyline(run.front, run.sides, leftCursor, 0, LEFT_DIRS);
+              leftCursor = drawn.ox;
+              leftUsed = true;
+            } else {
+              if (rightUsed) rightCursor += 0.35;
+              const drawn = drawRunPolyline(run.front, run.sides, rightCursor, 0, RIGHT_DIRS);
+              rightCursor = drawn.ox;
+              rightUsed = true;
+            }
+          }
+          if (gateKind !== "none" && gateHcm > 0) {
+            buildEntranceGate({
+              Hcm: gateHcm,
+              gapCm: gapCm,
+              slatProfile: slatProfile,
+              frameHex: frameHex,
+              slatHex: slatHex,
+              spacerHex: spacerHex,
+              leaves: gateKind,
+            });
+          }
+        }
+
+        if (minX !== Infinity) {
+          const shiftX = keepGateAtOriginX ? 0 : -(minX + maxX) / 2;
+          const shiftZ = -(minZ + maxZ) / 2;
+          fenceGroup.position.set(shiftX, 0, shiftZ);
+          envYardL = Math.max(8, maxX - minX);
+          envYardW = Math.max(0.25, maxZ - minZ);
+          envGateX = 0;
+        }
+
+        rebuildEnvScenery();
+        fitFenceRenderer();
+
+        if (!fenceUserOrbited && camera && controls) {
+          const span = Math.max(1, maxX - minX, maxZ - minZ, totalLengthM);
+          const hasSide = envYardW > 1.2;
+          const yardBack = hasSide ? -envYardW / 2 : -FRONT_YARD_M;
+          const camDist = Math.max(10, span * 1.2, maxHeightM * 1.15, Math.abs(yardBack) * 1.15);
+          // מצלמה מלפנים (לא מהצד) — שמאל המסך = שמאל החצר
+          camera.position.set(0, maxHeightM * 0.75 + 3.6, camDist + 2.2);
+          controls.target.set(0, maxHeightM * 0.28 + 0.8, yardBack * 0.22);
+          controls.update();
+        }
       }
 
       function init() {
@@ -298,6 +962,16 @@
         controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.08;
+        controls.enableRotate = true;
+        controls.enableZoom = true;
+        controls.enablePan = true;
+        controls.minDistance = 2;
+        controls.maxDistance = 80;
+        controls.maxPolarAngle = Math.PI / 2.02;
+        renderer.domElement.style.touchAction = "none";
+        controls.addEventListener("start", function () {
+          fenceUserOrbited = true;
+        });
 
         // Lights
         const amb = new THREE.AmbientLight(0xffffff, 0.7);
@@ -307,13 +981,35 @@
         sun.position.set(20, 30, 10);
         scene.add(sun);
 
-        // Ground grid plane (visual)
-        const floor = createBox(50, 0.02, 50, "#e2e8f0", 0.25);
-        floor.position.set(0, 0, 0);
-        scene.add(floor);
+        floorMesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(100, 100),
+          new THREE.MeshStandardMaterial({ color: 0x4d7c0f, roughness: 0.95, metalness: 0.05 })
+        );
+        floorMesh.rotation.x = -Math.PI / 2;
+        scene.add(floorMesh);
 
-        buildFence({ segments: [], gapCm: 2, slatProfile: "100", frameHex: "#555555", slatHex: "#ffffff", spacerHex: "#555555", inGround: false });
+        envSceneryGroup = new THREE.Group();
+        scene.add(envSceneryGroup);
+
+        applyEnvironmentLook();
+        if (pendingFenceConfig) {
+          const cfg = pendingFenceConfig;
+          pendingFenceConfig = null;
+          buildFence(cfg);
+        } else {
+          buildFence({ segments: [], gapCm: 2, slatProfile: "100", frameHex: "#555555", slatHex: "#ffffff", spacerHex: "#555555", inGround: false });
+        }
         wireRecordButton();
+        wireEnvChips();
+        wireGatePointer();
+        window.requestAnimationFrame(function () {
+          fitFenceRenderer();
+          notifyFenceReady();
+        });
+        window.setTimeout(function () {
+          fitFenceRenderer();
+          notifyFenceReady();
+        }, 250);
       }
 
       function setFenceRecordButton(isRecording) {
@@ -359,32 +1055,94 @@
         });
       }
 
+      function gatePointerFromEvent(e) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return null;
+        gatePointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        gatePointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        gateRaycaster.setFromCamera(gatePointer, camera);
+        return gateRaycaster.intersectObject(gateRoot, true);
+      }
+
+      function wireGatePointer() {
+        if (!renderer || !renderer.domElement) return;
+        const el = renderer.domElement;
+        el.addEventListener("pointerdown", function (e) {
+          gatePtrDown = { x: e.clientX, y: e.clientY };
+        });
+        el.addEventListener("pointerup", function (e) {
+          if (!gatePtrDown || !gateRoot || !camera) {
+            gatePtrDown = null;
+            return;
+          }
+          const dx = e.clientX - gatePtrDown.x;
+          const dy = e.clientY - gatePtrDown.y;
+          gatePtrDown = null;
+          if (dx * dx + dy * dy > 36) return;
+          const hits = gatePointerFromEvent(e);
+          if (hits && hits.length) toggleGate();
+        });
+        el.addEventListener("pointermove", function (e) {
+          if (!gateRoot || !camera) {
+            el.style.cursor = "";
+            return;
+          }
+          const hits = gatePointerFromEvent(e);
+          el.style.cursor = hits && hits.length ? "pointer" : "";
+        });
+      }
+
       window.addEventListener("resize", () => {
-        if (!renderer || !camera) return;
-        const container = document.getElementById("canvas-container");
-        const w = container.clientWidth || window.innerWidth;
-        const h = container.clientHeight || window.innerHeight;
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
+        fitFenceRenderer();
       });
 
       window.addEventListener("message", function (event) {
         if (!event?.data) return;
         if (event.data.type === "applyExternalConfig") {
           try {
-            buildFence(event.data.config || {});
+            const cfg = event.data.config || {};
+            if (cfg.env === "villa" || cfg.env === "garden") {
+              currentEnv = cfg.env;
+              syncEnvChips();
+              applyEnvironmentLook();
+            }
+            buildFence(cfg);
+            fitFenceRenderer();
+          } catch (e) {}
+        } else if (event.data.type === "requestSimConfig") {
+          try {
+            if (event.source) {
+              event.source.postMessage({
+                type: "simConfig",
+                reqId: event.data.reqId || null,
+                config: { env: currentEnv, kind: "f", gate: lastFenceConfig && lastFenceConfig.gate ? lastFenceConfig.gate : "none" },
+              }, "*");
+            }
           } catch (e) {}
         }
       });
 
       function animate() {
         requestAnimationFrame(animate);
+        const target = gateOpen ? GATE_OPEN_ANGLE : 0;
+        gateAngle += (target - gateAngle) * 0.14;
+        if (Math.abs(target - gateAngle) < 0.004) gateAngle = target;
+        applyGateAngle();
         if (controls) controls.update();
         if (renderer && scene && camera) renderer.render(scene, camera);
       }
 
       window.onload = () => {
+        try {
+          var qs = new URLSearchParams(location.search || "");
+          if (qs.get("viewOnly") === "1") {
+            document.body.classList.add("view-only");
+            var hint = document.getElementById("view-orbit-hint");
+            if (hint) window.setTimeout(function () { hint.style.opacity = "0"; hint.style.transition = "opacity 0.6s"; }, 4200);
+          }
+          var urlEnv = qs.get("env");
+          if (urlEnv === "villa" || urlEnv === "garden") currentEnv = urlEnv;
+        } catch (e) {}
         init();
         animate();
       };

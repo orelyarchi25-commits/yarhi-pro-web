@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>עוזר סגירת עסקאות - מקומי</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #0b1220;
+        color: #f8fafc;
+      }
+      .wrap {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 16px;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .card {
+        background: #111b30;
+        border: 1px solid #253047;
+        border-radius: 16px;
+        padding: 14px;
+        margin-bottom: 12px;
+      }
+      .auth-wrap {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 16px;
+      }
+      .auth-card {
+        width: 100%;
+        max-width: 420px;
+      }
+      .field {
+        width: 100%;
+        margin-top: 8px;
+        background: #0b1427;
+        color: #e2e8f0;
+        border: 1px solid #1f2a40;
+        border-radius: 12px;
+        padding: 11px;
+        font-family: inherit;
+        font-size: 14px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 24px;
+      }
+      p {
+        margin: 0;
+        color: #93a2bc;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        cursor: pointer;
+        font-weight: 700;
+        padding: 10px 14px;
+      }
+      .primary {
+        background: #2563eb;
+        color: #fff;
+      }
+      .danger {
+        background: #ef4444;
+        color: #fff;
+      }
+      .ghost {
+        background: #1f2a40;
+        color: #d8e1f0;
+      }
+      .small {
+        font-size: 13px;
+        padding: 8px 11px;
+      }
+      .status {
+        font-weight: 700;
+        margin-top: 10px;
+      }
+      .ok {
+        color: #34d399;
+      }
+      .warn {
+        color: #fbbf24;
+      }
+      .bad {
+        color: #f87171;
+      }
+      .live {
+        margin-top: 10px;
+        min-height: 22px;
+        color: #93c5fd;
+        font-style: italic;
+      }
+      .transcript {
+        max-height: 230px;
+        overflow: auto;
+        display: grid;
+        gap: 8px;
+      }
+      .msg {
+        background: #0b1427;
+        border: 1px solid #1f2a40;
+        border-radius: 12px;
+        padding: 10px;
+      }
+      .tag {
+        display: inline-block;
+        background: #1d4ed8;
+        color: #fff;
+        font-size: 12px;
+        border-radius: 999px;
+        padding: 4px 10px;
+        margin-bottom: 8px;
+      }
+      .tips {
+        display: grid;
+        gap: 8px;
+      }
+      .tip {
+        background: #0b1427;
+        border: 1px solid #1f2a40;
+        border-radius: 12px;
+        padding: 10px;
+        font-size: 20px;
+        font-weight: 800;
+      }
+      .footer-note {
+        margin-top: 10px;
+        font-size: 12px;
+        color: #7f90af;
+      }
+      .report-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        margin-top: 10px;
+      }
+      .report-box {
+        background: #0b1427;
+        border: 1px solid #1f2a40;
+        border-radius: 12px;
+        padding: 10px;
+      }
+      .report-title {
+        font-size: 12px;
+        color: #8ca0c0;
+        margin-bottom: 4px;
+      }
+      .report-value {
+        font-size: 24px;
+        font-weight: 800;
+      }
+      .report-list {
+        margin: 0;
+        padding-right: 18px;
+        color: #d8e1f0;
+      }
+      .report-list li {
+        margin-bottom: 6px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 92px;
+        resize: vertical;
+        background: #0b1427;
+        color: #e2e8f0;
+        border: 1px solid #1f2a40;
+        border-radius: 12px;
+        padding: 10px;
+        font-family: inherit;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="authWrap" class="auth-wrap">
+      <div class="card auth-card">
+        <h1>כניסה למערכת</h1>
+        <p>גישה פרטית לפי מייל וסיסמה בלבד.</p>
+        <div style="margin-top: 12px">
+          <label for="emailInput">מייל</label>
+          <input id="emailInput" class="field" type="email" placeholder="your@email.com" />
+        </div>
+        <div style="margin-top: 10px">
+          <label for="passwordInput">סיסמה</label>
+          <input id="passwordInput" class="field" type="password" placeholder="סיסמה" />
+        </div>
+        <div class="row">
+          <button id="loginBtn" class="primary">כניסה</button>
+        </div>
+        <div id="authStatus" class="status warn">התחבר כדי להמשיך.</div>
+      </div>
+    </div>
+
+    <div id="appWrap" class="wrap hidden">
+      <div class="card">
+        <h1>עוזר סגירת עסקאות (HTML מקומי)</h1>
+        <p>נפתח ישירות מהמחשב. עובד הכי טוב ב-Chrome עם הרשאת מיקרופון.</p>
+        <div class="row">
+          <button id="startBtn" class="primary">התחל האזנה</button>
+          <button id="stopBtn" class="danger">עצור וסכם</button>
+          <button id="clearBtn" class="ghost small">נקה שיחה</button>
+          <button id="logoutBtn" class="ghost small">יציאה</button>
+        </div>
+        <div id="status" class="status warn">מוכן להתחיל</div>
+        <div id="liveText" class="live"></div>
+      </div>
+
+      <div class="card">
+        <span class="tag" id="intentTag">הכוונה האחרונה: עדיין לא זוהתה</span>
+        <div id="tips" class="tips">
+          <div class="tip">תתחיל שיחה ותקבל כאן תגובות חכמות בזמן אמת.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top: 0">תמלול שיחה</h3>
+        <div id="transcript" class="transcript"></div>
+        <div class="footer-note">
+          טריגרים נתמכים: מחיר, מתחרה, היסוס, בן/בת זוג, אמון, זמן, איכות, מימון, סקר שוק ועוד.
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top: 0">דוח ליד וסיכום שיחה</h3>
+        <p>בלחיצה על "עצור וסכם" תקבל ציון, סטטוס ליד, סיבה והנחיות המשך.</p>
+        <div class="report-grid">
+          <div class="report-box">
+            <div class="report-title">ציון ליד</div>
+            <div id="leadScore" class="report-value">-</div>
+          </div>
+          <div class="report-box">
+            <div class="report-title">סטטוס ליד</div>
+            <div id="leadTemp" class="report-value">-</div>
+          </div>
+        </div>
+        <div class="report-grid">
+          <div class="report-box">
+            <div class="report-title">תאריך שיחה</div>
+            <div id="callDate">-</div>
+          </div>
+          <div class="report-box">
+            <div class="report-title">שעת התחלה</div>
+            <div id="callStartTime">-</div>
+          </div>
+          <div class="report-box">
+            <div class="report-title">שעת סיום</div>
+            <div id="callEndTime">-</div>
+          </div>
+          <div class="report-box">
+            <div class="report-title">משך שיחה</div>
+            <div id="callDuration">-</div>
+          </div>
+        </div>
+        <div class="report-box" style="margin-top: 10px">
+          <div class="report-title">הסבר קצר</div>
+          <div id="leadReason">עדיין אין מספיק מידע.</div>
+        </div>
+        <div class="report-box" style="margin-top: 10px">
+          <div class="report-title">התנגדויות שזוהו</div>
+          <div id="leadObjections">עדיין לא זוהו התנגדויות.</div>
+        </div>
+        <div class="report-box" style="margin-top: 10px">
+          <div class="report-title">הוראות המשך לליד</div>
+          <ul id="leadNextActions" class="report-list">
+            <li>התחל שיחה כדי לקבל המלצות.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top: 0">מצב ידני (אם המיקרופון לא עובד)</h3>
+        <p>תרשום מה הלקוח אמר ותקבל תגובת סגירה מיידית.</p>
+        <div class="row">
+          <button id="analyzeManualBtn" class="primary small">נתח משפט ידני</button>
+        </div>
+        <div style="margin-top: 10px">
+          <textarea id="manualInput" placeholder='לדוגמה: "יקר לי, אני צריך לחשוב על זה עם אשתי"'></textarea>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const ALLOWED_EMAIL = "yarchialuminum@gmail.com";
+      const ALLOWED_PASSWORD = "oy270989";
+
+      const triggers = [
+        {
+          keywords: ["יקר", "מחיר גבוה", "אין תקציב", "עולה הרבה"],
+          label: "התנגדות מחיר",
+          responses: [
+            "המחיר משקף איכות חומרים ואחריות אמיתית לשנים.",
+            "זול היום עולה ביוקר בתחזוקה. פה אתה סוגר פעם אחת.",
+            "אם מחלקים את זה לאורך שנים, העלות החודשית משתלמת מאוד."
+          ]
+        },
+        {
+          keywords: ["זול", "מתחרה", "הצעה אחרת", "קיבלתי מחיר אחר"],
+          label: "השוואה למתחרה",
+          responses: [
+            "תשווה עובי חומר, גימור ואחריות. שם ההבדל האמיתי.",
+            "אני שולח לך עבודות דומות כדי לראות איכות מול איכות.",
+            "בוא נשווה סעיף-סעיף כדי שתראה בדיוק על מה אתה משלם."
+          ]
+        },
+        {
+          keywords: ["אחשוב", "נדבר", "אבדוק", "אולי בהמשך"],
+          label: "דחיינות / היסוס",
+          responses: [
+            "מה בדיוק חסר לך כדי לסגור עכשיו? נפתור את זה יחד.",
+            "אם נסגור עכשיו אני שומר לך חלון התקנה קרוב.",
+            "אפשר לסכם על שלב ראשון קטן ולהתקדם בלי סיכון גדול."
+          ]
+        },
+        {
+          keywords: ["אישה", "בעלי", "בן זוג", "בת זוג", "נחליט בבית"],
+          label: "החלטה משותפת",
+          responses: [
+            "מעולה, נעשה שיחת 5 דקות עם שניכם ונסגור במקום.",
+            "אני שולח סיכום קצר וברור שתעביר/י ישר בבית.",
+            "רוצה שאכין הודעה מוכנה שתשלח/י עכשיו ותחסוך זמן?"
+          ]
+        },
+        {
+          keywords: ["אמון", "לא מכיר אותך", "חושש", "מפחד ליפול"],
+          label: "חוסר אמון",
+          responses: [
+            "מעולה שאתה בודק, אני עובד עם אחריות כתובה וסעיפים ברורים.",
+            "אשלח לך תמונות לפני/אחרי והמלצות של לקוחות דומים לשלך.",
+            "אפשר להתחיל במדידה מסודרת ורק אחר כך לאשר התקנה."
+          ]
+        },
+        {
+          keywords: ["אין זמן", "עמוס", "אחרי החג", "נדחה"],
+          label: "אין זמן כרגע",
+          responses: [
+            "בוא נקבע עכשיו חלון קצר למדידה כדי לא לאבד זמן בהמשך.",
+            "אני מתאים את ההתקנה ללו\"ז שלך ולא להפך.",
+            "אם נקבע תאריך מראש, אתה שומר מקום ביומן בלי לחץ."
+          ]
+        },
+        {
+          keywords: ["איכות", "חלודה", "עמידות", "אחריות"],
+          label: "חשש מאיכות וביצוע",
+          responses: [
+            "אני עובד עם חומר וצבע שמיועדים לעמידות חוץ לאורך זמן.",
+            "תקבל אחריות מסודרת והתחייבות כתובה על הביצוע.",
+            "אפשר לראות עבודה קיימת דומה כדי לקבל ביטחון לפני סגירה."
+          ]
+        },
+        {
+          keywords: ["מימון", "תשלומים", "אין לי עכשיו", "תזרים"],
+          label: "קושי תזרימי",
+          responses: [
+            "אפשר לבנות פריסת תשלומים נוחה שתאפשר לך להתקדם עכשיו.",
+            "בוא נבנה חלוקה שמותאמת ליכולת שלך בלי לפגוע באיכות.",
+            "אם נתחיל במדידה עכשיו, נוכל לתזמן ביצוע למועד שנוח לך."
+          ]
+        },
+        {
+          keywords: ["רק בודק", "סקר שוק", "משווה", "בודק מחירים"],
+          label: "לקוח בסקר שוק",
+          responses: [
+            "מעולה, בדיוק בגלל זה חשוב להשוות מפרט ולא רק מחיר סופי.",
+            "אני אתן לך רשימת בדיקה קצרה כדי שלא תיפול על פרטים נסתרים.",
+            "נעבור יחד על ההצעות שקיבלת ונחדד מה באמת נכון לך."
+          ]
+        },
+        {
+          keywords: ["תחזור אליי", "שבוע הבא", "אעדכן אותך", "נדבר בהמשך"],
+          label: "דחיית החלטה",
+          responses: [
+            "בשמחה, בוא נקבע כבר עכשיו יום ושעה מדויקים לשיחה הבאה.",
+            "לפני שניפרד, מה צריך לקרות כדי שנסגור בשיחה הבאה?",
+            "אני שולח סיכום קצר עכשיו כדי שתגיע מוכן להחלטה."
+          ]
+        }
+      ];
+
+      const statusEl = document.getElementById("status");
+      const liveTextEl = document.getElementById("liveText");
+      const transcriptEl = document.getElementById("transcript");
+      const tipsEl = document.getElementById("tips");
+      const intentTagEl = document.getElementById("intentTag");
+      const authWrap = document.getElementById("authWrap");
+      const appWrap = document.getElementById("appWrap");
+      const authStatus = document.getElementById("authStatus");
+      const emailInput = document.getElementById("emailInput");
+      const passwordInput = document.getElementById("passwordInput");
+      const loginBtn = document.getElementById("loginBtn");
+
+      const startBtn = document.getElementById("startBtn");
+      const stopBtn = document.getElementById("stopBtn");
+      const clearBtn = document.getElementById("clearBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
+      const analyzeManualBtn = document.getElementById("analyzeManualBtn");
+      const manualInput = document.getElementById("manualInput");
+      const leadScoreEl = document.getElementById("leadScore");
+      const leadTempEl = document.getElementById("leadTemp");
+      const leadReasonEl = document.getElementById("leadReason");
+      const leadObjectionsEl = document.getElementById("leadObjections");
+      const leadNextActionsEl = document.getElementById("leadNextActions");
+      const callDateEl = document.getElementById("callDate");
+      const callStartTimeEl = document.getElementById("callStartTime");
+      const callEndTimeEl = document.getElementById("callEndTime");
+      const callDurationEl = document.getElementById("callDuration");
+
+      const SpeechRecognition =
+        window.SpeechRecognition || window.webkitSpeechRecognition;
+
+      let recognition = null;
+      let isListening = false;
+      let fullTranscript = [];
+      let objectionHits = {};
+      let callStartedAt = null;
+      let callEndedAt = null;
+
+      function setAuthStatus(text, cls) {
+        authStatus.textContent = text;
+        authStatus.className = "status " + cls;
+      }
+
+      function showApp() {
+        authWrap.classList.add("hidden");
+        appWrap.classList.remove("hidden");
+      }
+
+      function showAuth() {
+        appWrap.classList.add("hidden");
+        authWrap.classList.remove("hidden");
+      }
+
+      function login() {
+        const email = (emailInput.value || "").trim().toLowerCase();
+        const password = passwordInput.value || "";
+
+        if (email === ALLOWED_EMAIL && password === ALLOWED_PASSWORD) {
+          setAuthStatus("התחברת בהצלחה.", "ok");
+          showApp();
+          return;
+        }
+        setAuthStatus("מייל או סיסמה שגויים.", "bad");
+      }
+
+      function logout() {
+        stopListening();
+        showAuth();
+        emailInput.value = "";
+        passwordInput.value = "";
+        setAuthStatus("נותקת מהמערכת.", "warn");
+      }
+
+      function setStatus(text, cls) {
+        statusEl.textContent = text;
+        statusEl.className = "status " + cls;
+      }
+
+      function renderTranscriptLine(text) {
+        const div = document.createElement("div");
+        div.className = "msg";
+        div.textContent = text;
+        transcriptEl.appendChild(div);
+        transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      }
+
+      function renderTips(label, responses) {
+        intentTagEl.textContent = "הכוונה האחרונה: " + label;
+        tipsEl.innerHTML = "";
+        responses.forEach((line, idx) => {
+          const div = document.createElement("div");
+          div.className = "tip";
+          div.textContent = (idx + 1) + ". " + line;
+          tipsEl.appendChild(div);
+        });
+      }
+
+      function findTrigger(text) {
+        const lower = text.toLowerCase();
+        return triggers.find((t) => t.keywords.some((k) => lower.includes(k)));
+      }
+
+      function summarizeCall() {
+        if (!fullTranscript.length) {
+          setStatus("אין עדיין שיחה לסיכום.", "warn");
+          return;
+        }
+
+        if (!callStartedAt) callStartedAt = new Date();
+        if (!callEndedAt) callEndedAt = new Date();
+
+        const report = buildLeadReport();
+        renderLeadReport(report);
+
+        const topObjection = Object.entries(objectionHits).sort(
+          (a, b) => b[1] - a[1]
+        )[0];
+
+        if (topObjection) {
+          setStatus(
+            "סיכום: מוקד השיחה היה '" + topObjection[0] + "'. המשך עם פולו-אפ מיידי.",
+            "ok"
+          );
+        } else {
+          setStatus(
+            "סיכום: שיחה כללית. מומלץ לשאול שאלת סגירה ישירה ולסגור תאריך התקנה.",
+            "ok"
+          );
+        }
+      }
+
+      function buildLeadReport() {
+        const allText = fullTranscript.join(" ").toLowerCase();
+        const hotKeywords = ["מתי", "להתקין", "סוגר", "סוגרים", "מתקדם", "סבבה", "כן", "חוזה", "מדידה"];
+        const coldKeywords = ["יקר", "אחשוב", "אולי", "לא בטוח", "נדבר", "יקר לי", "אין זמן"];
+        const irrelevantKeywords = ["לא רלוונטי", "לא צריך", "ירדנו מזה", "אין תקציב בכלל", "תוותר", "לא מעוניין"];
+
+        const hotHits = hotKeywords.reduce((count, word) => count + (allText.includes(word) ? 1 : 0), 0);
+        const coldHits = coldKeywords.reduce((count, word) => count + (allText.includes(word) ? 1 : 0), 0);
+        const irrelevantHits = irrelevantKeywords.reduce((count, word) => count + (allText.includes(word) ? 1 : 0), 0);
+
+        let score = 5 + hotHits * 2 - coldHits * 2 - irrelevantHits * 4;
+        if (score > 10) score = 10;
+        if (score < 1) score = 1;
+
+        let temperature = "פושר";
+        if (irrelevantHits > 0 && hotHits === 0) {
+          temperature = "לא רלוונטי";
+        } else if (score >= 8) {
+          temperature = "חם";
+        } else if (score <= 4) {
+          temperature = "קר";
+        }
+
+        let reason = "יש שילוב של עניין והתלבטות, צריך הובלה לשלב הבא.";
+        if (temperature === "חם") {
+          reason = "יש סימני קנייה ברורים (שאלות על סגירה/התקנה/התקדמות).";
+        } else if (temperature === "קר") {
+          reason = "כרגע יש יותר התנגדויות מאשר סימני סגירה.";
+        } else if (temperature === "לא רלוונטי") {
+          reason = "הלקוח מצהיר שאין צורך או שאין התאמה כרגע להצעה.";
+        }
+
+        const objections = Object.entries(objectionHits)
+          .sort((a, b) => b[1] - a[1])
+          .map((entry) => entry[0]);
+
+        let nextActions = [
+          "סכם בוואטסאפ את 2 היתרונות המרכזיים של ההצעה.",
+          "קבע נקודת המשך ברורה (שיחה/מדידה/הצעת מחיר מעודכנת)."
+        ];
+        if (temperature === "חם") {
+          nextActions = [
+            "בצע סגירה ישירה עכשיו: תאריך מדידה או התקנה.",
+            "שלח אישור כתוב עם מחיר סופי ולו\"ז.",
+            "צמצם אופציות כדי למנוע דחייה מיותרת."
+          ];
+        } else if (temperature === "קר") {
+          nextActions = [
+            "שאל מה ההתנגדות העיקרית (מחיר/אמון/תזמון).",
+            "תן הוכחת ערך אחת חדה (אחריות, איכות, עבודות דומות).",
+            "קבע פולו-אפ תוך 24-48 שעות."
+          ];
+        } else if (temperature === "לא רלוונטי") {
+          nextActions = [
+            "עצור לחץ מכירתי ושמור מערכת יחסים חיובית.",
+            "בקש רשות לחזור במועד אחר או לקבל הפניה.",
+            "תעד סיבת אי-התאמה כדי לא לבזבז זמן בהמשך."
+          ];
+        }
+
+        return { score, temperature, reason, objections, nextActions };
+      }
+
+      function renderLeadReport(report) {
+        leadScoreEl.textContent = report.score + "/10";
+        leadTempEl.textContent = report.temperature;
+        leadReasonEl.textContent = report.reason;
+        callDateEl.textContent = formatDate(callStartedAt);
+        callStartTimeEl.textContent = formatTime(callStartedAt);
+        callEndTimeEl.textContent = formatTime(callEndedAt);
+        callDurationEl.textContent = formatDuration(callStartedAt, callEndedAt);
+        leadObjectionsEl.textContent = report.objections.length
+          ? report.objections.join(" | ")
+          : "לא זוהו התנגדויות משמעותיות.";
+
+        leadNextActionsEl.innerHTML = "";
+        report.nextActions.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = item;
+          leadNextActionsEl.appendChild(li);
+        });
+      }
+
+      function formatDate(value) {
+        if (!value) return "-";
+        return value.toLocaleDateString("he-IL");
+      }
+
+      function formatTime(value) {
+        if (!value) return "-";
+        return value.toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      }
+
+      function formatDuration(startValue, endValue) {
+        if (!startValue || !endValue) return "-";
+        const diffMs = Math.max(0, endValue.getTime() - startValue.getTime());
+        const totalSeconds = Math.floor(diffMs / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const hh = String(hours).padStart(2, "0");
+        const mm = String(minutes).padStart(2, "0");
+        const ss = String(seconds).padStart(2, "0");
+        return hh + ":" + mm + ":" + ss;
+      }
+
+      async function startListening() {
+        if (!SpeechRecognition) {
+          setStatus("הדפדפן לא תומך בזיהוי קול. השתמש במצב הידני למטה.", "bad");
+          return;
+        }
+        if (isListening) return;
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          setStatus("הדפדפן לא תומך בגישת מיקרופון. נסה Chrome מעודכן.", "bad");
+          return;
+        }
+
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track) => track.stop());
+        } catch (_error) {
+          setStatus("אין הרשאת מיקרופון. לחץ על אייקון המנעול/מיקרופון בדפדפן ואשר גישה.", "bad");
+          return;
+        }
+
+        recognition = new SpeechRecognition();
+        callStartedAt = new Date();
+        callEndedAt = null;
+        recognition.lang = "he-IL";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+
+        recognition.onresult = (event) => {
+          let interim = "";
+          let final = "";
+
+          for (let i = event.resultIndex; i < event.results.length; i += 1) {
+            const chunk = event.results[i][0].transcript;
+            if (event.results[i].isFinal) final += chunk;
+            else interim += chunk;
+          }
+
+          liveTextEl.textContent = interim ? "מזהה עכשיו: " + interim : "";
+
+          if (interim) {
+            const fastHit = findTrigger(interim);
+            if (fastHit) {
+              renderTips(fastHit.label, fastHit.responses);
+            }
+          }
+
+          if (final.trim()) {
+            const text = final.trim();
+            fullTranscript.push(text);
+            renderTranscriptLine(text);
+
+            const hit = findTrigger(text);
+            if (hit) {
+              objectionHits[hit.label] = (objectionHits[hit.label] || 0) + 1;
+              renderTips(hit.label, hit.responses);
+            }
+          }
+        };
+
+        recognition.onerror = (event) => {
+          const errorCode = event && event.error ? " (" + event.error + ")" : "";
+          setStatus("שגיאת מיקרופון/הרשאה" + errorCode + ". אם זה ממשיך, השתמש במצב הידני למטה.", "bad");
+        };
+
+        recognition.onend = () => {
+          if (isListening && recognition) {
+            recognition.start();
+          }
+        };
+
+        recognition.start();
+        isListening = true;
+        setStatus("מקשיב עכשיו לשיחה...", "ok");
+      }
+
+      function processCustomerText(rawText) {
+        const text = (rawText || "").trim();
+        if (!text) {
+          setStatus("תכתוב קודם מה הלקוח אמר.", "warn");
+          return;
+        }
+
+        fullTranscript.push(text);
+        renderTranscriptLine(text);
+
+        const hit = findTrigger(text);
+        if (hit) {
+          objectionHits[hit.label] = (objectionHits[hit.label] || 0) + 1;
+          renderTips(hit.label, hit.responses);
+          setStatus("נותחה התנגדות: " + hit.label, "ok");
+        } else {
+          renderTips("בירור כללי", [
+            "שאל שאלה סוגרת: אם אני פותר את זה עכשיו, סוגרים היום?",
+            "תציע צעד הבא ברור: מדידה/תאריך התקנה/סיכום מחיר."
+          ]);
+          setStatus("נותח משפט כללי. קיבלת תגובת סגירה מוצעת.", "ok");
+        }
+      }
+
+      function stopListening() {
+        if (!isListening) return;
+        isListening = false;
+        callEndedAt = new Date();
+        if (recognition) recognition.stop();
+        liveTextEl.textContent = "";
+        summarizeCall();
+      }
+
+      function clearAll() {
+        stopListening();
+        fullTranscript = [];
+        objectionHits = {};
+        callStartedAt = null;
+        callEndedAt = null;
+        transcriptEl.innerHTML = "";
+        manualInput.value = "";
+        leadScoreEl.textContent = "-";
+        leadTempEl.textContent = "-";
+        callDateEl.textContent = "-";
+        callStartTimeEl.textContent = "-";
+        callEndTimeEl.textContent = "-";
+        callDurationEl.textContent = "-";
+        leadReasonEl.textContent = "עדיין אין מספיק מידע.";
+        leadObjectionsEl.textContent = "עדיין לא זוהו התנגדויות.";
+        leadNextActionsEl.innerHTML = "<li>התחל שיחה כדי לקבל המלצות.</li>";
+        intentTagEl.textContent = "הכוונה האחרונה: עדיין לא זוהתה";
+        tipsEl.innerHTML =
+          '<div class="tip">תתחיל שיחה ותקבל כאן תגובות חכמות בזמן אמת.</div>';
+        setStatus("נוקה. מוכן לשיחה חדשה.", "warn");
+      }
+
+      startBtn.addEventListener("click", startListening);
+      stopBtn.addEventListener("click", stopListening);
+      clearBtn.addEventListener("click", clearAll);
+      logoutBtn.addEventListener("click", logout);
+      analyzeManualBtn.addEventListener("click", () => {
+        processCustomerText(manualInput.value);
+      });
+      loginBtn.addEventListener("click", login);
+      passwordInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") login();
+      });
+
+      showAuth();
+    </script>
+  </body>
+</html>

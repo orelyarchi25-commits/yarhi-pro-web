@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>הדמיית מטבח 3D | נגרות</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="panel" id="panel">
+        <header class="panel__brand">
+          <h1>הדמיית מטבח 3D</h1>
+          <p>תכננו מול הלקוח לפני סגירת העסקה</p>
+        </header>
+
+        <section class="panel__section">
+          <h2>מידות החדר (ס״מ)</h2>
+          <div class="row">
+            <label>רוחב<input id="roomW" type="number" min="200" max="1200" value="400" /></label>
+            <label>עומק<input id="roomD" type="number" min="200" max="1200" value="350" /></label>
+            <label>גובה<input id="roomH" type="number" min="220" max="350" value="270" /></label>
+          </div>
+          <button type="button" class="btn btn--secondary" id="applyRoom">עדכון חדר</button>
+        </section>
+
+        <section class="panel__section">
+          <h2>הוספת מודול</h2>
+          <div class="catalog" id="catalog"></div>
+        </section>
+
+        <section class="panel__section">
+          <h2>חומרים</h2>
+          <p class="hint">בחרו ארון בסצנה, ואז בחרו חומר</p>
+          <div class="swatches" id="bodyMaterials"></div>
+          <h3>משטח עליון</h3>
+          <div class="swatches" id="topMaterials"></div>
+        </section>
+
+        <section class="panel__section" id="selectedSection" hidden>
+          <h2>ארון נבחר</h2>
+          <p id="selectedLabel">—</p>
+          <div class="row row--stack">
+            <button type="button" class="btn" id="openBtn">פתיחת דלתות/מגירות</button>
+            <button type="button" class="btn btn--secondary" id="rotateBtn">סיבוב 90°</button>
+            <button type="button" class="btn btn--danger" id="deleteBtn">מחיקה</button>
+          </div>
+          <p class="hint">דאבל־קליק על ארון = פתיחה/סגירה · גרירה = הזזה</p>
+        </section>
+
+        <section class="panel__section">
+          <h2>פעולות</h2>
+          <div class="row row--stack">
+            <button type="button" class="btn" id="shotBtn">שמירת תמונה ללקוח</button>
+            <button type="button" class="btn btn--secondary" id="openAllBtn">פתח/סגור הכל</button>
+            <button type="button" class="btn btn--secondary" id="clearBtn">ניקוי מטבח</button>
+          </div>
+          <p class="hint">גרירה ריקה = סיבוב מצלמה · גלגלת = זום · קטלוג + קליק על רצפה = הצבה</p>
+        </section>
+      </aside>
+
+      <main class="viewport">
+        <canvas id="c"></canvas>
+        <div class="viewport__badge">מצב הצבה: <span id="placeMode">בחרו מודול מהקטלוג</span></div>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

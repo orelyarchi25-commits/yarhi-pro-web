@@ -22,11 +22,16 @@ export function getNotifyAdminEmailRaw(): string {
   return unquoteEnvValue(envAny("ADMIN_NOTIFY_EMAIL", "ADMIN_EMAIL"));
 }
 
+export function hasFirebaseAdminForNotify(): boolean {
+  return Boolean(
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim() ||
+      process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim()
+  );
+}
+
+/** מה חסר כדי לשלוח מייל (Resend + כתובת מנהל). Firebase לא חובה להרשמת Supabase. */
 export function getNotifyRegistrationMissing(): NotifyRegistrationMissing[] {
   const missing: NotifyRegistrationMissing[] = [];
-  const hasJson = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim());
-  const hasPath = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim());
-  if (!hasJson && !hasPath) missing.push("firebase_admin");
   if (!getNotifyResendApiKey()) missing.push("resend");
   if (!getNotifyAdminEmailRaw()) missing.push("admin_email");
   return missing;

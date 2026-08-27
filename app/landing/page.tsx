@@ -9,7 +9,7 @@ export default function LandingPage() {
         <div className="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/40 text-emerald-300 text-sm font-bold">
           מיוחד לקבלני אלומיניום
         </div>
-        <div className="mt-3 text-xs text-amber-300 font-bold">גרסת נחיתה מעודכנת: 399₪ + מע&quot;מ</div>
+        <div className="mt-3 text-xs text-amber-300 font-bold">גרסת נחיתה מעודכנת: 250₪ + מע&quot;מ</div>
         <h1 className="mt-6 text-4xl md:text-6xl font-black leading-tight">
           Yarhi Pro
           <br />
@@ -56,11 +56,11 @@ export default function LandingPage() {
             </p>
             <h2 className="text-2xl font-black text-amber-300">מנוי Yarhi Pro מלא</h2>
             <p className="text-slate-300 mt-2">חישובים, הדמיות, דוחות וניהול פיננסי במקום אחד.</p>
-            <p className="mt-4 text-4xl font-black text-amber-300">399 ₪ + מע&quot;מ</p>
+            <p className="mt-4 text-4xl font-black text-amber-300">250 ₪ + מע&quot;מ</p>
             <p className="text-slate-400 text-sm">מסלול חודשי גמיש</p>
             <div className="mt-4 rounded-xl border border-emerald-400/40 bg-emerald-500/10 p-4">
               <p className="text-emerald-200 font-black">מסלול שנתי משתלם במיוחד</p>
-              <p className="text-2xl font-black text-emerald-300 mt-1">3,990 ₪ + מע&quot;מ לשנה</p>
+              <p className="text-2xl font-black text-emerald-300 mt-1">2,400 ₪ + מע&quot;מ לשנה</p>
               <p className="text-sm text-slate-200 mt-1">משלמים על 10 חודשים ומקבלים 12 חודשים מלאים (2 חודשי מתנה).</p>
             </div>
             <div className="mt-5 flex flex-col gap-3">

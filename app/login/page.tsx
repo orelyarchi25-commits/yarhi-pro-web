@@ -7,6 +7,8 @@ import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "@/components/AuthProvider";
 import { getFirebaseAuth, getFirebaseDb, isFirebaseConfigured } from "@/lib/firebase";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import { signInContractorOnSupabase, signOutSupabase, supabaseAuthErrorMessageHe } from "@/lib/supabase-profile";
 import { TERMS_VERSION } from "@/lib/terms";
 import { firebaseAuthErrorMessageHe, getFirebaseErrorCode } from "@/lib/auth-errors-he";
 import { normalizeLoginEmail } from "@/lib/normalize-email";
@@ -40,30 +42,60 @@ export default function LoginPage() {
       return;
     }
 
-    if (!isFirebaseConfigured()) {
-      login({ acceptedTerms: true });
-      router.push("/");
-      return;
-    }
-
-    const auth = getFirebaseAuth();
-    const db = getFirebaseDb();
-    if (!auth || !db) {
-      setError("הגדרות Firebase חסרות. בדוק קובץ .env.local");
-      return;
-    }
-
     const emailNorm = normalizeLoginEmail(email);
     if (!emailNorm) {
       setError("נא להזין אימייל תקין.");
       return;
     }
 
+    if (!isSupabaseConfigured() && !isFirebaseConfigured()) {
+      login({ acceptedTerms: true });
+      router.push("/");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const doLogin = async () => {
+        if (isSupabaseConfigured()) {
+          try {
+            await signInContractorOnSupabase(emailNorm, password);
+            // מונע סשן Firebase ישן שדורס אישור מ-Supabase
+            if (isFirebaseConfigured()) {
+              const fbAuth = getFirebaseAuth();
+              if (fbAuth?.currentUser) {
+                try {
+                  await signOut(fbAuth);
+                } catch {
+                  /* ignore */
+                }
+              }
+            }
+            router.push("/");
+            return;
+          } catch (sbErr: unknown) {
+            const msg = sbErr instanceof Error ? sbErr.message : String(sbErr);
+            const isInvalid = msg.toLowerCase().includes("invalid login credentials");
+            if (!isInvalid || !isFirebaseConfigured()) {
+              setError(supabaseAuthErrorMessageHe(msg));
+              return;
+            }
+          }
+        }
+
+        if (!isFirebaseConfigured()) {
+          setError("אין חיבור לענן.");
+          return;
+        }
+
+        const auth = getFirebaseAuth();
+        const db = getFirebaseDb();
+        if (!auth || !db) {
+          setError("הגדרות Firebase חסרות. בדוק קובץ .env.local");
+          return;
+        }
+
         const cred = await signInWithEmailAndPassword(auth, emailNorm, password);
-        // חובה לשמור terms ב-Firestore – אחרת דף הבית חושב שאין אישור תקנון (נראה כמו "לא מתחבר")
         try {
           await setDoc(
             doc(db, "users", cred.user.uid),
@@ -71,8 +103,6 @@ export default function LoginPage() {
               email: emailNorm,
               termsAcceptedAt: serverTimestamp(),
               termsVersion: TERMS_VERSION,
-              // נדרש ליצירת מסמך חדש לפי Firestore Rules.
-              accountApproved: false,
               updatedAt: serverTimestamp(),
             },
             { merge: true }
@@ -92,6 +122,35 @@ export default function LoginPage() {
           );
           return;
         }
+
+        if (isSupabaseConfigured()) {
+          try {
+            const idToken = await cred.user.getIdToken();
+            const syncRes = await fetch("/api/auth/sync-supabase-password", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ idToken, password }),
+            });
+            if (syncRes.ok) {
+              await signInContractorOnSupabase(emailNorm, password);
+              try {
+                await signOut(auth);
+              } catch {
+                /* ignore */
+              }
+              router.push("/");
+              return;
+            }
+          } catch (syncErr) {
+            console.warn("[Yarhi Pro] login – sync Supabase:", syncErr);
+          }
+        }
+
+        try {
+          await signOutSupabase();
+        } catch {
+          /* ignore */
+        }
         router.push("/");
       };
 
@@ -103,15 +162,8 @@ export default function LoginPage() {
       ]);
     } catch (err: unknown) {
       if (err instanceof Error && err.message === "LOGIN_TIMEOUT") {
-        console.error("[Yarhi Pro] login timeout – רשת או Firestore לא הגיבו בזמן");
-        try {
-          await signOut(auth);
-        } catch {
-          /* ignore */
-        }
-        setError(
-          "ההתחברות ארכה יותר מדי ונעצרה. בדוק אינטרנט, ש-Firestore Rules פורסמו, ושאין חסימת רשת. אם יש קובץ .env.local – וודא שהוא תואם לפרויקט ב-Firebase Console."
-        );
+        console.error("[Yarhi Pro] login timeout – רשת לא הגיבה בזמן");
+        setError("ההתחברות ארכה יותר מדי ונעצרה. בדוק אינטרנט והגדרות ענן, ונסה שוב.");
       } else {
         const code = getFirebaseErrorCode(err);
         setError(firebaseAuthErrorMessageHe(code));

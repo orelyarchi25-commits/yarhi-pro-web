@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>סקיצה + מידות</title>
+  </head>
+  <body>
+    <div class="app">
+      <h1>סקיצה + מידות</h1>
+      <p class="sub">כלי פשוט · נפרד מ־Yarhi Pro</p>
+
+      <label class="drop" id="drop">
+        <input type="file" id="file" accept="image/*" hidden />
+        העלאת סקיצה
+      </label>
+
+      <p class="msg" id="msg">העלו תמונה, אחר כך לחצו על שני קצוות של צלע ורשמו מידה.</p>
+
+      <div class="board wrap-hidden" id="boardWrap">
+        <canvas id="canvas"></canvas>
+      </div>
+
+      <div class="bar wrap-hidden" id="tools">
+        <button type="button" id="undoBtn">בטל אחרון</button>
+        <button type="button" id="clearBtn">נקה מידות</button>
+      </div>
+
+      <div class="form wrap-hidden" id="form">
+        <label>אורך קיר (ס״מ) <input id="lengthWall" type="number" step="0.1" /></label>
+        <label>יציאה / עומק (ס״מ) <input id="exitWidth" type="number" step="0.1" /></label>
+        <label class="check"><input type="checkbox" id="isLShape" /> צורת ר׳</label>
+        <label class="l">רוחב מגרעת <input id="lWallWidth" type="number" step="0.1" /></label>
+        <label class="l">עומק מגרעת <input id="lWallDepth" type="number" step="0.1" /></label>
+        <button type="button" class="go" id="calcBtn">חשב</button>
+      </div>
+
+      <div class="out wrap-hidden" id="out"></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

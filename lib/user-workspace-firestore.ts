@@ -6,7 +6,15 @@ export type { FieldWindowRecord } from "@/lib/field-windows";
 /** מפתח אחד תחת users/{uid} — לא לדרוס שדות פרופיל בשורש */
 export const USER_WORKSPACE_FIELD = "yarhiWorkspace";
 
-export type FenceSegmentDraft = { id: number; L: number; H: number; P?: number };
+export type FenceSegmentDraft = {
+  id: number;
+  L: number;
+  H: number;
+  P?: number;
+  connected?: boolean;
+  corner?: boolean;
+  side?: "left" | "right";
+};
 
 export type ScheduleJobType = "project" | "field";
 
@@ -83,6 +91,7 @@ export type UserWorkspaceSnapshot = {
     fenceGap: string;
     fenceColor: string;
     fenceSlatColor: string;
+    fenceSimGate?: "none" | "single" | "double";
   };
   businessTransactions: Transaction[];
   scheduleJobs?: ScheduleJob[];

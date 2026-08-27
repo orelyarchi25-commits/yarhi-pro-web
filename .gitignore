@@ -26,6 +26,9 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# גיבויי לקוחות / CRM — לא לקומיט
+/backups/
+
 # Firebase Admin SDK key — לעולם לא לקומיט
 firebase-service-account.json
 *-firebase-adminsdk-*.json

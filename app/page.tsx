@@ -6,10 +6,13 @@ import { useRouter } from "next/navigation";
 import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import BusinessView, { loadTransactions, type CrmProject, type Transaction } from "@/app/components/BusinessView";
 import FieldWindowsView from "@/app/components/FieldWindowsView";
+import ProductProjectBar from "@/app/components/ProductProjectBar";
 import ScheduleView from "@/app/components/ScheduleView";
 import { useAuth } from "@/components/AuthProvider";
 import { useSearchString } from "@/hooks/useSearchString";
 import { getFirebaseDb } from "@/lib/firebase";
+import { loadWorkspaceFromSupabase, saveWorkspaceToSupabase } from "@/lib/supabase-workspace";
+import { persistWorkspaceToBothClouds } from "@/lib/workspace-cloud-save";
 import { isAdminEmail } from "@/lib/admin-access";
 import {
   BUSINESS_SETTINGS_KEYS,
@@ -22,9 +25,32 @@ import {
 } from "@/lib/user-workspace-firestore";
 import {
   fieldWindowsLocalStorageKey,
+  formatFieldWindowDate,
   getFieldWindowRecordIdFromProject,
+  newFieldWindowRecordId,
   readFieldWindowsFromLocal,
 } from "@/lib/field-windows";
+import {
+  buildBundleCustomerQuoteHtml,
+  getActiveBundleUnitLabel,
+} from "@/lib/bundle-customer-quote";
+import { buildContractorSignatureHtml } from "@/lib/quote-signature";
+import {
+  newProjectUnitId,
+  projectIsBundle,
+  recalcBundleTotals,
+  defaultFenceBundleFormState,
+  defaultPergolaBundleFormState,
+  fenceFormHasSegments,
+  fenceResultFromSavedUnit,
+  pergolaFormHasDimensions,
+  pergolaResultFromSavedUnit,
+  unitTypeForProductView,
+  viewForUnitType,
+  type BundleFormState,
+  type ProjectUnit,
+  type ProjectUnitType,
+} from "@/lib/project-bundle";
 import type { CrmStatus } from "@/lib/crm-status";
 import {
   CRM_STATUS_LABELS,
@@ -49,14 +75,249 @@ import {
 } from "@/lib/vat";
 import { EMPTY_FENCE_RESULT, type FenceCalcResult } from "@/lib/types/fence-calc";
 import { EMPTY_PERGOLA_RESULT, type PergolaCalcResult } from "@/lib/types/pergola-calc";
+import {
+  appendPergolaShareUrlParams,
+  buildDividerAccessoryStates,
+  buildSimWhatsAppUrl,
+  createShortShareUrl,
+  encodeDividerStatesParam,
+  ledToneFromColor,
+  mergePergolaShareWithLive,
+  openSimWhatsApp,
+  requestLiveSimConfig,
+  type LiveSimConfig,
+  type ShareFenceConfig,
+  type SharePergolaConfig,
+  normPergolaShareEnv,
+  normFenceShareEnv,
+  normFenceShareGate,
+} from "@/lib/share-sim";
 
-type ViewId = "dashboard" | "data" | "fences" | "field-windows" | "3d" | "schedule" | "settings" | "business";
-const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "field-windows", "3d", "schedule", "settings", "business"];
+type ViewId = "dashboard" | "data" | "fences" | "field-windows" | "3d" | "fence-3d" | "schedule" | "settings" | "business";
+const VIEW_IDS: ViewId[] = ["dashboard", "data", "fences", "field-windows", "3d", "fence-3d", "schedule", "settings", "business"];
 function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "frame-ribs-left-dual-face-v1";
+const SIM_VERSION = "wall-mount-v6";
+
+type FenceSide = "left" | "right";
+type FenceSegRow = {
+  id: number;
+  L: number;
+  H: number;
+  P?: number;
+  connected?: boolean;
+  corner?: boolean;
+  /** צד בחצר — רק למקטע ראשי (לא פינה/המשך) */
+  side?: FenceSide;
+};
+
+/** פינה 90° — connected בלי corner:false (תאימות לאחור) */
+function fenceSegIsCorner(s: { connected?: boolean; corner?: boolean }) {
+  return !!s.connected && s.corner !== false;
+}
+/** המשך באותו כיוון — גובה/אורך משתנים בלי סיבוב */
+function fenceSegIsContinue(s: { connected?: boolean; corner?: boolean }) {
+  return !!s.connected && s.corner === false;
+}
+
+function emptyFenceFronts(): FenceSegRow[] {
+  return [{ id: Date.now(), L: 0, H: 0, side: "left" }];
+}
+
+function fenceRunRootIndex(segs: { connected?: boolean }[], index: number): number {
+  let root = index;
+  while (root > 0 && segs[root]?.connected) root -= 1;
+  return root;
+}
+
+/** צד המקטע בהדמיה — לפי בחירה, או ברירת מחדל (ראשון=שמאל) */
+function fenceSegSideOf(
+  segs: { connected?: boolean; side?: FenceSide }[],
+  index: number
+): FenceSide {
+  const root = fenceRunRootIndex(segs, index);
+  const explicit = segs[root]?.side;
+  if (explicit === "left" || explicit === "right") return explicit;
+  let rootsBefore = 0;
+  for (let i = 0; i < root; i++) {
+    if (!segs[i]?.connected) rootsBefore += 1;
+  }
+  return rootsBefore === 0 ? "left" : "right";
+}
+
+function defaultSideForNewRoot(segs: { connected?: boolean; side?: FenceSide }[]): FenceSide {
+  let hasLeft = false;
+  let hasRight = false;
+  segs.forEach((s, i) => {
+    if (s.connected) return;
+    const side = fenceSegSideOf(segs, i);
+    if (side === "left") hasLeft = true;
+    else hasRight = true;
+  });
+  if (!hasLeft) return "left";
+  if (!hasRight) return "right";
+  return "right";
+}
+
+type FenceSegLabel = {
+  title: string;
+  hint: string;
+  tone: "left" | "right" | "front" | "side" | "continue" | "corner";
+  runIdx: number;
+  seq: number;
+};
+
+/** תיוג לפי בחירת שמאל/ימין (לא לפי סדר בלבד) */
+function fenceSegLabel(
+  segs: { connected?: boolean; corner?: boolean; side?: FenceSide }[],
+  index: number,
+  env: "villa" | "garden" = "villa"
+): FenceSegLabel {
+  const side = fenceSegSideOf(segs, index);
+  const sideHeb = side === "left" ? "שמאל" : "ימין";
+  let fronts = 0;
+  let i = 0;
+  let seq = 0;
+  while (i < segs.length) {
+    const runIdx = fronts;
+    seq += 1;
+    if (i === index) {
+      if (env === "garden") {
+        return {
+          title: runIdx === 0 ? "חזית" : `חזית ${runIdx + 1}`,
+          hint: "מקטע בחזית",
+          tone: "front",
+          runIdx,
+          seq,
+        };
+      }
+      return {
+        title: side === "left" ? "צד שמאל" : "צד ימין",
+        hint: "לחץ שמאל או ימין למטה",
+        tone: side,
+        runIdx,
+        seq,
+      };
+    }
+    fronts += 1;
+    i += 1;
+    let sideInRun = 0;
+    let continueInRun = 0;
+    while (i < segs.length && segs[i]?.connected) {
+      seq += 1;
+      if (i === index) {
+        if (fenceSegIsContinue(segs[i]!)) {
+          return {
+            title: `המשך · ${sideHeb}`,
+            hint: "אותו כיוון · עמוד משותף",
+            tone: "continue",
+            runIdx,
+            seq,
+          };
+        }
+        if (sideInRun === 0) {
+          return {
+            title: `פינה · ${sideHeb} לבית`,
+            hint: "סיבוב 90° לכיוון הבית",
+            tone: "side",
+            runIdx,
+            seq,
+          };
+        }
+        return {
+          title: `פינה · ${sideHeb}`,
+          hint: "המשך לאורך הבית",
+          tone: "corner",
+          runIdx,
+          seq,
+        };
+      }
+      if (fenceSegIsContinue(segs[i]!)) continueInRun += 1;
+      else sideInRun += 1;
+      i += 1;
+    }
+  }
+  return { title: `מקטע ${index + 1}`, hint: "", tone: "front", runIdx: 0, seq: index + 1 };
+}
+
+function fenceSegTitle(
+  segs: { connected?: boolean; corner?: boolean; side?: FenceSide }[],
+  index: number,
+  env: "villa" | "garden" = "villa"
+): string {
+  return fenceSegLabel(segs, index, env).title;
+}
+
+function fenceSegToneClass(tone: FenceSegLabel["tone"]): string {
+  switch (tone) {
+    case "left":
+      return "border-sky-400 bg-sky-50";
+    case "right":
+      return "border-amber-400 bg-amber-50";
+    case "side":
+      return "border-violet-300 bg-violet-50";
+    case "continue":
+      return "border-sky-300 bg-white";
+    case "corner":
+      return "border-emerald-300 bg-white";
+    default:
+      return "border-slate-200 bg-white";
+  }
+}
+
+function withFenceSide(s: FenceSegRow): Partial<FenceSegRow> {
+  if (s.connected) return {};
+  if (s.side === "left" || s.side === "right") return { side: s.side };
+  return {};
+}
+
+function fenceSegsForApi(segs: FenceSegRow[]) {
+  return segs
+    .filter((s) => s.L > 0 && s.H > 0 && (s.P ?? 0) >= 0)
+    .map((s) => ({
+      L: s.L,
+      H: s.H,
+      P: typeof s.P === "number" ? s.P : undefined,
+      ...(s.connected ? { connected: true as const } : {}),
+      ...(fenceSegIsContinue(s) ? { corner: false as const } : {}),
+      ...(s.connected && s.corner === true ? { corner: true as const } : {}),
+      ...withFenceSide(s),
+    }));
+}
+
+function fenceSegsForSim(segs: FenceSegRow[]) {
+  return segs
+    .map((s, idx) => ({
+      s,
+      side: !s.connected ? fenceSegSideOf(segs, idx) : undefined,
+    }))
+    .filter(({ s }) => (s.L ?? 0) > 0 && (s.H ?? 0) > 0)
+    .map(({ s, side }) => ({
+      L: s.L,
+      H: s.H,
+      P: typeof s.P === "number" ? s.P : 0,
+      connected: !!s.connected,
+      ...(fenceSegIsContinue(s) ? { corner: false as const } : {}),
+      ...(fenceSegIsCorner(s) ? { corner: true as const } : {}),
+      ...(side ? { side } : {}),
+    }));
+}
+
+function fenceSegsForFormState(segs: FenceSegRow[]) {
+  return segs
+    .filter((s) => s.L > 0 && s.H > 0)
+    .map((s) => ({
+      L: s.L,
+      H: s.H,
+      P: s.P,
+      ...(s.connected ? { connected: true as const } : {}),
+      ...(fenceSegIsContinue(s) ? { corner: false as const } : {}),
+      ...(s.connected && s.corner === true ? { corner: true as const } : {}),
+      ...withFenceSide(s),
+    }));
+}
 
 function scheduleLocalStorageKey(uid: string) {
   return `yarhi_schedule_${uid}`;
@@ -170,6 +431,42 @@ function createVitrineOpening(idSeed = Date.now()): VitrineOpening {
   return { id: idSeed, widthCm: "", heightCm: "", profile: "7000", note: "" };
 }
 
+/** אם בלוח המקומי יש לקוחות שהענן לא מכיר — לא לדרוס אותם (פיתוח מול אתר חי). */
+function isRicherCrmList(local: unknown, cloud: unknown): boolean {
+  if (!Array.isArray(local) || local.length === 0) return false;
+  if (!Array.isArray(cloud)) return true;
+  if (local.length > cloud.length) return true;
+  const cloudNames = new Set(
+    cloud.map((p) => String((p as { customer?: string })?.customer || "").trim()).filter(Boolean)
+  );
+  return local.some((p) => {
+    const name = String((p as { customer?: string })?.customer || "").trim();
+    return name.length > 0 && !cloudNames.has(name);
+  });
+}
+
+function readLocalCrmList(): unknown[] {
+  try {
+    const raw = localStorage.getItem("yarhi_crm_data");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function readLocalTxList(): unknown[] {
+  try {
+    const raw = localStorage.getItem("yarchiTransactions");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 /** טלפון לקוח לחיפוש בטבלת CRM (ליד / פרגולה / גדר) */
 function getCrmProjectPhoneForSearch(p: CrmProject): string {
   const fs = (p.formState ?? {}) as Record<string, unknown>;
@@ -205,8 +502,14 @@ function HomeGate() {
     authReady,
     profileLoading,
     firebaseUser,
+    supabaseUser,
     logout,
+    refreshAccountAccess,
+    cloudBackend,
   } = useAuth();
+
+  const accountEmail = supabaseUser?.email ?? firebaseUser?.email ?? null;
+  const hasCloudAccount = Boolean(supabaseUser || firebaseUser);
 
   if (!authReady || (isLoggedIn && profileLoading)) {
     const isDev = process.env.NODE_ENV === "development";
@@ -236,7 +539,7 @@ function HomeGate() {
     );
   }
 
-  if (isLoggedIn && hasAcceptedTerms && !accountApproved && firebaseUser) {
+  if (isLoggedIn && hasAcceptedTerms && !accountApproved && hasCloudAccount) {
     const expired = accountBlockReason === "expired";
     return (
       <main className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-6" dir="rtl">
@@ -268,8 +571,18 @@ function HomeGate() {
             </>
           )}
           <p className="text-slate-500 text-xs">
-            אימייל: <span className="font-mono text-slate-300">{firebaseUser.email ?? "—"}</span>
+            אימייל: <span className="font-mono text-slate-300">{accountEmail ?? "—"}</span>
+            {cloudBackend ? (
+              <span className="block mt-1 text-slate-600">מקור: {cloudBackend}</span>
+            ) : null}
           </p>
+          <button
+            type="button"
+            onClick={() => void refreshAccountAccess()}
+            className="w-full py-3 rounded-xl bg-sky-600 hover:bg-sky-500 font-black text-white transition"
+          >
+            בדוק שוב אם אושרתי
+          </button>
           <button
             type="button"
             onClick={() => void logout()}
@@ -283,7 +596,7 @@ function HomeGate() {
   }
 
   if (!isLoggedIn || !hasAcceptedTerms) {
-    if (isLoggedIn && !hasAcceptedTerms && firebaseUser) {
+    if (isLoggedIn && !hasAcceptedTerms && hasCloudAccount) {
       return (
         <main className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-6" dir="rtl">
           <div className="w-full max-w-xl rounded-3xl border border-amber-600/50 bg-slate-800/95 shadow-2xl p-8 md:p-10 text-center space-y-4">
@@ -342,19 +655,27 @@ export default function Page() {
 function AuthenticatedPageContent() {
   const router = useRouter();
   const searchString = useSearchString();
-  const { logout, firebaseUser, isAdmin } = useAuth();
-  const isManagerUser = isAdmin || isAdminEmail(firebaseUser?.email);
+  const { logout, firebaseUser, supabaseUser, cloudUserId, cloudBackend, isAdmin } = useAuth();
+  const isManagerUser = isAdmin || isAdminEmail(supabaseUser?.email ?? firebaseUser?.email);
   const currentView = parseView(new URLSearchParams(searchString).get("view"));
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const fenceSimIframeRef = useRef<HTMLIFrameElement | null>(null);
   const pergolaSimIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const lastLiveSimConfigRef = useRef<LiveSimConfig | null>(null);
   const lastUidRef = useRef<string | null>(null);
   const [alertMsg, setAlertMsg] = useState("");
   const [hiddenCostsBox, setHiddenCostsBox] = useState(false);
+  const [showPergolaPriceCompare, setShowPergolaPriceCompare] = useState(false);
+  const [showFencePriceCompare, setShowFencePriceCompare] = useState(false);
   const [fenceHiddenCostsBox, setFenceHiddenCostsBox] = useState(false);
   const [kitOrderModal, setKitOrderModal] = useState<null | { kind: "pergola" | "fence" }>(null);
-  const [fencesInnerTab, setFencesInnerTab] = useState<"calc" | "sim">("calc");
   const [pergolaSimLoaded, setPergolaSimLoaded] = useState(false);
+  const [fenceSimLoaded, setFenceSimLoaded] = useState(false);
+  const [pergolaSimEnv, setPergolaSimEnv] = useState<"villa" | "balcony" | "garden">("villa");
+  const [fenceSimEnv, setFenceSimEnv] = useState<"villa" | "garden">("villa");
+  const [fenceSimGate, setFenceSimGate] = useState<"none" | "single" | "double">("none");
+  /** הסתרת פאנל מידות בהדמיית גדר (כמו «הסתר תפריט» בפרגולה) */
+  const [fenceSimPanelVisible, setFenceSimPanelVisible] = useState(true);
   /** במובייל: גיליון "עוד" (הגדרות / פיננסי / התנתקות) */
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
@@ -440,7 +761,7 @@ function AuthenticatedPageContent() {
   const [fenceCustPhone, setFenceCustPhone] = useState("");
   const [fenceCustAddress, setFenceCustAddress] = useState("");
   const [fenceCustInternalNotes, setFenceCustInternalNotes] = useState("");
-  const [fenceSegments, setFenceSegments] = useState<{ id: number; L: number; H: number; P?: number }[]>([{ id: 1, L: 0, H: 0 }]);
+  const [fenceSegments, setFenceSegments] = useState<FenceSegRow[]>(emptyFenceFronts());
   const [fenceSegDrafts, setFenceSegDrafts] = useState<Record<number, Partial<Record<"L" | "H" | "P", string>>>>({});
   const [fenceInGround, setFenceInGround] = useState(false);
   const [fenceSlat, setFenceSlat] = useState("100");
@@ -451,6 +772,15 @@ function AuthenticatedPageContent() {
   const [crmData, setCrmData] = useState<CrmProject[]>([]);
   /** כשטוענים פרויקט פרגולה מ-CRM — שמירה מעדכנת את אותה שורה (בלי כפילות) ומסנכרנת הערות פנימיות */
   const [pergolaCrmEditId, setPergolaCrmEditId] = useState<number | null>(null);
+  /** כשטוענים פרויקט גדר מ-CRM — סיכום ללקוח משתמש במחיר העסקה השמור (כולל אחרי «ערוך מחיר») */
+  const [fenceCrmEditId, setFenceCrmEditId] = useState<number | null>(null);
+  /** פרויקט משולב — לקוח עם כמה מוצרים */
+  const [bundleProjectId, setBundleProjectId] = useState<number | null>(null);
+  const [activeUnitId, setActiveUnitId] = useState<string | null>(null);
+  const snapshotActiveUnitRef = useRef<(unit: ProjectUnit) => ProjectUnit>((unit) => unit);
+  const handleFieldWindowRecordsChangeRef = useRef<(records: FieldWindowRecord[]) => void>(() => {});
+  const bundleSyncingRef = useRef(false);
+  const lastLoadedBundleUnitRef = useRef<string | null>(null);
   /** מודל ליד חדש / עריכת ליד מלוח הבקרה */
   const [leadModalOpen, setLeadModalOpen] = useState(false);
   const [leadEditId, setLeadEditId] = useState<number | null>(null);
@@ -469,6 +799,11 @@ function AuthenticatedPageContent() {
     customerName: string;
   }>(null);
   const [crmDealAmountRaw, setCrmDealAmountRaw] = useState("");
+  const [crmPriceEditModal, setCrmPriceEditModal] = useState<null | {
+    projectId: number;
+    customerName: string;
+  }>(null);
+  const [crmPriceEditRaw, setCrmPriceEditRaw] = useState("");
   const [businessTransactions, setBusinessTransactions] = useState<Transaction[]>([]);
   const [scheduleJobs, setScheduleJobs] = useState<ScheduleJob[]>([]);
   const [fieldWindowRecords, setFieldWindowRecords] = useState<FieldWindowRecord[]>([]);
@@ -479,6 +814,7 @@ function AuthenticatedPageContent() {
   const scheduleJobsCloudRef = useRef<ScheduleJob[]>([]);
   const fieldWindowRecordsRef = useRef<FieldWindowRecord[]>([]);
   const fieldWindowRecordsCloudRef = useRef<FieldWindowRecord[]>([]);
+  const persistWorkspaceNowRef = useRef<() => Promise<void>>(async () => {});
 
   const crmStaleFollowUpCount = useMemo(() => countCrmStaleAlerts(crmData), [crmData]);
 
@@ -618,6 +954,93 @@ function AuthenticatedPageContent() {
     const incVat = incVatFromExVat(exVat, businessVatDecimal);
     return { exVat, incVat, vatAmount: incVat - exVat };
   }, [pergolaResult.exVat, hasVitrines, vitrineQuote.exVat, businessVatDecimal]);
+
+  /** מחיר ללקוח במסך: עדיפות למחיר CRM אחרי «ערוך מחיר», עם אפשרות להשוות למחיר המחושב */
+  const pergolaCustomerPriceDisplay = useMemo(() => {
+    const liveEx = Math.round(totalPergolaWithVitrines.exVat);
+    const liveInc = Math.round(totalPergolaWithVitrines.incVat);
+    let dealInc = liveInc;
+    let dealEx = liveEx;
+    let fromCrm = false;
+
+    if (bundleProjectId != null && activeUnitId) {
+      const unit = crmData.find((p) => p.id === bundleProjectId)?.units?.find((u) => u.id === activeUnitId);
+      if (unit?.type === "pergola" && Number(unit.sellingPriceInc) > 0) {
+        dealInc = Math.round(Number(unit.sellingPriceInc));
+        dealEx = Math.round(Number(unit.incomeExVat) || exVatFromIncVat(dealInc, businessVatDecimal));
+        fromCrm = true;
+      }
+    } else if (pergolaCrmEditId != null) {
+      const proj = crmData.find((p) => p.id === pergolaCrmEditId);
+      if (proj && Number(proj.sellingPriceInc) > 0) {
+        dealInc = Math.round(Number(proj.sellingPriceInc));
+        dealEx = Math.round(Number(proj.incomeExVat) || exVatFromIncVat(dealInc, businessVatDecimal));
+        fromCrm = true;
+      }
+    }
+
+    const useDeal = fromCrm && dealInc > 0;
+    const hasOverride = useDeal && dealInc !== liveInc && liveInc > 0;
+    return {
+      displayInc: useDeal ? dealInc : liveInc,
+      displayEx: useDeal ? dealEx : liveEx,
+      liveInc,
+      liveEx,
+      hasOverride,
+      isDiscount: hasOverride && dealInc < liveInc,
+    };
+  }, [
+    totalPergolaWithVitrines.exVat,
+    totalPergolaWithVitrines.incVat,
+    bundleProjectId,
+    activeUnitId,
+    crmData,
+    pergolaCrmEditId,
+    businessVatDecimal,
+  ]);
+
+  useEffect(() => {
+    setShowPergolaPriceCompare(false);
+  }, [pergolaCrmEditId, bundleProjectId, activeUnitId]);
+
+  useEffect(() => {
+    setShowFencePriceCompare(false);
+  }, [fenceCrmEditId, bundleProjectId, activeUnitId]);
+
+  const fenceCustomerPriceDisplay = useMemo(() => {
+    const liveInc = Math.round(Number(fenceResult.sellIncVat) || 0);
+    const liveEx = Math.round(Number(fenceResult.sellExVat) || 0);
+    let dealInc = liveInc;
+    let dealEx = liveEx;
+    let fromCrm = false;
+
+    if (bundleProjectId != null && activeUnitId) {
+      const unit = crmData.find((p) => p.id === bundleProjectId)?.units?.find((u) => u.id === activeUnitId);
+      if (unit?.type === "fence" && Number(unit.sellingPriceInc) > 0) {
+        dealInc = Math.round(Number(unit.sellingPriceInc));
+        dealEx = Math.round(Number(unit.incomeExVat) || exVatFromIncVat(dealInc, businessVatDecimal));
+        fromCrm = true;
+      }
+    } else if (fenceCrmEditId != null) {
+      const proj = crmData.find((p) => p.id === fenceCrmEditId);
+      if (proj && Number(proj.sellingPriceInc) > 0) {
+        dealInc = Math.round(Number(proj.sellingPriceInc));
+        dealEx = Math.round(Number(proj.incomeExVat) || exVatFromIncVat(dealInc, businessVatDecimal));
+        fromCrm = true;
+      }
+    }
+
+    const useDeal = fromCrm && dealInc > 0;
+    const hasOverride = useDeal && dealInc !== liveInc && liveInc > 0;
+    return {
+      displayInc: useDeal ? dealInc : liveInc,
+      displayEx: useDeal ? dealEx : liveEx,
+      liveInc,
+      liveEx,
+      hasOverride,
+      isDiscount: hasOverride && dealInc < liveInc,
+    };
+  }, [fenceResult.sellIncVat, fenceResult.sellExVat, bundleProjectId, activeUnitId, crmData, fenceCrmEditId, businessVatDecimal]);
 
   const openNewLeadModal = useCallback(() => {
     setLeadEditId(null);
@@ -836,6 +1259,105 @@ function AuthenticatedPageContent() {
     showAlert("הסטטוס והסכום עודכנו");
   }, [crmDealAmountModal, crmDealAmountRaw, crmData, showAlert, businessVatDecimal]);
 
+  const openCrmPriceEdit = useCallback((p: CrmProject) => {
+    const inc = Math.round(Number(p.sellingPriceInc) || 0);
+    setCrmPriceEditRaw(inc > 0 ? String(inc) : "");
+    setCrmPriceEditModal({
+      projectId: p.id,
+      customerName: p.customer ?? "",
+    });
+  }, []);
+
+  const applyCrmPriceEdit = useCallback(() => {
+    if (!crmPriceEditModal) return;
+    const incVat = Number(crmPriceEditRaw.replace(/[^0-9]/g, "")) || 0;
+    if (incVat <= 0) {
+      showAlert("הזן סכום עסקה חיובי (כולל מע״מ)");
+      return;
+    }
+    const { projectId } = crmPriceEditModal;
+    const base = Math.round(exVatFromIncVat(incVat, businessVatDecimal));
+    const vat = Math.round(vatFromIncVat(incVat, businessVatDecimal));
+
+    setCrmData((list) =>
+      list.map((x) => {
+        if (x.id !== projectId) return x;
+
+        const oldTotal = Math.round(Number(x.sellingPriceInc) || 0);
+        const prevList = Math.round(Number(x.quoteListPriceInc) || 0);
+        const listAnchor = Math.max(prevList, oldTotal);
+        const nextListPrice = incVat < listAnchor && listAnchor > 0 ? listAnchor : undefined;
+
+        if (projectIsBundle(x) && Array.isArray(x.units) && x.units.length > 0) {
+          let units = x.units;
+          if (oldTotal > 0) {
+            const ratio = incVat / oldTotal;
+            units = x.units.map((u) => {
+              const uInc = Math.max(0, Math.round((Number(u.sellingPriceInc) || 0) * ratio));
+              const uEx = Math.round(exVatFromIncVat(uInc, businessVatDecimal));
+              return {
+                ...u,
+                sellingPriceInc: uInc,
+                incomeExVat: uEx,
+                vatAmount: uInc - uEx,
+              };
+            });
+            const sumInc = units.reduce((s, u) => s + (Number(u.sellingPriceInc) || 0), 0);
+            const diff = incVat - sumInc;
+            if (diff !== 0) {
+              const lastIdx = units.length - 1;
+              const last = units[lastIdx]!;
+              const fixedInc = Math.max(0, (Number(last.sellingPriceInc) || 0) + diff);
+              const fixedEx = Math.round(exVatFromIncVat(fixedInc, businessVatDecimal));
+              units = units.map((u, i) =>
+                i === lastIdx
+                  ? { ...u, sellingPriceInc: fixedInc, incomeExVat: fixedEx, vatAmount: fixedInc - fixedEx }
+                  : u
+              );
+            }
+          } else {
+            const per = Math.floor(incVat / x.units.length);
+            let remainder = incVat - per * x.units.length;
+            units = x.units.map((u) => {
+              const uInc = per + (remainder > 0 ? 1 : 0);
+              if (remainder > 0) remainder -= 1;
+              const uEx = Math.round(exVatFromIncVat(uInc, businessVatDecimal));
+              return {
+                ...u,
+                sellingPriceInc: uInc,
+                incomeExVat: uEx,
+                vatAmount: uInc - uEx,
+              };
+            });
+          }
+          const next: CrmProject = {
+            ...x,
+            units,
+            ...recalcBundleTotals(units),
+          };
+          if (nextListPrice != null) next.quoteListPriceInc = nextListPrice;
+          else delete next.quoteListPriceInc;
+          return next;
+        }
+
+        const next: CrmProject = {
+          ...x,
+          sellingPriceInc: incVat,
+          income: incVat,
+          incomeExVat: base,
+          vatAmount: vat,
+        };
+        if (nextListPrice != null) next.quoteListPriceInc = nextListPrice;
+        else delete next.quoteListPriceInc;
+        return next;
+      })
+    );
+
+    setCrmPriceEditModal(null);
+    setCrmPriceEditRaw("");
+    showAlert("מחיר העסקה עודכן — יופיע גם בסיכום ללקוח (טען את הפרויקט אם עדיין לא)");
+  }, [crmPriceEditModal, crmPriceEditRaw, showAlert, businessVatDecimal]);
+
   useEffect(() => {
     if (!crmDealAmountModal) return;
     const prevOverflow = document.body.style.overflow;
@@ -844,6 +1366,15 @@ function AuthenticatedPageContent() {
       document.body.style.overflow = prevOverflow;
     };
   }, [crmDealAmountModal]);
+
+  useEffect(() => {
+    if (!crmPriceEditModal) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [crmPriceEditModal]);
 
   useEffect(() => {
     if (!leadModalOpen) return;
@@ -878,23 +1409,20 @@ function AuthenticatedPageContent() {
 
   /** מונע ערבוב נתונים בין קבלנים באותו דפדפן (localStorage). */
   useEffect(() => {
-    const uid = firebaseUser?.uid ?? null;
+    const uid = cloudUserId ?? null;
     if (!uid) {
       lastUidRef.current = uid;
       return;
     }
 
     if (lastUidRef.current && lastUidRef.current !== uid) {
+      // לא מוחקים CRM/הכנסות — אותו קבלן יכול לעבור Firebase→Supabase עם uid שונה
       try {
-        localStorage.removeItem("yarhi_crm_data");
-        localStorage.removeItem("yarchiTransactions");
         localStorage.removeItem("yarhi_current_calc");
         localStorage.removeItem("yarhi_logoDataUrl");
         for (const key of BUSINESS_SETTINGS_KEYS) localStorage.removeItem("yarhi_" + key);
       } catch {}
 
-      setCrmData([]);
-      setBusinessTransactions([]);
       setScheduleJobs([]);
       setLogoDataUrl(null);
 
@@ -926,7 +1454,7 @@ function AuthenticatedPageContent() {
     }
 
     lastUidRef.current = uid;
-  }, [firebaseUser?.uid]);
+  }, [cloudUserId]);
 
 
   useEffect(() => {
@@ -1038,23 +1566,31 @@ function AuthenticatedPageContent() {
   /** טעינת טיוטות + CRM + תנועות מהענן (דורס localStorage אם יש yarhiWorkspace) */
   useEffect(() => {
     setWorkspaceCloudHydrated(false);
-    const uid = firebaseUser?.uid;
+    const uid = cloudUserId;
     if (!uid) {
-      setWorkspaceCloudHydrated(true);
-      return;
-    }
-    const db = getFirebaseDb();
-    if (!db) {
       setWorkspaceCloudHydrated(true);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const snap = await getDoc(doc(db, "users", uid));
+        let parsed: ReturnType<typeof parseWorkspaceFromFirestore> = null;
+        let rawWs: unknown = undefined;
+        if (cloudBackend === "supabase") {
+          parsed = await loadWorkspaceFromSupabase(uid);
+          rawWs = parsed ?? undefined;
+        } else {
+          const db = getFirebaseDb();
+          if (!db) {
+            if (!cancelled) setWorkspaceCloudHydrated(true);
+            return;
+          }
+          const snap = await getDoc(doc(db, "users", uid));
+          if (cancelled) return;
+          rawWs = snap.exists() ? snap.data()?.[USER_WORKSPACE_FIELD] : undefined;
+          parsed = parseWorkspaceFromFirestore(rawWs);
+        }
         if (cancelled) return;
-        const rawWs = snap.exists() ? snap.data()?.[USER_WORKSPACE_FIELD] : undefined;
-        const parsed = parseWorkspaceFromFirestore(rawWs);
         if (!parsed) {
           // משתמש חדש (או בלי yarhiWorkspace בכלל): מנקים מקומית כדי שלא יישארו נתוני משתמש קודם
           try {
@@ -1165,8 +1701,22 @@ function AuthenticatedPageContent() {
           setWorkspaceCloudHydrated(true);
           return;
         }
-        if (parsed.crmProjects !== undefined) setCrmData(parsed.crmProjects);
-        if (parsed.businessTransactions !== undefined) setBusinessTransactions(parsed.businessTransactions);
+        if (parsed.crmProjects !== undefined) {
+          const localCrm = readLocalCrmList();
+          if (isRicherCrmList(localCrm, parsed.crmProjects)) {
+            setCrmData(localCrm as CrmProject[]);
+          } else {
+            setCrmData(parsed.crmProjects);
+          }
+        }
+        if (parsed.businessTransactions !== undefined) {
+          const localTx = readLocalTxList();
+          if (isRicherCrmList(localTx, parsed.businessTransactions)) {
+            setBusinessTransactions(localTx as Transaction[]);
+          } else {
+            setBusinessTransactions(parsed.businessTransactions);
+          }
+        }
         {
           const loadedSchedule = resolveScheduleJobsOnLoad(uid, rawWs, parsed);
           scheduleJobsCloudRef.current = loadedSchedule;
@@ -1266,14 +1816,32 @@ function AuthenticatedPageContent() {
           if (f.fenceSlatColor !== undefined) setFenceSlatColor(String(f.fenceSlatColor));
           if (Array.isArray(f.fenceSegments) && f.fenceSegments.length > 0) {
             setFenceSegments(
-              f.fenceSegments.map((seg, i) => ({
-                id: typeof seg.id === "number" ? seg.id : Date.now() + i,
-                L: Number(seg.L) || 0,
-                H: Number(seg.H) || 0,
-                P: typeof seg.P === "number" ? seg.P : undefined,
-              }))
+              (() => {
+                let rootN = 0;
+                return f.fenceSegments.map((seg, i) => {
+                  const connected = !!seg.connected;
+                  const rawSide = (seg as { side?: string }).side;
+                  let side: FenceSide | undefined;
+                  if (!connected) {
+                    if (rawSide === "left" || rawSide === "right") side = rawSide;
+                    else side = rootN === 0 ? "left" : "right";
+                    rootN += 1;
+                  }
+                  return {
+                    id: typeof seg.id === "number" ? seg.id : Date.now() + i,
+                    L: Number(seg.L) || 0,
+                    H: Number(seg.H) || 0,
+                    P: typeof seg.P === "number" ? seg.P : undefined,
+                    connected,
+                    ...(connected && seg.corner === false ? { corner: false as const } : {}),
+                    ...(connected && seg.corner === true ? { corner: true as const } : {}),
+                    ...(side ? { side } : {}),
+                  };
+                });
+              })()
             );
           }
+          if (f.fenceSimGate !== undefined) setFenceSimGate(normFenceShareGate(f.fenceSimGate));
         }
         const bs = parsed.businessSettings;
         if (bs && typeof bs === "object") {
@@ -1346,10 +1914,20 @@ function AuthenticatedPageContent() {
         }
         try {
           if (parsed.crmProjects !== undefined) {
-            localStorage.setItem("yarhi_crm_data", JSON.stringify(parsed.crmProjects));
+            const localCrm = readLocalCrmList();
+            const keepLocal = isRicherCrmList(localCrm, parsed.crmProjects);
+            localStorage.setItem(
+              "yarhi_crm_data",
+              JSON.stringify(keepLocal ? localCrm : parsed.crmProjects)
+            );
           }
           if (parsed.businessTransactions !== undefined) {
-            localStorage.setItem("yarchiTransactions", JSON.stringify(parsed.businessTransactions));
+            const localTx = readLocalTxList();
+            const keepLocal = isRicherCrmList(localTx, parsed.businessTransactions);
+            localStorage.setItem(
+              "yarchiTransactions",
+              JSON.stringify(keepLocal ? localTx : parsed.businessTransactions)
+            );
           }
           if (Object.prototype.hasOwnProperty.call(parsed, "logoDataUrl")) {
             if (typeof parsed.logoDataUrl === "string" && parsed.logoDataUrl.length > 0) {
@@ -1370,7 +1948,7 @@ function AuthenticatedPageContent() {
     return () => {
       cancelled = true;
     };
-  }, [firebaseUser?.uid]);
+  }, [cloudUserId, cloudBackend]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1505,9 +2083,7 @@ function AuthenticatedPageContent() {
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
-          const segs = fenceSegments
-            .filter((s) => s.L > 0 && s.H > 0 && (s.P ?? 0) >= 0)
-            .map((s) => ({ L: s.L, H: s.H, P: typeof s.P === "number" ? s.P : undefined }));
+          const segs = fenceSegsForApi(fenceSegments);
           const res = await fetch("/api/calculate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1565,9 +2141,64 @@ function AuthenticatedPageContent() {
     sysVatPercent,
   ]);
 
-  const addFenceSeg = useCallback(() => setFenceSegments((prev) => [...prev, { id: Date.now(), L: 0, H: 0 }]), []);
+  const addFenceSeg = useCallback(
+    () =>
+      setFenceSegments((prev) => {
+        const last = prev[prev.length - 1];
+        return [
+          ...prev,
+          {
+            id: Date.now(),
+            L: 0,
+            H: last?.H ?? 0,
+            P: 2,
+            side: defaultSideForNewRoot(prev),
+          },
+        ];
+      }),
+    []
+  );
+  const insertFenceAfter = useCallback((afterId: number, kind: "continue" | "corner") => {
+    setFenceSegments((prev) => {
+      const idx = prev.findIndex((s) => s.id === afterId);
+      const base = idx >= 0 ? prev[idx] : prev[prev.length - 1];
+      const row: FenceSegRow = {
+        id: Date.now(),
+        L: 0,
+        H: base?.H ?? 0,
+        P: 2,
+        connected: true,
+        corner: kind === "corner",
+      };
+      if (idx < 0) return [...prev, row];
+      return [...prev.slice(0, idx + 1), row, ...prev.slice(idx + 1)];
+    });
+  }, []);
+  const addFenceContinue = useCallback(() => {
+    setFenceSegments((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last) return [{ id: Date.now(), L: 0, H: 0, P: 2, connected: true, corner: false }];
+      return [
+        ...prev,
+        { id: Date.now(), L: 0, H: last.H ?? 0, P: 2, connected: true, corner: false },
+      ];
+    });
+  }, []);
+  const addFenceCorner = useCallback(() => {
+    setFenceSegments((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last) return [{ id: Date.now(), L: 0, H: 0, P: 2, connected: true, corner: true }];
+      return [
+        ...prev,
+        { id: Date.now(), L: 0, H: last.H ?? 0, P: 2, connected: true, corner: true },
+      ];
+    });
+  }, []);
   const removeFenceSeg = useCallback((id: number) => {
-    setFenceSegments((prev) => prev.filter((s) => s.id !== id));
+    setFenceSegments((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      return next.length > 0 ? next : emptyFenceFronts();
+    });
     setFenceSegDrafts((prev) => {
       const next = { ...prev };
       delete next[id];
@@ -1575,7 +2206,12 @@ function AuthenticatedPageContent() {
     });
   }, []);
   const updateFenceSeg = useCallback((id: number, field: "L" | "H" | "P", value: number | undefined) => setFenceSegments((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s))), []);
-  const getFenceSegInputValue = useCallback((seg: { id: number; L: number; H: number; P?: number }, field: "L" | "H" | "P") => {
+  const setFenceSegSide = useCallback((id: number, side: FenceSide) => {
+    setFenceSegments((prev) =>
+      prev.map((s) => (s.id === id && !s.connected ? { ...s, side } : s))
+    );
+  }, []);
+  const getFenceSegInputValue = useCallback((seg: FenceSegRow, field: "L" | "H" | "P") => {
     const draft = fenceSegDrafts[seg.id]?.[field];
     if (draft !== undefined) return draft;
     const current = seg[field];
@@ -1617,15 +2253,37 @@ function AuthenticatedPageContent() {
     return `<div style="text-align:center; margin-bottom:20px;"><img src="${logoDataUrl}" alt="לוגו" style="max-height:70px; max-width:220px; object-fit:contain;"></div>`;
   }, [logoDataUrl]);
 
+  const resolveActiveBundleUnitLabel = useCallback(() => {
+    if (bundleProjectId == null) return "";
+    const units = crmData.find((p) => p.id === bundleProjectId)?.units;
+    return getActiveBundleUnitLabel(bundleProjectId, activeUnitId, units);
+  }, [activeUnitId, bundleProjectId, crmData]);
+
   const resetFenceForm = useCallback(() => {
     if (typeof window !== "undefined" && !(window as unknown as { confirm: (s: string) => boolean }).confirm("לאפס טופס?")) return;
     setFenceCustName(""); setFenceCustPhone(""); setFenceCustAddress(""); setFenceCustInternalNotes("");
-    setFenceSegments([{ id: Date.now(), L: 0, H: 0 }]);
+    setFenceSegments(emptyFenceFronts());
+    setFenceSimGate("none");
     setFenceResult(EMPTY_FENCE_RESULT);
     showAlert("טופס אופס");
   }, [showAlert]);
 
   const saveFenceToCRM = useCallback(() => {
+    if (bundleProjectId != null && activeUnitId) {
+      const proj = crmData.find((p) => p.id === bundleProjectId);
+      const unit = proj?.units?.find((u) => u.id === activeUnitId);
+      if (!unit || unit.type !== "fence") return showAlert("בחר מוצר מסוג גדר בפרויקט המשולב");
+      if (!fenceResult.sqm) return showAlert("אין נתוני גדר לשמירה");
+      setCrmData((prev) =>
+        prev.map((p) => {
+          if (p.id !== bundleProjectId || !p.units) return p;
+          const units = p.units.map((u) => (u.id === activeUnitId ? snapshotActiveUnitRef.current(u) : u));
+          return { ...p, units, ...recalcBundleTotals(units) };
+        })
+      );
+      showAlert("גדר נשמרה בפרויקט המשולב");
+      return;
+    }
     if (!fenceCustName.trim()) return showAlert("הזן שם לקוח לשמירה");
     if (!fenceResult.sqm) return showAlert("אין נתוני גדר לשמירה");
     const v = fenceResult.sellIncVat;
@@ -1642,7 +2300,8 @@ function AuthenticatedPageContent() {
       fenceColor,
       fenceSlatColor,
       fenceInGround,
-      segs: fenceSegments.filter((s) => s.L > 0 && s.H > 0).map((s) => ({ L: s.L, H: s.H, P: s.P })),
+      segs: fenceSegsForFormState(fenceSegments),
+      fenceSimGate,
     };
     const newProject: CrmProject = {
       id: Date.now(),
@@ -1674,28 +2333,204 @@ function AuthenticatedPageContent() {
     setFenceCustPhone("");
     setFenceCustAddress("");
     setFenceCustInternalNotes("");
-    setFenceSegments([{ id: Date.now(), L: 0, H: 0 }]);
-  }, [fenceCustName, fenceResult, fenceSegments, fenceCustPhone, fenceCustAddress, fenceCustInternalNotes, fenceSlat, fenceGap, fenceColor, fenceSlatColor, fenceInGround, showAlert, businessVatDecimal]);
+    setFenceSegments(emptyFenceFronts());
+    setFenceSimGate("none");
+  }, [fenceCustName, fenceResult, fenceSegments, fenceCustPhone, fenceCustAddress, fenceCustInternalNotes, fenceSlat, fenceGap, fenceColor, fenceSlatColor, fenceInGround, fenceSimGate, showAlert, businessVatDecimal, bundleProjectId, activeUnitId, crmData]);
 
   const printFenceReport = useCallback(() => {
     if (!fenceResult.sqm) return showAlert("אנא הזן מידות לפני הדפסת דוח ייצור לגדר");
     const w = window.open("", "_blank");
     if (!w) return showAlert("הדפדפן חסם את פתיחת החלון.");
-    w.document.write(`<html dir="rtl" lang="he"><head><title>דוח ייצור גדרות - ${fenceCustName || "לקוח"}</title><style>body{font-family:Assistant,sans-serif;padding:30px;direction:rtl;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #cbd5e1;padding:8px;text-align:center;} th{background:#f1f5f9;}</style></head><body>${getLogoHtml()}<div style="border-bottom:3px solid #0f172a;padding-bottom:15px;margin-bottom:20px;"><h1 style="margin:0;font-size:24px;font-weight:800;">דוח ייצור למפעל - גדרות</h1><p style="margin:5px 0 0 0;color:#475569;">${sysContractorName}</p></div><div style="text-align:left;"><strong>לקוח:</strong> ${fenceCustName || "-"}<br><strong>תאריך:</strong> ${new Date().toLocaleDateString("he-IL")}</div><h2>✂️ רשימת חיתוכים (ס"מ)</h2><table><thead><tr><th>פרופיל / ייעוד</th><th>כמות</th><th>מידה סופית</th></tr></thead><tbody>${fenceResult.cuttingHtml}</tbody></table><h2 style="margin-top:30px;">📦 משיכת חומר מהמחסן</h2><table><thead><tr><th>סוג פרופיל</th><th>כמות מוטות</th></tr></thead><tbody>${fenceResult.bomHtml}</tbody></table><h2 style="margin-top:30px;">🔩 פירזול</h2><div style="background:#f8fafc;padding:15px;border-radius:8px;">${fenceResult.hardwareHtml}</div><h2 style="margin-top:30px;">📐 מפרט שדות והוראות</h2><div>${fenceResult.instructionsHtml}</div><script>setTimeout(function(){window.print();},500);<\/script></body></html>`);
+    w.document.write(`<html dir="rtl" lang="he"><head><title>דוח ייצור גדרות - ${fenceCustName || "לקוח"}</title><style>body{font-family:Assistant,sans-serif;padding:30px;direction:rtl;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #cbd5e1;padding:8px;text-align:center;} th{background:#f1f5f9;} td svg,th svg{width:22px!important;height:22px!important;max-width:22px!important;max-height:22px!important;vertical-align:middle;} @media print{td svg,th svg{width:18px!important;height:18px!important;}}</style></head><body>${getLogoHtml()}<div style="border-bottom:3px solid #0f172a;padding-bottom:15px;margin-bottom:20px;"><h1 style="margin:0;font-size:24px;font-weight:800;">דוח ייצור למפעל - גדרות</h1><p style="margin:5px 0 0 0;color:#475569;">${sysContractorName}</p></div><div style="text-align:left;"><strong>לקוח:</strong> ${fenceCustName || "-"}<br><strong>תאריך:</strong> ${new Date().toLocaleDateString("he-IL")}</div><h2>✂️ רשימת חיתוכים (ס"מ)</h2><table><thead><tr><th>פרופיל / ייעוד</th><th>כמות</th><th>מידה לחיתוך</th></tr></thead><tbody>${fenceResult.cuttingHtml}</tbody></table><h2 style="margin-top:30px;">📦 משיכת חומר מהמחסן</h2><table><thead><tr><th>סוג פרופיל</th><th>כמות מוטות</th></tr></thead><tbody>${fenceResult.bomHtml}</tbody></table><h2 style="margin-top:30px;">🔩 פירזול</h2><div style="background:#f8fafc;padding:15px;border-radius:8px;">${fenceResult.hardwareHtml}</div><h2 style="margin-top:30px;">📐 מפרט שדות והוראות</h2><div>${fenceResult.instructionsHtml}</div><script>setTimeout(function(){window.print();},500);<\/script></body></html>`);
     w.document.close();
   }, [fenceResult, fenceCustName, sysContractorName, getLogoHtml, showAlert]);
 
-  const printFenceQuote = useCallback(() => {
+  const buildPergolaShareConfig = useCallback((): SharePergolaConfig => {
+    const L = pergolaResult.L || parseFloat(lengthWall) || 0;
+    const W = pergolaResult.W || parseFloat(exitWidth) || 0;
+    const ledN = hasLed
+      ? Math.max(1, parseInt(ledCount, 10) || parseInt(dividerLedCount, 10) || pergolaResult.autoLedBase || 1)
+      : 0;
+    // אם סומן מאוורר בלי כמות — לפחות 1, אחרת הוא נעלם בהדמיה
+    const fanN = hasFan ? Math.max(1, parseInt(fanCount, 10) || 1) : 0;
+    const tensionN = Math.max(0, parseInt(tensionerCount, 10) || 0);
+    let dividers = Math.max(0, Math.min(8, pergolaResult.nDividersTotal ?? 0));
+    const want = ledN + fanN;
+    if (want > 0) dividers = Math.min(8, Math.max(dividers, want));
+    const dividerStates = buildDividerAccessoryStates({
+      dividers,
+      hasLed,
+      hasFan,
+      ledCount: ledN,
+      fanCount: fanN,
+    });
+    const pFront = parseInt(postCountFront, 10) || 0;
+    const pRight = parseInt(postCountRight, 10) || 0;
+    const pLeft = parseInt(postCountLeft, 10) || 0;
+    const pBack = parseInt(postCountBack, 10) || 0;
+    const sidePostsTotal = pFront + pRight + pLeft + pBack;
+    const legacyPosts = parseInt(postCount, 10) || 0;
+    // אם מילאו רק «כמות עמודים» הכללית — שמים בחזית
+    let postsFront = sidePostsTotal > 0 ? pFront : legacyPosts;
+    let postsRight = sidePostsTotal > 0 ? pRight : 0;
+    let postsLeft = sidePostsTotal > 0 ? pLeft : 0;
+    let postsBack = sidePostsTotal > 0 ? pBack : 0;
+    // אם יש גובה עמודים אבל בלי כמות — מניחים לפחות 2 בחזית (סטנדרט בהדמיה)
+    if (postsFront + postsRight + postsLeft + postsBack <= 0 && String(postHeight || "").trim()) {
+      postsFront = 2;
+    }
+    const hasPosts = postsFront + postsRight + postsLeft + postsBack > 0;
+    return {
+      L,
+      W,
+      gap: parseFloat(spacing) || 0,
+      dividers: Math.max(dividers, dividerStates.length > 1 || want > 0 ? dividerStates.length : dividers),
+      ...(hasPosts
+        ? { postsFront, postsRight, postsLeft, postsBack, hasPosts: true as const }
+        : {}),
+      isLShape,
+      lWallWidth: isLShape ? parseFloat(lWallWidth) || 0 : 0,
+      lWallDepth: isLShape ? parseFloat(lWallDepth) || 0 : 0,
+      lShapeSide,
+      frameHex: pergolaResult.frameHex,
+      slatHex: pergolaResult.shadeHex,
+      santafHex: pergolaResult.santafHex || (hasSantaf ? "#7ec8e3" : "#888888"),
+      hasSantaf,
+      frameType,
+      captionText: simCaption || "",
+      hasLed,
+      hasFan,
+      ledCount: ledN,
+      fanCount: fanN,
+      ledTone: ledToneFromColor(ledColor),
+      dividerStates,
+      hasTensioners: tensionN > 0,
+      tensionerCount: tensionN,
+      env: pergolaSimEnv,
+    };
+  }, [
+    pergolaResult.L,
+    pergolaResult.W,
+    pergolaResult.nDividersTotal,
+    pergolaResult.autoLedBase,
+    pergolaResult.frameHex,
+    pergolaResult.shadeHex,
+    pergolaResult.santafHex,
+    lengthWall,
+    exitWidth,
+    spacing,
+    postCountFront,
+    postCountRight,
+    postCountLeft,
+    postCountBack,
+    postCount,
+    postHeight,
+    isLShape,
+    lWallWidth,
+    lWallDepth,
+    lShapeSide,
+    hasSantaf,
+    frameType,
+    simCaption,
+    hasLed,
+    hasFan,
+    ledCount,
+    dividerLedCount,
+    fanCount,
+    ledColor,
+    tensionerCount,
+    pergolaSimEnv,
+  ]);
+
+  const buildFenceShareConfig = useCallback((): ShareFenceConfig | null => {
+    const segments = fenceSegsForSim(fenceSegments);
+    if (!segments.length) return null;
+    return {
+      segments,
+      gapCm: parseFloat(fenceGap) || 0,
+      slatProfile: fenceSlat,
+      frameHex: fenceResult.frameHex,
+      slatHex: fenceResult.slatHex,
+      spacerHex: fenceResult.spacerHex,
+      inGround: fenceInGround,
+      env: fenceSimEnv,
+      gate: fenceSimGate,
+    };
+  }, [
+    fenceSegments,
+    fenceGap,
+    fenceSlat,
+    fenceResult.frameHex,
+    fenceResult.slatHex,
+    fenceResult.spacerHex,
+    fenceInGround,
+    fenceSimEnv,
+    fenceSimGate,
+  ]);
+
+  const sendPergolaSimToWhatsApp = useCallback(() => {
+    const config = buildPergolaShareConfig();
+    if (!(config.L > 0 && config.W > 0)) {
+      showAlert("הזן מידות פרגולה לפני שליחת ההדמיה");
+      return;
+    }
+
+    const withDefaultPosts = (c: SharePergolaConfig): SharePergolaConfig =>
+      c.hasPosts
+        ? c
+        : { ...c, postsFront: 2, postsRight: 0, postsLeft: 0, postsBack: 0, hasPosts: true };
+
+    const finish = (finalConfig: SharePergolaConfig) => {
+      void openSimWhatsApp(custPhone, sysContractorName, {
+        k: "p",
+        n: sysContractorName.trim() || "הקבלן שלך",
+        p: withDefaultPosts(finalConfig),
+      });
+    };
+
+    void (async () => {
+      const liveFromIframe = await requestLiveSimConfig(pergolaSimIframeRef.current?.contentWindow ?? null);
+      const live = liveFromIframe ?? lastLiveSimConfigRef.current;
+      const merged = mergePergolaShareWithLive(config, live);
+      finish({
+        ...merged,
+        env: normPergolaShareEnv(liveFromIframe?.env) || pergolaSimEnv,
+      });
+    })();
+  }, [buildPergolaShareConfig, custPhone, sysContractorName, showAlert, pergolaSimEnv]);
+
+  const sendFenceSimToWhatsApp = useCallback(() => {
+    const config = buildFenceShareConfig();
+    if (!config) {
+      showAlert("הזן אורך וגובה במקטע אחד לפחות כדי לשלוח הדמיה");
+      return;
+    }
+    void (async () => {
+      const live = await requestLiveSimConfig(fenceSimIframeRef.current?.contentWindow ?? null);
+      const env = normFenceShareEnv(live?.env) || fenceSimEnv;
+      const liveGate = live && "gate" in live ? normFenceShareGate((live as { gate?: unknown }).gate) : undefined;
+      const gate = liveGate ?? fenceSimGate;
+      void openSimWhatsApp(fenceCustPhone, sysContractorName, {
+        k: "f",
+        n: sysContractorName.trim() || "הקבלן שלך",
+        f: { ...config, env, gate },
+      });
+    })();
+  }, [buildFenceShareConfig, fenceCustPhone, sysContractorName, showAlert, fenceSimEnv, fenceSimGate]);
+
+  const printFenceQuote = useCallback(async () => {
     if (!fenceResult.sqm) return showAlert("הזן מידות תחילה");
+    const activeBundleUnitLabel = resolveActiveBundleUnitLabel();
     const w = window.open("", "_blank");
     if (!w) return showAlert("הדפדפן חסם את פתיחת החלון.");
-    const segmentsForSim = fenceSegments
-      .filter((s) => s.L > 0 && s.H > 0)
-      .map((s) => ({ L: s.L, H: s.H, P: typeof s.P === "number" ? s.P : 0 }));
+    const segmentsForSim = fenceSegsForSim(fenceSegments);
 
     const totalLenCm = segmentsForSim.reduce((sum, s) => sum + (s.L || 0), 0);
     const maxHeightCm = segmentsForSim.reduce((m, s) => Math.max(m, s.H || 0), 0);
-    const totalPosts = fenceSegments.reduce((sum, s) => sum + (typeof s.P === "number" ? s.P : 0), 0);
+    const totalPosts = fenceSegments.reduce((sum, s, i) => {
+      const pVal = typeof s.P === "number" ? s.P : 0;
+      return sum + (i > 0 && s.connected ? Math.max(0, pVal - 1) : pVal);
+    }, 0);
     const fieldsTotal = fenceSegments.reduce((sum, s) => {
       const pVal = typeof s.P === "number" ? s.P : 0;
       return sum + Math.max(0, pVal - 1);
@@ -1706,11 +2541,48 @@ function AuthenticatedPageContent() {
     const frameHex = fenceResult.frameHex;
     const slatHex = fenceResult.slatHex;
     const spacerHex = fenceResult.spacerHex;
-    const basicQuoteExVat = fenceResult.basicQuoteExVat;
-    const installExVat = fenceResult.installExVat;
-    const transportExVat = fenceResult.transportExVat;
-    const vatAmount = fenceResult.vatAmount;
+    let basicQuoteExVat = fenceResult.basicQuoteExVat;
+    let installExVat = fenceResult.installExVat;
+    let transportExVat = fenceResult.transportExVat;
+    let vatAmount = fenceResult.vatAmount;
+    let sellIncVatQuote = fenceResult.sellIncVat;
+    const liveFenceIncVat = Math.round(Number(fenceResult.sellIncVat) || 0);
     const slatLabel = fenceResult.slatLabel;
+
+    const crmFencePrice = (() => {
+      if (bundleProjectId != null && activeUnitId) {
+        const unit = crmData.find((p) => p.id === bundleProjectId)?.units?.find((u) => u.id === activeUnitId);
+        if (unit?.type === "fence" && Number(unit.sellingPriceInc) > 0) {
+          const inc = Math.round(Number(unit.sellingPriceInc));
+          const ex = Math.round(Number(unit.incomeExVat) || exVatFromIncVat(inc, businessVatDecimal));
+          return { inc, ex, vat: Math.round(Number(unit.vatAmount) || inc - ex) };
+        }
+      }
+      if (fenceCrmEditId != null) {
+        const proj = crmData.find((p) => p.id === fenceCrmEditId);
+        if (proj && Number(proj.sellingPriceInc) > 0) {
+          const inc = Math.round(Number(proj.sellingPriceInc));
+          const ex = Math.round(Number(proj.incomeExVat) || exVatFromIncVat(inc, businessVatDecimal));
+          return { inc, ex, vat: Math.round(Number(proj.vatAmount) || inc - ex) };
+        }
+      }
+      return null;
+    })();
+    if (crmFencePrice) {
+      const liveEx = Math.round(Number(fenceResult.sellExVat) || 0);
+      const ratioEx = liveEx > 0 ? crmFencePrice.ex / liveEx : 1;
+      basicQuoteExVat = Math.round(fenceResult.basicQuoteExVat * ratioEx);
+      installExVat = Math.round(fenceResult.installExVat * ratioEx);
+      transportExVat = Math.round(fenceResult.transportExVat * ratioEx);
+      const lines = basicQuoteExVat + installExVat + transportExVat;
+      if (lines !== crmFencePrice.ex) basicQuoteExVat += crmFencePrice.ex - lines;
+      sellIncVatQuote = crmFencePrice.inc;
+      vatAmount = crmFencePrice.vat;
+    }
+    const fenceDealIncRounded = Math.round(sellIncVatQuote);
+    const showFenceCustomerDiscountOption = liveFenceIncVat > 0 && fenceDealIncRounded > 0 && fenceDealIncRounded < liveFenceIncVat;
+    const fenceCustomerDiscountSaved = showFenceCustomerDiscountOption ? liveFenceIncVat - fenceDealIncRounded : 0;
+
     const deliveryDaysTerm = String(sysQuoteDeliveryDays || "").trim() || "X";
     const warrantyYearsTerm = String(sysWorkWarrantyYears || "").trim() || "X";
     const paymentStage1Term = String(sysPaymentStage1Percent || "").trim() || "50";
@@ -1729,6 +2601,17 @@ function AuthenticatedPageContent() {
       `שלום ${fenceCustName || ""}, מצורף סיכום הגדר שלך מ-${sysContractorName || "Yarhi Pro"}.`
     );
     const fenceWaHref = canSendFenceToCustomer ? `https://wa.me/${fenceWaPhone}?text=${fenceWaText}` : "";
+    const fenceSimShareCfg = buildFenceShareConfig();
+    const liveFenceEnv = normFenceShareEnv(
+      (await requestLiveSimConfig(fenceSimIframeRef.current?.contentWindow ?? null))?.env
+    ) || fenceSimEnv;
+    const fenceSimShareCfgWithEnv = fenceSimShareCfg ? { ...fenceSimShareCfg, env: liveFenceEnv } : null;
+    const fenceSimShareUrl = fenceSimShareCfgWithEnv
+      ? await createShortShareUrl({ k: "f", n: sysContractorName.trim() || "הקבלן שלך", f: fenceSimShareCfgWithEnv })
+      : "";
+    const fenceSimWaHref = fenceSimShareUrl
+      ? buildSimWhatsAppUrl(fenceCustPhone, sysContractorName, fenceSimShareUrl)
+      : "";
 
     w.document.write(`
       <html dir="rtl" lang="he"><head><title>הצעת מחיר - ${fenceCustName || "לקוח"}</title>
@@ -1780,10 +2663,11 @@ function AuthenticatedPageContent() {
           <p style="margin:3px 0;"><strong>שם הלקוח:</strong> ${fenceCustName || "-"}</p>
           <p style="margin:3px 0;"><strong>כתובת הלקוח:</strong> ${fenceCustAddress || "-"}</p>
           <p style="margin:3px 0;"><strong>מספר טלפון:</strong> ${fenceCustPhone || "-"}</p>
+          ${activeBundleUnitLabel ? `<p style="margin:3px 0;"><strong>מיקום במבנה:</strong> ${escapeHtmlForQuote(activeBundleUnitLabel)}</p>` : ""}
         </div>
 
         <div class="spec-full" style="border:none;margin:0;padding:0;">
-          <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:10px 0 5px 0;">מפרט הגדר</h3>
+          <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:10px 0 5px 0;">מפרט הגדר${activeBundleUnitLabel ? ` — ${escapeHtmlForQuote(activeBundleUnitLabel)}` : ""}</h3>
         </div>
 
         <div><p style="margin:5px 0;"><strong>מידות:</strong> אורך כולל: ${totalLenCm || 0} ס"מ | גובה מרבי: ${maxHeightCm || 0} ס"מ</p></div>
@@ -1803,6 +2687,11 @@ function AuthenticatedPageContent() {
           <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:0;">הדמיה (לפי הנתונים שהוזנו)</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
             ${
+              fenceSimWaHref
+                ? `<a id="btn-whatsapp-sim" href="${fenceSimWaHref}" target="_self" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#0d9488;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🎥 שלח הדמיה בוואטסאפ</a>`
+                : ""
+            }
+            ${
               canSendFenceToCustomer
                 ? `<a id="btn-whatsapp-quote" href="${fenceWaHref}" target="_self" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#16a34a;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">📲 שלח בוואטסאפ ללקוח</a>`
                 : `<button id="btn-whatsapp-quote" style="background:#94a3b8;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:not-allowed;border:none;" disabled>📲 שלח בוואטסאפ ללקוח</button>`
@@ -1811,7 +2700,7 @@ function AuthenticatedPageContent() {
             <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
           </div>
         </div>
-        <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד גדרות" src="/fence-sim.html" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
+        <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד גדרות" src="/fence-sim.html?rev=${SIM_VERSION}&env=${liveFenceEnv}" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
       </div>
 
       <script>
@@ -1819,7 +2708,10 @@ function AuthenticatedPageContent() {
         var btn=document.getElementById('btn-print-quote');
         var closeBtn=document.getElementById('btn-close-quote');
         var waBtn=document.getElementById('btn-whatsapp-quote');
+        var simWaBtn=document.getElementById('btn-whatsapp-sim');
         var waUrl=${JSON.stringify(fenceWaHref)};
+        var simWaUrl=${JSON.stringify(fenceSimWaHref)};
+        var simShareText=${JSON.stringify(fenceSimShareUrl ? `הדמיה מאת ${sysContractorName.trim() || "הקבלן שלך"}\n${fenceSimShareUrl}` : "")};
         if(!btn)return;
         var iframe=document.getElementById('quote-sim-iframe');
         // Apply live config into fence-sim.html (3D)
@@ -1833,7 +2725,9 @@ function AuthenticatedPageContent() {
               frameHex: '${frameHex}',
               slatHex: '${slatHex}',
               spacerHex: '${spacerHex}',
-              inGround: ${fenceInGround ? "true" : "false"}
+              inGround: ${fenceInGround ? "true" : "false"},
+              env: ${JSON.stringify(liveFenceEnv)},
+              gate: ${JSON.stringify(fenceSimGate)}
             } }, '*');
           }catch(e){}
         };
@@ -1862,6 +2756,36 @@ function AuthenticatedPageContent() {
           waBtn.onclick = goWhatsApp;
           waBtn.addEventListener('touchend', goWhatsApp, { passive: false });
         }
+        if (simWaBtn && simWaUrl) {
+          var goSimWhatsApp = function(ev){
+            if(ev && ev.preventDefault) ev.preventDefault();
+            if (simShareText && navigator.clipboard && navigator.clipboard.writeText) {
+              try { navigator.clipboard.writeText(simShareText); } catch(e) {}
+            }
+            var wapp = null;
+            try { wapp = window.open(simWaUrl, '_blank'); } catch(e) {}
+            if (!wapp) {
+              try { window.location.href = simWaUrl; } catch(e) {}
+            }
+          };
+          simWaBtn.onclick = goSimWhatsApp;
+          simWaBtn.addEventListener('touchend', goSimWhatsApp, { passive: false });
+        }
+        var discOn=false;
+        var bindDiscountToggle=function(){
+          var discBtn=document.getElementById('btn-toggle-discount');
+          var discOrig=document.getElementById('discount-original-wrap');
+          var discSaved=document.getElementById('discount-saved-line');
+          if(!discBtn || !discOrig || discBtn.getAttribute('data-bound')==='1') return;
+          discBtn.setAttribute('data-bound','1');
+          discBtn.onclick=function(){
+            discOn=!discOn;
+            discOrig.style.display=discOn?'block':'none';
+            if(discSaved) discSaved.style.display=discOn?'block':'none';
+            discBtn.textContent=discOn?'🏷️ הסתר מחיר מקורי':'🏷️ הצג הנחה ללקוח';
+          };
+        };
+        setTimeout(bindDiscountToggle, 0);
         btn.onclick=function(){
           btn.disabled=true;btn.textContent='מדפיס...';
           setTimeout(function(){window.print();btn.disabled=false;btn.textContent='🖨️ הדפס סיכום';},50);
@@ -1879,8 +2803,22 @@ function AuthenticatedPageContent() {
           </ul>
         </div>
         <div style="text-align:left;">
+          ${
+            showFenceCustomerDiscountOption
+              ? `<button id="btn-toggle-discount" type="button" class="no-print" style="display:inline-block;margin:0 0 10px 0;background:#b45309;color:white;padding:8px 12px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;font-size:13px;">🏷️ הצג הנחה ללקוח</button>
+                <div id="discount-original-wrap" style="display:none;margin-bottom:8px;">
+                  <p style="margin:0;font-size:18px;font-weight:700;color:#94a3b8;text-decoration:line-through;">₪ ${liveFenceIncVat.toLocaleString()}</p>
+                  <p style="margin:4px 0 0 0;font-size:13px;font-weight:800;color:#b45309;">מחיר אחרי הנחה</p>
+                </div>`
+              : ""
+          }
           <p style="font-weight:bold;color:#1d4ed8;margin:0 0 5px 0;">סה\"כ לתשלום (כולל מע\"מ):</p>
-          <h3 style="font-size:42px;font-weight:900;color:#1e3a8a;margin:0;">₪ ${Math.round(fenceResult.sellIncVat).toLocaleString()}</h3>
+          <h3 style="font-size:42px;font-weight:900;color:#1e3a8a;margin:0;">₪ ${fenceDealIncRounded.toLocaleString()}</h3>
+          ${
+            showFenceCustomerDiscountOption
+              ? `<p id="discount-saved-line" style="display:none;margin:8px 0 0 0;font-size:13px;font-weight:800;color:#047857;">חיסכון ללקוח: ₪ ${fenceCustomerDiscountSaved.toLocaleString()}</p>`
+              : ""
+          }
         </div>
       </div>
       <div class="terms-box">
@@ -1897,7 +2835,7 @@ function AuthenticatedPageContent() {
 
       <div class="signatures">
         <div class="sig-line">חתימת לקוח</div>
-        <div class="sig-line">חתימת קבלן מבצע</div>
+        ${buildContractorSignatureHtml(sysContractorName, escapeHtmlForQuote)}
       </div>
       </div></body></html>
     `);
@@ -1926,6 +2864,15 @@ function AuthenticatedPageContent() {
     sysPaymentStage1Percent,
     sysPaymentStage2Percent,
     sysPaymentStage3Percent,
+    resolveActiveBundleUnitLabel,
+    bundleProjectId,
+    activeUnitId,
+    crmData,
+    fenceCrmEditId,
+    businessVatDecimal,
+    buildFenceShareConfig,
+    fenceSimEnv,
+    fenceSimGate,
   ]);
 
   const printLeadQuote = useCallback(
@@ -2100,7 +3047,7 @@ ${logoBlock}
 
 <div class="signatures">
   <div class="sig-line">חתימת לקוח</div>
-  <div class="sig-line">חתימת קבלן מבצע</div>
+  ${buildContractorSignatureHtml(sysContractorName, E)}
 </div>
 </div></body></html>`;
 
@@ -2173,6 +3120,7 @@ ${logoBlock}
   const resetCurrentForm = useCallback(() => {
     if (typeof window !== "undefined" && !(window as unknown as { confirm: (s: string) => boolean }).confirm("האם לאפס את כל השדות בטופס הנוכחי?")) return;
     setPergolaCrmEditId(null);
+    setFenceCrmEditId(null);
     setCustName(""); setCustPhone(""); setCustAddress(""); setCustInternalNotes(""); setLengthWall(""); setExitWidth("");
     setLWallWidth(""); setLWallDepth(""); setLShapeSide("right"); setDividerSmoothCount(""); setDividerLedCount("");
     setPostCount(""); setPostCountFront(""); setPostCountRight(""); setPostCountLeft(""); setPostCountBack(""); setPostHeight(""); setTensionerCount(""); setTensionerColor(""); setLedCount(""); setFanCount("");
@@ -2185,6 +3133,21 @@ ${logoBlock}
   }, [showAlert]);
 
   const saveProjectToCRM = useCallback(() => {
+    if (!custName.trim() && bundleProjectId == null) return showAlert("הזן שם לקוח לשמירה");
+    if (bundleProjectId != null && activeUnitId) {
+      const proj = crmData.find((p) => p.id === bundleProjectId);
+      const unit = proj?.units?.find((u) => u.id === activeUnitId);
+      if (!unit || unit.type !== "pergola") return showAlert("בחר מוצר מסוג פרגולה בפרויקט המשולב");
+      setCrmData((prev) =>
+        prev.map((p) => {
+          if (p.id !== bundleProjectId || !p.units) return p;
+          const units = p.units.map((u) => (u.id === activeUnitId ? snapshotActiveUnitRef.current(u) : u));
+          return { ...p, units, ...recalcBundleTotals(units) };
+        })
+      );
+      showAlert("פרגולה נשמרה בפרויקט המשולב");
+      return;
+    }
     if (!custName.trim()) return showAlert("הזן שם לקוח לשמירה");
     const vitrineExVat = hasVitrines ? vitrineQuote.exVat : 0;
     const exVat = pergolaResult.exVat + vitrineExVat;
@@ -2209,12 +3172,12 @@ ${logoBlock}
     };
     const editId = pergolaCrmEditId;
     const canUpdateExisting =
-      editId != null && crmData.some((p) => p.id === editId && !p.isLead && !p.isFence);
+      editId != null && crmData.some((p) => p.id === editId && !p.isLead && !p.isFence && !projectIsBundle(p));
 
     if (canUpdateExisting) {
       setCrmData((prev) =>
         prev.map((p) =>
-          p.id === editId && !p.isLead && !p.isFence
+          p.id === editId && !p.isLead && !p.isFence && !projectIsBundle(p)
             ? {
                 ...p,
                 date: new Date().toLocaleDateString("he-IL"),
@@ -2367,6 +3330,8 @@ ${logoBlock}
     tensionerColor,
     vitrineOpenings,
     vitrineQuote.exVat,
+    bundleProjectId,
+    activeUnitId,
   ]);
 
   const printFactoryReport = useCallback(() => {
@@ -2376,14 +3341,15 @@ ${logoBlock}
     if (!w) return showAlert("הדפדפן חסם את פתיחת החלון. אנא אשר חלונות קופצים.");
     w.document.write(`
       <html dir="rtl" lang="he"><head><title>דוח ייצור - ${custName || "לקוח"}</title>
-      <style>body{font-family:Assistant,sans-serif;padding:30px;direction:rtl;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #cbd5e1;padding:8px;text-align:center;} th{background:#f1f5f9;}</style></head><body>
+      <style>body{font-family:Assistant,sans-serif;padding:30px;direction:rtl;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #cbd5e1;padding:8px;text-align:center;} th{background:#f1f5f9;} td svg,th svg{width:22px!important;height:22px!important;max-width:22px!important;max-height:22px!important;vertical-align:middle;} @media print{td svg,th svg{width:18px!important;height:18px!important;max-width:18px!important;max-height:18px!important;}}</style></head><body>
       ${getLogoHtml()}
       <div style="border-bottom:3px solid #0f172a;padding-bottom:15px;margin-bottom:20px;">
         <h1 style="margin:0;font-size:24px;font-weight:800;">דוח ייצור למפעל</h1>
         <p style="margin:5px 0 0 0;color:#475569;">${sysContractorName}</p>
       </div>
       <div style="background:#f8fafc;padding:15px;border-radius:8px;margin-bottom:20px;"><strong>מידות ברוטו לייצור:</strong> חזית ${L} ס"מ על ${W} ס"מ</div>
-      <h2>רשימת חיתוכים</h2><table><thead><tr><th>פרופיל</th><th>ייעוד</th><th>כמות</th><th>מידה סופית (ס"מ)</th></tr></thead><tbody>${pergolaResult.cuttingHtml}</tbody></table>
+      <h2>רשימת חיתוכים</h2><table><thead><tr><th>פרופיל</th><th>ייעוד</th><th>כמות</th><th>מידה לחיתוך (ס"מ)</th><th>מוט</th></tr></thead><tbody>${pergolaResult.cuttingHtml}</tbody></table>
+      ${pergolaResult.shadeSlatPlanHtml ? `<h2 style="margin-top:24px;color:#1e40af;">שלבי הצללה — תוכנית חיתוך (מוט 6 מ׳)</h2>${pergolaResult.shadeSlatPlanHtml}` : ""}
       <h2 style="margin-top:30px;">משיכת חומר מהמחסן</h2><table><thead><tr><th>סוג פרופיל</th><th>כמות מוטות</th><th>אורך מוט</th></tr></thead><tbody>${pergolaResult.bomHtml}</tbody></table>
       <h2 style="margin-top:30px;">פירזול</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">${pergolaResult.hardwareHtml}</div>
       <div style="page-break-before:always;margin-top:40px;"></div><h2 style="color:#ea580c;">סקיצה והוראות הרכבה</h2><div>${pergolaResult.instructionsHtml}</div>
@@ -2391,8 +3357,9 @@ ${logoBlock}
     w.document.close();
   }, [pergolaResult, custName, sysContractorName, getLogoHtml, showAlert]);
 
-  const printCustomerQuote = useCallback(() => {
+  const printCustomerQuote = useCallback(async () => {
     if (!pergolaResult.sqm) return showAlert("אנא הזן מידות לפני הדפסת סיכום");
+    const activeBundleUnitLabel = resolveActiveBundleUnitLabel();
     const w = window.open("", "_blank");
     if (!w) return showAlert("הדפדפן חסם את פתיחת החלון.");
 
@@ -2427,11 +3394,49 @@ ${logoBlock}
     const paymentStage1Term = String(sysPaymentStage1Percent || "").trim() || "50";
     const paymentStage2Term = String(sysPaymentStage2Percent || "").trim() || "40";
     const paymentStage3Term = String(sysPaymentStage3Percent || "").trim() || "10";
-    const basicQuoteExVat = pergolaResult.exVat - pergolaResult.installCost;
-    const vitrineExVat = hasVitrines ? vitrineQuote.exVat : 0;
-    const totalExVat = pergolaResult.exVat + vitrineExVat;
-    const totalIncVat = incVatFromExVat(totalExVat, businessVatDecimal);
-    const vatAmount = totalIncVat - totalExVat;
+    let basicQuoteExVat = pergolaResult.exVat - pergolaResult.installCost;
+    let installCostQuote = pergolaResult.installCost;
+    let vitrineExVat = hasVitrines ? vitrineQuote.exVat : 0;
+    let totalExVat = pergolaResult.exVat + vitrineExVat;
+    let totalIncVat = incVatFromExVat(totalExVat, businessVatDecimal);
+    let vatAmount = totalIncVat - totalExVat;
+    const liveTotalIncVat = Math.round(totalIncVat);
+
+    const crmPergolaPrice = (() => {
+      if (bundleProjectId != null && activeUnitId) {
+        const unit = crmData.find((p) => p.id === bundleProjectId)?.units?.find((u) => u.id === activeUnitId);
+        if (unit?.type === "pergola" && Number(unit.sellingPriceInc) > 0) {
+          const inc = Math.round(Number(unit.sellingPriceInc));
+          const ex = Math.round(Number(unit.incomeExVat) || exVatFromIncVat(inc, businessVatDecimal));
+          return { inc, ex, vat: Math.round(Number(unit.vatAmount) || inc - ex) };
+        }
+      }
+      if (pergolaCrmEditId != null) {
+        const proj = crmData.find((p) => p.id === pergolaCrmEditId);
+        if (proj && Number(proj.sellingPriceInc) > 0) {
+          const inc = Math.round(Number(proj.sellingPriceInc));
+          const ex = Math.round(Number(proj.incomeExVat) || exVatFromIncVat(inc, businessVatDecimal));
+          return { inc, ex, vat: Math.round(Number(proj.vatAmount) || inc - ex) };
+        }
+      }
+      return null;
+    })();
+    if (crmPergolaPrice) {
+      const liveEx = totalExVat;
+      const ratioEx = liveEx > 0 ? crmPergolaPrice.ex / liveEx : 1;
+      basicQuoteExVat = Math.round(basicQuoteExVat * ratioEx);
+      installCostQuote = Math.round(installCostQuote * ratioEx);
+      vitrineExVat = Math.round(vitrineExVat * ratioEx);
+      const lines = basicQuoteExVat + installCostQuote + vitrineExVat;
+      if (lines !== crmPergolaPrice.ex) basicQuoteExVat += crmPergolaPrice.ex - lines;
+      totalExVat = crmPergolaPrice.ex;
+      totalIncVat = crmPergolaPrice.inc;
+      vatAmount = crmPergolaPrice.vat;
+    }
+    const dealIncRounded = Math.round(totalIncVat);
+    const showCustomerDiscountOption = liveTotalIncVat > 0 && dealIncRounded > 0 && dealIncRounded < liveTotalIncVat;
+    const customerDiscountSaved = showCustomerDiscountOption ? liveTotalIncVat - dealIncRounded : 0;
+
     const vitrineRowsForQuote = hasVitrines
       ? vitrineQuote.rows.filter((row) => row.sqm > 0)
       : [];
@@ -2468,6 +3473,18 @@ ${logoBlock}
       `שלום ${custName || ""}, מצורף סיכום הפרגולה שלך מ-${sysContractorName || "Yarhi Pro"}.`
     );
     const customerWaHref = canSendToCustomer ? `https://wa.me/${customerWaPhone}?text=${customerWaText}` : "";
+    const liveFromIframe = await requestLiveSimConfig(pergolaSimIframeRef.current?.contentWindow ?? null);
+    const liveSimForShare = liveFromIframe ?? lastLiveSimConfigRef.current;
+    const pergolaSimShareCfg = {
+      ...mergePergolaShareWithLive(buildPergolaShareConfig(), liveSimForShare),
+      env: normPergolaShareEnv(liveFromIframe?.env) || pergolaSimEnv,
+    };
+    const pergolaSimShareUrl = await createShortShareUrl({
+      k: "p",
+      n: sysContractorName.trim() || "הקבלן שלך",
+      p: pergolaSimShareCfg,
+    });
+    const pergolaSimWaHref = buildSimWhatsAppUrl(custPhone, sysContractorName, pergolaSimShareUrl);
 
     w.document.write(`
       <html dir="rtl" lang="he"><head><title>הצעת מחיר - ${custName || "לקוח"}</title>
@@ -2517,9 +3534,10 @@ ${logoBlock}
           <p style="margin:3px 0;"><strong>שם הלקוח:</strong> ${custName || "-"}</p>
           <p style="margin:3px 0;"><strong>כתובת הלקוח:</strong> ${custAddress || "-"}</p>
           <p style="margin:3px 0;"><strong>מספר טלפון:</strong> ${custPhone || "-"}</p>
+          ${activeBundleUnitLabel ? `<p style="margin:3px 0;"><strong>מיקום במבנה:</strong> ${escapeHtmlForQuote(activeBundleUnitLabel)}</p>` : ""}
         </div>
         <div class="spec-full" style="border:none;margin:0;padding:0;">
-          <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:10px 0 5px 0;">מפרט הפרגולה</h3>
+          <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:10px 0 5px 0;">מפרט הפרגולה${activeBundleUnitLabel ? ` — ${escapeHtmlForQuote(activeBundleUnitLabel)}` : ""}</h3>
         </div>
         <div><p style="margin:5px 0;"><strong>מידות:</strong> ${dimensionsText}</p></div>
         <div><p style="margin:5px 0;"><strong>סוג מסגרת:</strong> ${frameLabel}</p></div>
@@ -2561,6 +3579,11 @@ ${logoBlock}
           <h3 style="font-size:18px;font-weight:bold;color:#1e293b;margin:0;">הדמיה (לפי הנתונים שהוזנו)</h3>
           <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
             ${
+              pergolaSimWaHref
+                ? `<a id="btn-whatsapp-sim" href="${pergolaSimWaHref}" target="_self" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#0d9488;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🎥 שלח הדמיה בוואטסאפ</a>`
+                : ""
+            }
+            ${
               canSendToCustomer
                 ? `<a id="btn-whatsapp-quote" href="${customerWaHref}" target="_self" rel="noopener" style="display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:#16a34a;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">📲 שלח בוואטסאפ ללקוח</a>`
                 : `<button id="btn-whatsapp-quote" style="background:#94a3b8;color:white;padding:10px 16px;border-radius:8px;font-weight:bold;cursor:not-allowed;border:none;" disabled>📲 שלח בוואטסאפ ללקוח</button>`
@@ -2569,14 +3592,17 @@ ${logoBlock}
             <button id="btn-print-quote" style="background:#2563eb;color:white;padding:10px 20px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;">🖨️ הדפס סיכום</button>
           </div>
         </div>
-        <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד פרגולה" src="/sim.html?rev=${SIM_VERSION}" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
+        <iframe id="quote-sim-iframe" title="הדמיה תלת-ממד פרגולה" src="/sim.html?rev=${SIM_VERSION}&env=${pergolaSimShareCfg.env || "villa"}" style="width:100%;height:380px;border:1px solid #e2e8f0;border-radius:12px;background:#f1f5f9;" referrerPolicy="no-referrer"></iframe>
       </div>
       <script>
       (function(){
         var btn=document.getElementById('btn-print-quote');
         var closeBtn=document.getElementById('btn-close-quote');
         var waBtn=document.getElementById('btn-whatsapp-quote');
+        var simWaBtn=document.getElementById('btn-whatsapp-sim');
         var waUrl=${JSON.stringify(customerWaHref)};
+        var simWaUrl=${JSON.stringify(pergolaSimWaHref)};
+        var simShareText=${JSON.stringify(`הדמיה מאת ${sysContractorName.trim() || "הקבלן שלך"}\n${pergolaSimShareUrl}`)};
         var hasManualVitrineOpenings=${vitrineRowsForQuote.length > 0 ? "true" : "false"};
         if(!btn)return;
         var iframe=document.getElementById('quote-sim-iframe');
@@ -2584,26 +3610,9 @@ ${logoBlock}
         var applyCfg=function(){
           try{
             if(!iframe||!iframe.contentWindow) return;
-            iframe.contentWindow.postMessage({ type:'applyExternalConfig', config: {
-              L: ${Number.isFinite(L) ? L : 0},
-              W: ${Number.isFinite(W) ? W : 0},
-              gap: ${parseFloat(spacing) || 0},
-              dividers: ${nDividersTotal},
-              postsFront: ${pFront},
-              postsRight: ${pRight},
-              postsLeft: ${pLeft},
-              postsBack: ${pBack},
-              roofType: 'slats',
-              isLShape: ${isLShape ? "true" : "false"},
-              lWallWidth: ${isLShape ? parseFloat(lWallWidth) || 0 : 0},
-              lWallDepth: ${isLShape ? parseFloat(lWallDepth) || 0 : 0},
-              lShapeSide: '${lShapeSide}',
-              hasSantaf: ${hasSantaf ? "true" : "false"},
-              santafHex: '${santafHexQuote}',
-              frameHex: '${frameHex}',
-              slatHex: '${shadeHex}',
-              captionText: ${JSON.stringify(simCaption || '')}
-            } }, '*');
+            iframe.contentWindow.postMessage({ type:'applyExternalConfig', config: ${JSON.stringify({
+              ...pergolaSimShareCfg,
+            })} }, '*');
           }catch(e){}
         };
         if (iframe) iframe.onload = function(){ setTimeout(applyCfg, 150); };
@@ -2631,6 +3640,36 @@ ${logoBlock}
           waBtn.onclick = goWhatsApp;
           waBtn.addEventListener('touchend', goWhatsApp, { passive: false });
         }
+        if (simWaBtn && simWaUrl) {
+          var goSimWhatsApp = function(ev){
+            if(ev && ev.preventDefault) ev.preventDefault();
+            if (simShareText && navigator.clipboard && navigator.clipboard.writeText) {
+              try { navigator.clipboard.writeText(simShareText); } catch(e) {}
+            }
+            var wapp = null;
+            try { wapp = window.open(simWaUrl, '_blank'); } catch(e) {}
+            if (!wapp) {
+              try { window.location.href = simWaUrl; } catch(e) {}
+            }
+          };
+          simWaBtn.onclick = goSimWhatsApp;
+          simWaBtn.addEventListener('touchend', goSimWhatsApp, { passive: false });
+        }
+        var discOn=false;
+        var bindDiscountToggle=function(){
+          var discBtn=document.getElementById('btn-toggle-discount');
+          var discOrig=document.getElementById('discount-original-wrap');
+          var discSaved=document.getElementById('discount-saved-line');
+          if(!discBtn || !discOrig || discBtn.getAttribute('data-bound')==='1') return;
+          discBtn.setAttribute('data-bound','1');
+          discBtn.onclick=function(){
+            discOn=!discOn;
+            discOrig.style.display=discOn?'block':'none';
+            if(discSaved) discSaved.style.display=discOn?'block':'none';
+            discBtn.textContent=discOn?'🏷️ הסתר מחיר מקורי':'🏷️ הצג הנחה ללקוח';
+          };
+        };
+        setTimeout(bindDiscountToggle, 0);
         var simHasVitrines=function(){
           try{
             if(!iframe || !iframe.contentWindow || !iframe.contentWindow.document) return false;
@@ -2660,14 +3699,28 @@ ${logoBlock}
           <h3 style="font-weight:bold;color:#334155;margin:0 0 10px 0;border-bottom:1px solid #bfdbfe;padding-bottom:5px;">פירוט עלויות:</h3>
           <ul style="margin:0;padding-right:20px;font-size:14px;color:#475569;line-height:1.6;">
             <li>עלות פרגולה (${pergolaResult.sqm.toFixed(1)} מ"ר): <strong>₪${Math.round(basicQuoteExVat).toLocaleString()}</strong></li>
-            ${pergolaResult.installCost > 0 ? `<li>התקנה והובלה: <strong>₪${Math.round(pergolaResult.installCost).toLocaleString()}</strong></li>` : ""}
+            ${installCostQuote > 0 ? `<li>התקנה והובלה: <strong>₪${Math.round(installCostQuote).toLocaleString()}</strong></li>` : ""}
             ${vitrineExVat > 0 ? `<li>סגירת ויטרינות: <strong>₪${Math.round(vitrineExVat).toLocaleString()}</strong></li>` : ""}
             <li>מע"מ (${vatPercentLabelUi}): <strong>₪${Math.round(vatAmount).toLocaleString()}</strong></li>
           </ul>
         </div>
         <div style="text-align:left;">
+          ${
+            showCustomerDiscountOption
+              ? `<button id="btn-toggle-discount" type="button" class="no-print" style="display:inline-block;margin:0 0 10px 0;background:#b45309;color:white;padding:8px 12px;border-radius:8px;font-weight:bold;cursor:pointer;border:none;font-size:13px;">🏷️ הצג הנחה ללקוח</button>
+                <div id="discount-original-wrap" style="display:none;margin-bottom:8px;">
+                  <p style="margin:0;font-size:18px;font-weight:700;color:#94a3b8;text-decoration:line-through;">₪ ${liveTotalIncVat.toLocaleString()}</p>
+                  <p style="margin:4px 0 0 0;font-size:13px;font-weight:800;color:#b45309;">מחיר אחרי הנחה</p>
+                </div>`
+              : ""
+          }
           <p style="font-weight:bold;color:#1d4ed8;margin:0 0 5px 0;">סה"כ לתשלום (כולל מע"מ):</p>
-          <h3 style="font-size:42px;font-weight:900;color:#1e3a8a;margin:0;">₪ ${Math.round(totalIncVat).toLocaleString()}</h3>
+          <h3 style="font-size:42px;font-weight:900;color:#1e3a8a;margin:0;">₪ ${dealIncRounded.toLocaleString()}</h3>
+          ${
+            showCustomerDiscountOption
+              ? `<p id="discount-saved-line" style="display:none;margin:8px 0 0 0;font-size:13px;font-weight:800;color:#047857;">חיסכון ללקוח: ₪ ${customerDiscountSaved.toLocaleString()}</p>`
+              : ""
+          }
         </div>
       </div>
       <div class="terms-box">
@@ -2683,11 +3736,85 @@ ${logoBlock}
       </div>
       <div class="signatures">
         <div class="sig-line">חתימת לקוח</div>
-        <div class="sig-line">חתימת קבלן מבצע</div>
+        ${buildContractorSignatureHtml(sysContractorName, escapeHtmlForQuote)}
       </div>
       </div></body></html>`);
     w.document.close();
-  }, [pergolaResult, custName, custPhone, custAddress, sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, getLogoHtml, showAlert, lengthWall, exitWidth, isLShape, lWallWidth, dividerSize, dividerSmoothCount, dividerLedCount, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, frameType, shadingProfile, spacing, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postType, colorSelect, shadeColorSelect, simCaption, vatPercentLabelUi, hasVitrines, vitrineQuote, businessVatDecimal, sysQuoteDeliveryDays, sysWorkWarrantyYears, sysPaymentStage1Percent, sysPaymentStage2Percent, sysPaymentStage3Percent]);
+  }, [pergolaResult, custName, custPhone, custAddress, sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, getLogoHtml, showAlert, lengthWall, exitWidth, isLShape, lWallWidth, dividerSize, dividerSmoothCount, dividerLedCount, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, frameType, shadingProfile, spacing, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postType, colorSelect, shadeColorSelect, simCaption, vatPercentLabelUi, hasVitrines, vitrineQuote, businessVatDecimal, sysQuoteDeliveryDays, sysWorkWarrantyYears, sysPaymentStage1Percent, sysPaymentStage2Percent,     sysPaymentStage3Percent, resolveActiveBundleUnitLabel, bundleProjectId, activeUnitId, crmData, pergolaCrmEditId]);
+
+  const printBundleCustomerQuote = useCallback(() => {
+    if (bundleProjectId == null) {
+      showAlert("פתח פרויקט משולב תחילה");
+      return;
+    }
+    const proj = crmData.find((p) => p.id === bundleProjectId);
+    if (!proj || !projectIsBundle(proj)) return;
+
+    let units = (proj.units ?? []).map((u) => ({ ...u }));
+    if (activeUnitId) {
+      const idx = units.findIndex((u) => u.id === activeUnitId);
+      if (idx >= 0) units[idx] = snapshotActiveUnitRef.current(units[idx]);
+    }
+    if (units.length === 0) {
+      showAlert("הוסף לפחות מוצר אחד לפרויקט");
+      return;
+    }
+
+    const snapProj = { ...proj, units, ...recalcBundleTotals(units) };
+    setCrmData((prev) => prev.map((p) => (p.id === bundleProjectId ? snapProj : p)));
+
+    const w = window.open("", "_blank");
+    if (!w) return showAlert("הדפדפן חסם את פתיחת החלון.");
+
+    const deliveryDaysTerm = String(sysQuoteDeliveryDays || "").trim() || "X";
+    const warrantyYearsTerm = String(sysWorkWarrantyYears || "").trim() || "X";
+    const paymentStage1Term = String(sysPaymentStage1Percent || "").trim() || "50";
+    const paymentStage2Term = String(sysPaymentStage2Percent || "").trim() || "40";
+    const paymentStage3Term = String(sysPaymentStage3Percent || "").trim() || "10";
+
+    w.document.write(
+      buildBundleCustomerQuoteHtml(snapProj, {
+        contractorName: sysContractorName,
+        companyId: sysCompanyId,
+        phone: sysPhone,
+        address: sysAddress,
+        email: sysEmail,
+        logoHtml: getLogoHtml(),
+        vatPercentLabel: vatPercentLabelUi,
+        deliveryDays: deliveryDaysTerm,
+        warrantyYears: warrantyYearsTerm,
+        paymentStage1: paymentStage1Term,
+        paymentStage2: paymentStage2Term,
+        paymentStage3: paymentStage3Term,
+        vitrine7000PriceSqm: Math.max(0, parseFloat(sysVitrine7000PriceSqm) || 0),
+        vitrine9000PriceSqm: Math.max(0, parseFloat(sysVitrine9000PriceSqm) || 0),
+        vatDecimal: businessVatDecimal,
+      })
+    );
+    w.document.close();
+  }, [
+    activeUnitId,
+    bundleProjectId,
+    crmData,
+    getLogoHtml,
+    showAlert,
+    sysAddress,
+    sysCompanyId,
+    sysContractorName,
+    sysEmail,
+    sysPaymentStage1Percent,
+    sysPaymentStage2Percent,
+    sysPaymentStage3Percent,
+    sysPhone,
+    sysQuoteDeliveryDays,
+    sysWorkWarrantyYears,
+    vatPercentLabelUi,
+    sysVitrine7000PriceSqm,
+    sysVitrine9000PriceSqm,
+    businessVatDecimal,
+    buildPergolaShareConfig,
+    pergolaSimEnv,
+  ]);
 
   const handleWhatsAppOrder = useCallback((kind: "pergola" | "fence") => {
     const contractorHeader =
@@ -2698,7 +3825,15 @@ ${logoBlock}
     const fenceSegmentsLines =
       fenceSegmentsForMessage.length > 0
         ? fenceSegmentsForMessage
-            .map((s, i) => `• מקטע ${i + 1}: אורך ${s.L} ס"מ | גובה ${s.H} ס"מ`)
+            .map((s, i) => {
+              const title = fenceSegTitle(fenceSegmentsForMessage, i, fenceSimEnv);
+              const corner = fenceSegIsContinue(s)
+                ? " | המשך באותו כיוון"
+                : fenceSegIsCorner(s)
+                  ? " | פינה 90°"
+                  : "";
+              return `• ${title}: אורך ${s.L} ס"מ | גובה ${s.H} ס"מ${corner}`;
+            })
             .join("\n")
         : "• לא הוזנו מקטעים תקינים";
 
@@ -2769,6 +3904,7 @@ ${logoBlock}
     fenceSlatColor,
     fenceInGround,
     fenceSegments,
+    fenceSimEnv,
     lengthWall,
     exitWidth,
     isLShape,
@@ -2814,13 +3950,750 @@ ${logoBlock}
       sysPaymentStage1Percent, sysPaymentStage2Percent, sysPaymentStage3Percent,
     };
     Object.entries(map).forEach(([k, v]) => localStorage.setItem("yarhi_" + k, String(v)));
+    void persistWorkspaceNowRef.current();
   }, [sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, simCaption, sysInstallPriceSqm, sysTransportPrice, sysSantafPrice, sysLedPrice, sysScrewPrice, sysDripEdgePrice, pricePerKg, sellPricePerSqm, sysFencePriceSqm, sysFenceSetPrice, sysJumboPrice, sysVitrine7000PriceSqm, sysVitrine9000PriceSqm, sysVatPercent, sysQuoteDeliveryDays, sysWorkWarrantyYears, sysPaymentStage1Percent, sysPaymentStage2Percent, sysPaymentStage3Percent]);
+
+  const bundleProject = useMemo(
+    () => (bundleProjectId != null ? crmData.find((p) => p.id === bundleProjectId) : undefined),
+    [bundleProjectId, crmData]
+  );
+
+  const bundleCustomerPreview = useMemo(() => {
+    if (currentView === "data") return custName;
+    if (currentView === "fences") return fenceCustName;
+    if (fieldWindowsOpenRecordId) {
+      const rec = fieldWindowRecords.find((r) => r.id === fieldWindowsOpenRecordId);
+      return rec?.title ?? "";
+    }
+    return fieldWindowRecords[0]?.title ?? "";
+  }, [currentView, custName, fenceCustName, fieldWindowsOpenRecordId, fieldWindowRecords]);
+
+  const isProductView = currentView === "data" || currentView === "fences" || currentView === "field-windows";
+
+  const capturePergolaFormState = useCallback((): Record<string, unknown> => {
+    const totalPostsBySide =
+      (parseInt(postCountFront, 10) || 0) +
+      (parseInt(postCountRight, 10) || 0) +
+      (parseInt(postCountLeft, 10) || 0) +
+      (parseInt(postCountBack, 10) || 0);
+    return {
+      custName,
+      custPhone,
+      custAddress,
+      custInternalNotes,
+      lengthWall,
+      exitWidth,
+      isLShape,
+      lWallWidth,
+      lWallDepth,
+      lShapeSide,
+      colorSelect,
+      shadeColorSelect,
+      frameType,
+      dividerSize,
+      dividerSmoothCount,
+      dividerLedCount,
+      shadingProfile,
+      spacing,
+      hasLed,
+      ledCount,
+      ledColor,
+      hasFan,
+      fanCount,
+      hasSantaf,
+      santafColor,
+      dripEdgeType,
+      postCount: totalPostsBySide > 0 ? totalPostsBySide : postCount,
+      postCountFront,
+      postCountRight,
+      postCountLeft,
+      postCountBack,
+      postHeight,
+      postType,
+      tensionerCount,
+      tensionerColor,
+      hasVitrines,
+      vitrineOpenings: vitrineOpenings.map((opening) => ({
+        id: opening.id,
+        widthCm: opening.widthCm,
+        heightCm: opening.heightCm,
+        profile: opening.profile,
+        note: opening.note,
+      })),
+    };
+  }, [
+    custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, isLShape, lWallWidth, lWallDepth, lShapeSide,
+    colorSelect, shadeColorSelect, frameType, dividerSize, dividerSmoothCount, dividerLedCount, shadingProfile, spacing,
+    hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, dripEdgeType, postCount, postCountFront,
+    postCountRight, postCountLeft, postCountBack, postHeight, postType, tensionerCount, tensionerColor, hasVitrines, vitrineOpenings,
+  ]);
+
+  const applyPergolaFormState = useCallback((state: Record<string, unknown>) => {
+    PERGOLA_IDS.forEach((fieldKey) => {
+      const v = state[fieldKey];
+      if (v === undefined) return;
+      if (fieldKey === "custName") setCustName(String(v));
+      else if (fieldKey === "custPhone") setCustPhone(String(v));
+      else if (fieldKey === "custAddress") setCustAddress(String(v));
+      else if (fieldKey === "custInternalNotes") setCustInternalNotes(String(v));
+      else if (fieldKey === "lengthWall") setLengthWall(String(v));
+      else if (fieldKey === "exitWidth") setExitWidth(String(v));
+      else if (fieldKey === "isLShape") setIsLShape(Boolean(v));
+      else if (fieldKey === "lWallWidth") setLWallWidth(String(v));
+      else if (fieldKey === "lWallDepth") setLWallDepth(String(v));
+      else if (fieldKey === "lShapeSide") setLShapeSide((v as "left") || "right");
+      else if (fieldKey === "colorSelect") setColorSelect(String(v));
+      else if (fieldKey === "shadeColorSelect") setShadeColorSelect(String(v));
+      else if (fieldKey === "frameType") setFrameType(String(v));
+      else if (fieldKey === "dividerSize") setDividerSize(String(v));
+      else if (fieldKey === "dividerSmoothCount") setDividerSmoothCount(String(v));
+      else if (fieldKey === "dividerLedCount") setDividerLedCount(String(v));
+      else if (fieldKey === "shadingProfile") setShadingProfile(String(v));
+      else if (fieldKey === "spacing") setSpacing(String(v));
+      else if (fieldKey === "hasLed") setHasLed(Boolean(v));
+      else if (fieldKey === "ledCount") setLedCount(String(v));
+      else if (fieldKey === "ledColor") setLedColor(String(v));
+      else if (fieldKey === "hasFan") setHasFan(Boolean(v));
+      else if (fieldKey === "fanCount") setFanCount(String(v));
+      else if (fieldKey === "hasSantaf") setHasSantaf(Boolean(v));
+      else if (fieldKey === "santafColor") setSantafColor(String(v));
+      else if (fieldKey === "dripEdgeType") setDripEdgeType(String(v));
+      else if (fieldKey === "postCount") {
+        setPostCount(String(v));
+        setPostCountFront(String(v));
+      } else if (fieldKey === "postCountFront") setPostCountFront(String(v));
+      else if (fieldKey === "postCountRight") setPostCountRight(String(v));
+      else if (fieldKey === "postCountLeft") setPostCountLeft(String(v));
+      else if (fieldKey === "postCountBack") setPostCountBack(String(v));
+      else if (fieldKey === "postHeight") setPostHeight(String(v));
+      else if (fieldKey === "postType") setPostType(String(v));
+      else if (fieldKey === "tensionerCount") setTensionerCount(String(v));
+      else if (fieldKey === "tensionerColor") setTensionerColor(String(v));
+    });
+    setHasVitrines(Boolean(state.hasVitrines));
+    if (Array.isArray(state.vitrineOpenings)) {
+      const parsedOpenings = state.vitrineOpenings
+        .map((item, i) => {
+          if (!item || typeof item !== "object") return null;
+          const row = item as Record<string, unknown>;
+          const profile = row.profile === "9000" ? "9000" : "7000";
+          return {
+            id: typeof row.id === "number" ? row.id : Date.now() + i,
+            widthCm: String(row.widthCm ?? ""),
+            heightCm: String(row.heightCm ?? ""),
+            profile: profile as VitrineProfile,
+            note: String(row.note ?? ""),
+          };
+        })
+        .filter((row): row is VitrineOpening => Boolean(row));
+      setVitrineOpenings(parsedOpenings.length > 0 ? parsedOpenings : [createVitrineOpening(1)]);
+    } else {
+      setVitrineOpenings([createVitrineOpening(1)]);
+    }
+  }, []);
+
+  const applyFenceFormState = useCallback((state: Record<string, unknown>) => {
+    const s = state as {
+      fenceCustName?: string;
+      fenceCustPhone?: string;
+      fenceCustAddress?: string;
+      fenceCustInternalNotes?: string;
+      fenceSlat?: string;
+      fenceGap?: string;
+      fenceColor?: string;
+      fenceSlatColor?: string;
+      fenceInGround?: boolean;
+      segs?: { L: number; H: number; P: number; connected?: boolean; corner?: boolean }[];
+      fenceSimGate?: "none" | "single" | "double";
+    };
+    setFenceCustName(s.fenceCustName ?? "");
+    setFenceCustPhone(s.fenceCustPhone ?? "");
+    setFenceCustAddress(s.fenceCustAddress ?? "");
+    setFenceCustInternalNotes(s.fenceCustInternalNotes ?? "");
+    setFenceSlat(s.fenceSlat ?? "100");
+    setFenceGap(s.fenceGap ?? "2");
+    setFenceColor(s.fenceColor ?? "RAL 9016");
+    setFenceSlatColor(s.fenceSlatColor ?? "RAL 9016");
+    setFenceInGround(false);
+    if (s.segs && s.segs.length > 0) setFenceSegments(s.segs.map((seg, i) => ({ id: Date.now() + i, ...seg })));
+    else setFenceSegments(emptyFenceFronts());
+    setFenceSimGate(normFenceShareGate(s.fenceSimGate));
+  }, []);
+
+  const snapshotActiveUnit = useCallback(
+    (unit: ProjectUnit): ProjectUnit => {
+      if (unit.type === "pergola") {
+        const formState = capturePergolaFormState();
+        const vitrineExVat = hasVitrines ? vitrineQuote.exVat : 0;
+        const liveExVat = pergolaResult.exVat + vitrineExVat;
+        const liveIncVat = incVatFromExVat(liveExVat, businessVatDecimal);
+        const calcPending =
+          liveIncVat <= 0 && pergolaFormHasDimensions(formState) && (unit.sellingPriceInc ?? 0) > 0;
+        if (calcPending) {
+          return { ...unit, formState };
+        }
+        return {
+          ...unit,
+          formState,
+          sellingPriceInc: liveIncVat,
+          incomeExVat: liveExVat,
+          vatAmount: liveIncVat - liveExVat,
+          estExpense: pergolaResult.materialCost + pergolaResult.installCost,
+        };
+      }
+      if (unit.type === "fence") {
+        const formState = {
+          fenceCustName,
+          fenceCustPhone,
+          fenceCustAddress,
+          fenceCustInternalNotes,
+          fenceSlat,
+          fenceGap,
+          fenceColor,
+          fenceSlatColor,
+          fenceInGround,
+          segs: fenceSegsForFormState(fenceSegments),
+          fenceSimGate,
+        };
+        const liveIncVat = fenceResult.sellIncVat;
+        const calcPending =
+          liveIncVat <= 0 && fenceFormHasSegments(formState) && (unit.sellingPriceInc ?? 0) > 0;
+        if (calcPending) {
+          return { ...unit, formState };
+        }
+        const base = exVatFromIncVat(liveIncVat, businessVatDecimal);
+        const vat = vatFromIncVat(liveIncVat, businessVatDecimal);
+        const totalLen = fenceSegments.filter((s) => s.L > 0).reduce((sum, s) => sum + s.L, 0);
+        return {
+          ...unit,
+          formState,
+          sellingPriceInc: liveIncVat,
+          incomeExVat: base,
+          vatAmount: vat,
+          estExpense: 0,
+          totalLength: totalLen,
+        };
+      }
+      return {
+        ...unit,
+        fieldWindowRecordId: unit.fieldWindowRecordId,
+        formState: { fieldWindowRecordId: unit.fieldWindowRecordId },
+      };
+    },
+    [
+      hasVitrines,
+      vitrineQuote.exVat,
+      pergolaResult,
+      businessVatDecimal,
+      capturePergolaFormState,
+      fenceResult.sellIncVat,
+      fenceSegments,
+      fenceCustName,
+      fenceCustPhone,
+      fenceCustAddress,
+      fenceCustInternalNotes,
+      fenceSlat,
+      fenceGap,
+      fenceColor,
+      fenceSlatColor,
+      fenceInGround,
+      fenceSimGate,
+    ]
+  );
+
+  snapshotActiveUnitRef.current = snapshotActiveUnit;
+
+  const loadBundleUnitIntoForms = useCallback(
+    (unit: ProjectUnit, proj: CrmProject, options?: { skipViewSwitch?: boolean }) => {
+      const bundleFs = (proj.formState ?? {}) as BundleFormState;
+      setPergolaCrmEditId(null);
+      lastLoadedBundleUnitRef.current = unit.id;
+      if (unit.type === "pergola") {
+        const fs = {
+          ...defaultPergolaBundleFormState(proj.customer, bundleFs),
+          ...((unit.formState ?? {}) as Record<string, unknown>),
+        };
+        applyPergolaFormState(fs);
+        const saved = pergolaResultFromSavedUnit(unit);
+        setPergolaResult(
+          saved
+            ? { ...EMPTY_PERGOLA_RESULT, incVat: saved.incVat, exVat: saved.exVat, materialCost: saved.estExpense }
+            : EMPTY_PERGOLA_RESULT
+        );
+        if (!options?.skipViewSwitch) switchView("data");
+        return;
+      }
+      if (unit.type === "fence") {
+        const fs = {
+          ...defaultFenceBundleFormState(proj.customer, bundleFs),
+          ...((unit.formState ?? {}) as Record<string, unknown>),
+        };
+        applyFenceFormState(fs);
+        const saved = fenceResultFromSavedUnit(unit);
+        setFenceResult(
+          saved
+            ? { ...EMPTY_FENCE_RESULT, sellIncVat: saved.sellIncVat, sellExVat: saved.sellExVat, vatAmount: saved.vatAmount }
+            : EMPTY_FENCE_RESULT
+        );
+        if (!options?.skipViewSwitch) switchView("fences");
+        return;
+      }
+      setFieldWindowsOpenRecordId(unit.fieldWindowRecordId ?? null);
+      if (!options?.skipViewSwitch) switchView("field-windows");
+    },
+    [applyFenceFormState, applyPergolaFormState, switchView]
+  );
+
+  const prepBundleCategoryShell = useCallback(
+    (proj: CrmProject, unitType: ProjectUnitType) => {
+      const bundleFs = (proj.formState ?? {}) as BundleFormState;
+      if (unitType === "pergola") {
+        applyPergolaFormState(defaultPergolaBundleFormState(proj.customer, bundleFs));
+        setPergolaResult(EMPTY_PERGOLA_RESULT);
+        return;
+      }
+      if (unitType === "fence") {
+        applyFenceFormState(defaultFenceBundleFormState(proj.customer, bundleFs));
+        setFenceResult(EMPTY_FENCE_RESULT);
+        return;
+      }
+      setFieldWindowsOpenRecordId(null);
+    },
+    [applyFenceFormState, applyPergolaFormState]
+  );
+
+  const switchBundleUnit = useCallback(
+    (unitId: string, options?: { skipViewSwitch?: boolean }) => {
+      if (bundleProjectId == null) return;
+      const proj = crmData.find((p) => p.id === bundleProjectId);
+      if (!proj?.units) return;
+
+      let units = proj.units.map((u) => ({ ...u }));
+      if (activeUnitId && activeUnitId !== unitId) {
+        const idx = units.findIndex((u) => u.id === activeUnitId);
+        if (idx >= 0) units[idx] = snapshotActiveUnitRef.current(units[idx]);
+      }
+      const nextProj = { ...proj, units, ...recalcBundleTotals(units) };
+      const targetUnit = units.find((u) => u.id === unitId);
+      if (!targetUnit) return;
+
+      bundleSyncingRef.current = true;
+      setCrmData((prev) => prev.map((p) => (p.id === bundleProjectId ? nextProj : p)));
+      setActiveUnitId(unitId);
+      loadBundleUnitIntoForms(targetUnit, nextProj, options);
+      queueMicrotask(() => {
+        bundleSyncingRef.current = false;
+      });
+    },
+    [activeUnitId, bundleProjectId, crmData, loadBundleUnitIntoForms]
+  );
+
+  const syncBundleWithProductView = useCallback(() => {
+    if (bundleProjectId == null || bundleSyncingRef.current) return;
+    const proj = crmData.find((p) => p.id === bundleProjectId);
+    if (!proj || !projectIsBundle(proj)) return;
+    if (currentView !== "data" && currentView !== "fences" && currentView !== "field-windows") return;
+
+    const wantType = unitTypeForProductView(currentView);
+    const units = proj.units ?? [];
+    const active = activeUnitId ? units.find((u) => u.id === activeUnitId) : undefined;
+
+    if (active?.type === wantType) {
+      if (lastLoadedBundleUnitRef.current === active.id) return;
+      bundleSyncingRef.current = true;
+      loadBundleUnitIntoForms(active, proj, { skipViewSwitch: true });
+      queueMicrotask(() => {
+        bundleSyncingRef.current = false;
+      });
+      return;
+    }
+
+    const ofType = units.filter((u) => u.type === wantType);
+    if (ofType.length > 0) {
+      switchBundleUnit(ofType[ofType.length - 1].id, { skipViewSwitch: true });
+      return;
+    }
+
+    if (activeUnitId && active) {
+      const unitsSnap = units.map((u) => (u.id === activeUnitId ? snapshotActiveUnitRef.current(u) : u));
+      const nextProj = { ...proj, units: unitsSnap, ...recalcBundleTotals(unitsSnap) };
+      setCrmData((prev) => prev.map((p) => (p.id === bundleProjectId ? nextProj : p)));
+      prepBundleCategoryShell(nextProj, wantType);
+      return;
+    }
+
+    prepBundleCategoryShell(proj, wantType);
+  }, [
+    activeUnitId,
+    bundleProjectId,
+    crmData,
+    currentView,
+    loadBundleUnitIntoForms,
+    prepBundleCategoryShell,
+    switchBundleUnit,
+  ]);
+
+  const syncBundleWithProductViewRef = useRef(syncBundleWithProductView);
+  syncBundleWithProductViewRef.current = syncBundleWithProductView;
+
+  useEffect(() => {
+    if (bundleProjectId == null) return;
+    if (currentView !== "data" && currentView !== "fences" && currentView !== "field-windows") return;
+    syncBundleWithProductViewRef.current();
+  }, [bundleProjectId, currentView]);
+
+  /** Keep bundle tab prices in sync when live calculation finishes */
+  useEffect(() => {
+    if (bundleProjectId == null || !activeUnitId || bundleSyncingRef.current) return;
+    const proj = crmData.find((p) => p.id === bundleProjectId);
+    const unit = proj?.units?.find((u) => u.id === activeUnitId);
+    if (!unit) return;
+
+    if (unit.type === "pergola" && currentView === "data" && pergolaResult.incVat > 0) {
+      const vitrineExVat = hasVitrines ? vitrineQuote.exVat : 0;
+      const exVat = pergolaResult.exVat + vitrineExVat;
+      const incVat = incVatFromExVat(exVat, businessVatDecimal);
+      const vatAmount = incVat - exVat;
+      const estExpense = pergolaResult.materialCost + pergolaResult.installCost;
+      if (
+        unit.sellingPriceInc === incVat &&
+        unit.incomeExVat === exVat &&
+        unit.vatAmount === vatAmount &&
+        unit.estExpense === estExpense
+      ) {
+        return;
+      }
+      setCrmData((prev) =>
+        prev.map((p) => {
+          if (p.id !== bundleProjectId || !p.units) return p;
+          const units = p.units.map((u) =>
+            u.id === activeUnitId
+              ? {
+                  ...u,
+                  sellingPriceInc: incVat,
+                  incomeExVat: exVat,
+                  vatAmount,
+                  estExpense,
+                  formState: capturePergolaFormState(),
+                }
+              : u
+          );
+          return { ...p, units, ...recalcBundleTotals(units) };
+        })
+      );
+      return;
+    }
+
+    if (unit.type === "fence" && currentView === "fences" && fenceResult.sellIncVat > 0) {
+      const incVat = fenceResult.sellIncVat;
+      const exVat = exVatFromIncVat(incVat, businessVatDecimal);
+      const vatAmount = vatFromIncVat(incVat, businessVatDecimal);
+      const totalLen = fenceSegments.filter((s) => s.L > 0).reduce((sum, s) => sum + s.L, 0);
+      if (unit.sellingPriceInc === incVat && unit.incomeExVat === exVat && unit.vatAmount === vatAmount) {
+        return;
+      }
+      setCrmData((prev) =>
+        prev.map((p) => {
+          if (p.id !== bundleProjectId || !p.units) return p;
+          const units = p.units.map((u) =>
+            u.id === activeUnitId
+              ? {
+                  ...u,
+                  sellingPriceInc: incVat,
+                  incomeExVat: exVat,
+                  vatAmount,
+                  totalLength: totalLen,
+                  formState: {
+                    fenceCustName,
+                    fenceCustPhone,
+                    fenceCustAddress,
+                    fenceCustInternalNotes,
+                    fenceSlat,
+                    fenceGap,
+                    fenceColor,
+                    fenceSlatColor,
+                    fenceInGround,
+                    segs: fenceSegsForFormState(fenceSegments),
+                    fenceSimGate,
+                  },
+                }
+              : u
+          );
+          return { ...p, units, ...recalcBundleTotals(units) };
+        })
+      );
+    }
+  }, [
+    activeUnitId,
+    bundleProjectId,
+    businessVatDecimal,
+    capturePergolaFormState,
+    crmData,
+    currentView,
+    fenceColor,
+    fenceCustAddress,
+    fenceCustInternalNotes,
+    fenceCustName,
+    fenceCustPhone,
+    fenceGap,
+    fenceInGround,
+    fenceSimGate,
+    fenceResult.sellIncVat,
+    fenceSegments,
+    fenceSlat,
+    fenceSlatColor,
+    hasVitrines,
+    pergolaResult,
+    vitrineQuote.exVat,
+  ]);
+
+  const startBundleWithCurrentProduct = useCallback(
+    (label: string) => {
+      const unitType: ProjectUnitType =
+        currentView === "fences" ? "fence" : currentView === "field-windows" ? "field-windows" : "pergola";
+
+      let customer = "";
+      let phone = "";
+      let address = "";
+
+      if (unitType === "pergola") {
+        customer = custName.trim();
+        phone = custPhone.trim();
+        address = custAddress.trim();
+      } else if (unitType === "fence") {
+        customer = fenceCustName.trim();
+        phone = fenceCustPhone.trim();
+        address = fenceCustAddress.trim();
+      } else {
+        const openId = fieldWindowsOpenRecordId;
+        const rec = openId ? fieldWindowRecordsRef.current.find((r) => r.id === openId) : fieldWindowRecordsRef.current[0];
+        customer = rec?.title?.trim() ?? "";
+        phone = rec?.clientPhone?.trim() ?? "";
+        address = rec?.clientAddress?.trim() ?? "";
+      }
+
+      if (!customer) {
+        showAlert(
+          unitType === "field-windows"
+            ? "הזן שם לקוח / פרויקט במסך מידות חלונות לפני התחלת פרויקט משולב"
+            : "הזן שם לקוח בטופס לפני התחלת פרויקט משולב"
+        );
+        return;
+      }
+
+      const id = Date.now();
+      const unitId = newProjectUnitId();
+      let fieldRecordId: string | undefined;
+
+      if (unitType === "field-windows") {
+        const openId = fieldWindowsOpenRecordId;
+        if (openId) {
+          fieldRecordId = openId;
+          const nextRecords = fieldWindowRecordsRef.current.map((r) =>
+            r.id === openId ? { ...r, title: label, clientPhone: phone || r.clientPhone, clientAddress: address || r.clientAddress } : r
+          );
+          fieldWindowRecordsRef.current = nextRecords;
+          setFieldWindowRecords(nextRecords);
+          handleFieldWindowRecordsChangeRef.current(nextRecords);
+        } else {
+          fieldRecordId = newFieldWindowRecordId();
+          const record: FieldWindowRecord = {
+            id: fieldRecordId,
+            title: label,
+            clientPhone: phone || undefined,
+            clientAddress: address || undefined,
+            items: [],
+            createdAt: formatFieldWindowDate(),
+            updatedAt: formatFieldWindowDate(),
+          };
+          const nextRecords = [record, ...fieldWindowRecordsRef.current];
+          fieldWindowRecordsRef.current = nextRecords;
+          setFieldWindowRecords(nextRecords);
+          handleFieldWindowRecordsChangeRef.current(nextRecords);
+          setFieldWindowsOpenRecordId(fieldRecordId);
+        }
+      }
+
+      const draftUnit: ProjectUnit = {
+        id: unitId,
+        type: unitType,
+        label,
+        fieldWindowRecordId: fieldRecordId,
+        sellingPriceInc: 0,
+        incomeExVat: 0,
+        vatAmount: 0,
+        estExpense: 0,
+      };
+      const snappedUnit = snapshotActiveUnitRef.current(draftUnit);
+      const units = [snappedUnit];
+      const project: CrmProject = {
+        id,
+        date: new Date().toLocaleDateString("he-IL"),
+        customer,
+        isBundle: true,
+        units,
+        formState: { bundleCustomerPhone: phone, bundleCustomerAddress: address },
+        crmStatus: DEFAULT_CRM_STATUS_AFTER_CALC_SAVE,
+        crmStatusSince: new Date().toISOString(),
+        ...recalcBundleTotals(units),
+      };
+
+      setCrmData((prev) => [project, ...prev]);
+      setBundleProjectId(id);
+      setActiveUnitId(unitId);
+      lastLoadedBundleUnitRef.current = unitId;
+      setPergolaCrmEditId(null);
+      requestAnimationFrame(() => mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+      showAlert(`פרויקט משולב נפתח — מיקום: ${label}`);
+    },
+    [
+      currentView,
+      custName,
+      custPhone,
+      custAddress,
+      fenceCustName,
+      fenceCustPhone,
+      fenceCustAddress,
+      fieldWindowsOpenRecordId,
+      showAlert,
+    ]
+  );
+
+  const addBundleUnit = useCallback(
+    (type: ProjectUnitType, label: string) => {
+      if (bundleProjectId == null) return;
+      let proj = crmData.find((p) => p.id === bundleProjectId);
+      if (!proj) return;
+
+      let units = [...(proj.units ?? [])];
+      if (activeUnitId) {
+        const idx = units.findIndex((u) => u.id === activeUnitId);
+        if (idx >= 0) units[idx] = snapshotActiveUnitRef.current(units[idx]);
+        proj = { ...proj, units, ...recalcBundleTotals(units) };
+      }
+
+      const bundleFs = (proj.formState ?? {}) as BundleFormState;
+      const unitId = newProjectUnitId();
+      let fieldRecordId: string | undefined;
+      if (type === "field-windows") {
+        fieldRecordId = newFieldWindowRecordId();
+        const record: FieldWindowRecord = {
+          id: fieldRecordId,
+          title: label,
+          clientPhone: bundleFs.bundleCustomerPhone,
+          clientAddress: bundleFs.bundleCustomerAddress,
+          items: [],
+          createdAt: formatFieldWindowDate(),
+          updatedAt: formatFieldWindowDate(),
+        };
+        const nextRecords = [record, ...fieldWindowRecordsRef.current];
+        fieldWindowRecordsRef.current = nextRecords;
+        setFieldWindowRecords(nextRecords);
+        handleFieldWindowRecordsChangeRef.current(nextRecords);
+      }
+      const unit: ProjectUnit = {
+        id: unitId,
+        type,
+        label,
+        formState:
+          type === "pergola"
+            ? defaultPergolaBundleFormState(proj.customer, bundleFs)
+            : type === "fence"
+              ? defaultFenceBundleFormState(proj.customer, bundleFs)
+              : { fieldWindowRecordId: fieldRecordId },
+        fieldWindowRecordId: fieldRecordId,
+        sellingPriceInc: 0,
+        incomeExVat: 0,
+        vatAmount: 0,
+        estExpense: 0,
+      };
+      const nextUnits = [...(proj.units ?? []), unit];
+      const nextProj = { ...proj, units: nextUnits, ...recalcBundleTotals(nextUnits) };
+      setCrmData((prev) => prev.map((p) => (p.id === bundleProjectId ? nextProj : p)));
+      setActiveUnitId(unitId);
+      bundleSyncingRef.current = true;
+      loadBundleUnitIntoForms(unit, nextProj);
+      requestAnimationFrame(() => mainScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }));
+      queueMicrotask(() => {
+        bundleSyncingRef.current = false;
+      });
+      showAlert(`מוצר חדש: ${label} — הזן מידות`);
+    },
+    [activeUnitId, bundleProjectId, crmData, loadBundleUnitIntoForms, showAlert]
+  );
+
+  const removeBundleUnit = useCallback(
+    (unitId: string) => {
+      if (bundleProjectId == null) return;
+      const proj = crmData.find((p) => p.id === bundleProjectId);
+      if (!proj) return;
+
+      let units = (proj.units ?? []).map((u) => ({ ...u }));
+      if (activeUnitId && activeUnitId !== unitId) {
+        const idx = units.findIndex((u) => u.id === activeUnitId);
+        if (idx >= 0) units[idx] = snapshotActiveUnitRef.current(units[idx]);
+      }
+      const remaining = units.filter((u) => u.id !== unitId);
+      const nextProj = { ...proj, units: remaining, ...recalcBundleTotals(remaining) };
+
+      setCrmData((prev) => prev.map((p) => (p.id === bundleProjectId ? nextProj : p)));
+
+      if (activeUnitId === unitId) {
+        const next = remaining[0];
+        setActiveUnitId(next?.id ?? null);
+        if (next) {
+          bundleSyncingRef.current = true;
+          loadBundleUnitIntoForms(next, nextProj);
+          queueMicrotask(() => {
+            bundleSyncingRef.current = false;
+          });
+        }
+      }
+
+      showAlert("המוצר נמחק מהפרויקט");
+    },
+    [activeUnitId, bundleProjectId, crmData, loadBundleUnitIntoForms, showAlert]
+  );
+
+  const exitBundleMode = useCallback(() => {
+    if (bundleProjectId != null && activeUnitId) {
+      setCrmData((prev) =>
+        prev.map((p) => {
+          if (p.id !== bundleProjectId || !p.units) return p;
+          const units = p.units.map((u) => (u.id === activeUnitId ? snapshotActiveUnitRef.current(u) : u));
+          return { ...p, units, ...recalcBundleTotals(units) };
+        })
+      );
+    }
+    setBundleProjectId(null);
+    setActiveUnitId(null);
+    lastLoadedBundleUnitRef.current = null;
+    showAlert("פרויקט משולב נסגר — הנתונים נשמרו ב-CRM");
+  }, [activeUnitId, bundleProjectId, showAlert]);
 
   const loadProject = useCallback((id: number) => {
     const proj = crmData.find((p) => p.id === id);
     if (!proj) return;
+    if (projectIsBundle(proj)) {
+      setBundleProjectId(proj.id);
+      setPergolaCrmEditId(null);
+      setFenceCrmEditId(null);
+      const first = proj.units?.[0];
+      if (first) {
+        setActiveUnitId(first.id);
+        loadBundleUnitIntoForms(first, proj);
+        switchView(viewForUnitType(first.type));
+      } else {
+        setActiveUnitId(null);
+        switchView("data");
+      }
+      return;
+    }
+    setBundleProjectId(null);
+    setActiveUnitId(null);
     if (proj.isLead) {
       setPergolaCrmEditId(null);
+      setFenceCrmEditId(null);
       setHasVitrines(false);
       setVitrineOpenings([createVitrineOpening(1)]);
       openLeadEditor(proj);
@@ -2829,6 +4702,7 @@ ${logoBlock}
     const state = (proj.formState || {}) as Record<string, unknown>;
     if (proj.isFence) {
       setPergolaCrmEditId(null);
+      setFenceCrmEditId(proj.id);
       setHasVitrines(false);
       setVitrineOpenings([createVitrineOpening(1)]);
       const s = state as {
@@ -2841,7 +4715,8 @@ ${logoBlock}
         fenceColor?: string;
         fenceSlatColor?: string;
         fenceInGround?: boolean;
-        segs?: { L: number; H: number; P: number }[];
+        segs?: { L: number; H: number; P: number; connected?: boolean; corner?: boolean }[];
+        fenceSimGate?: "none" | "single" | "double";
       };
       setFenceCustName(s.fenceCustName ?? "");
       setFenceCustPhone(s.fenceCustPhone ?? "");
@@ -2853,18 +4728,33 @@ ${logoBlock}
       setFenceSlatColor(s.fenceSlatColor ?? "RAL 9016");
       setFenceInGround(false);
       if (s.segs && s.segs.length > 0) setFenceSegments(s.segs.map((seg, i) => ({ id: Date.now() + i, ...seg })));
+      setFenceSimGate(normFenceShareGate(s.fenceSimGate));
+      {
+        const inc = Math.round(Number(proj.sellingPriceInc) || 0);
+        const ex = Math.round(Number(proj.incomeExVat) || (inc > 0 ? exVatFromIncVat(inc, businessVatDecimal) : 0));
+        if (inc > 0) {
+          setFenceResult((prev) => ({
+            ...prev,
+            sellIncVat: inc,
+            sellExVat: ex,
+            vatAmount: inc - ex,
+          }));
+        }
+      }
       switchView("fences");
       return;
     }
     const fieldRecordId = getFieldWindowRecordIdFromProject(state);
     if (proj.isFieldWindows || fieldRecordId) {
       setPergolaCrmEditId(null);
+      setFenceCrmEditId(null);
       setHasVitrines(false);
       setVitrineOpenings([createVitrineOpening(1)]);
       setFieldWindowsOpenRecordId(fieldRecordId);
       switchView("field-windows");
       return;
     }
+    setFenceCrmEditId(null);
     setPergolaCrmEditId(proj.id);
     PERGOLA_IDS.forEach((fieldKey) => {
       const v = state[fieldKey];
@@ -2929,7 +4819,7 @@ ${logoBlock}
       setVitrineOpenings([createVitrineOpening(1)]);
     }
     switchView("data");
-  }, [crmData, openLeadEditor, switchView]);
+  }, [crmData, openLeadEditor, switchView, loadBundleUnitIntoForms, businessVatDecimal]);
 
   /** הערות התקנה פנימיות: מעדכן את כרטיס ה-CRM בלי לחיצה נוספת על «שמור ב-CRM» */
   useEffect(() => {
@@ -2950,26 +4840,26 @@ ${logoBlock}
   const deleteProject = useCallback((id: number) => {
     if (typeof window === "undefined" || !(window as unknown as { confirm: (s: string) => boolean }).confirm("האם למחוק פרויקט זה מהמערכת?")) return;
     setPergolaCrmEditId((cur) => (cur === id ? null : cur));
+    setFenceCrmEditId((cur) => (cur === id ? null : cur));
+    setBundleProjectId((cur) => (cur === id ? null : cur));
+    if (bundleProjectId === id) setActiveUnitId(null);
     setCrmData((prev) => {
       const next = prev.filter((p) => p.id !== id);
       try { localStorage.setItem("yarhi_crm_data", JSON.stringify(next)); } catch {}
       return next;
     });
     showAlert("הפרויקט נמחק");
-  }, [showAlert]);
+  }, [showAlert, bundleProjectId]);
 
   useEffect(() => {
     try { localStorage.setItem("yarhi_crm_data", JSON.stringify(crmData)); } catch {}
   }, [crmData]);
 
-  /** שמירת טיוטות פרגולה/גדר + CRM + תנועות ל-Firestore (debounce) */
+  /** שמירת טיוטות פרגולה/גדר + CRM + תנועות לענן (debounce) */
   useEffect(() => {
-    const uid = firebaseUser?.uid;
+    const uid = cloudUserId;
     if (!uid || !workspaceCloudHydrated) return;
-    const db = getFirebaseDb();
-    if (!db) return;
-    const t = window.setTimeout(() => {
-      const totalPostsBySide =
+    const totalPostsBySide =
         (parseInt(postCountFront, 10) || 0) +
         (parseInt(postCountRight, 10) || 0) +
         (parseInt(postCountLeft, 10) || 0) +
@@ -3026,12 +4916,22 @@ ${logoBlock}
         fenceCustPhone,
         fenceCustAddress,
         fenceCustInternalNotes,
-        fenceSegments: fenceSegments.map((seg) => ({ id: seg.id, L: seg.L, H: seg.H, P: seg.P })),
+        fenceSegments: fenceSegments.map((seg) => ({
+          id: seg.id,
+          L: seg.L,
+          H: seg.H,
+          P: seg.P,
+          ...(seg.connected ? { connected: true as const } : {}),
+          ...(fenceSegIsContinue(seg) ? { corner: false as const } : {}),
+          ...(seg.connected && seg.corner === true ? { corner: true as const } : {}),
+          ...withFenceSide(seg),
+        })),
         fenceInGround,
         fenceSlat,
         fenceGap,
         fenceColor,
         fenceSlatColor,
+        fenceSimGate,
       };
       const businessSettings: Record<string, string> = {
         sysContractorName,
@@ -3054,6 +4954,11 @@ ${logoBlock}
         sysVitrine7000PriceSqm,
         sysVitrine9000PriceSqm,
         sysVatPercent,
+        sysQuoteDeliveryDays,
+        sysWorkWarrantyYears,
+        sysPaymentStage1Percent,
+        sysPaymentStage2Percent,
+        sysPaymentStage3Percent,
       };
       const base = sanitizeForFirestore({
         crmProjects: crmData,
@@ -3075,15 +4980,32 @@ ${logoBlock}
         logoDataUrl,
         businessSettings,
       }) as Record<string, unknown>;
-      const payload = { ...trimWorkspaceForSize(base), cloudSavedAt: serverTimestamp() };
-      void updateDoc(doc(db, "users", uid), { [USER_WORKSPACE_FIELD]: payload }).catch((err) =>
-        console.error("[Yarhi Pro] שמירת yarhiWorkspace:", err)
-      );
-    }, 1100);
+      const trimmed = trimWorkspaceForSize(base);
+      const writeCloud = async () => {
+        try {
+          await persistWorkspaceToBothClouds({ ...trimmed });
+          return;
+        } catch (err) {
+          console.error("[Yarhi Pro] שמירת workspace (שני עננים):", err);
+        }
+        if (cloudBackend === "supabase") {
+          await saveWorkspaceToSupabase(uid, { ...trimmed, cloudSavedAt: new Date().toISOString() });
+          return;
+        }
+        const db = getFirebaseDb();
+        if (!db) return;
+        const payload = { ...trimmed, cloudSavedAt: serverTimestamp() };
+        await updateDoc(doc(db, "users", uid), { [USER_WORKSPACE_FIELD]: payload });
+      };
+    persistWorkspaceNowRef.current = writeCloud;
+    const t = window.setTimeout(() => {
+      void writeCloud().catch((err) => console.error("[Yarhi Pro] שמירת yarhiWorkspace:", err));
+    }, 400);
     return () => window.clearTimeout(t);
   }, [
     workspaceCloudHydrated,
-    firebaseUser?.uid,
+    cloudUserId,
+    cloudBackend,
     crmData,
     businessTransactions,
     scheduleJobs,
@@ -3134,6 +5056,7 @@ ${logoBlock}
     fenceCustInternalNotes,
     fenceSegments,
     fenceInGround,
+    fenceSimGate,
     fenceSlat,
     fenceGap,
     fenceColor,
@@ -3156,40 +5079,96 @@ ${logoBlock}
     sysVitrine7000PriceSqm,
     sysVitrine9000PriceSqm,
     sysVatPercent,
+    sysQuoteDeliveryDays,
+    sysWorkWarrantyYears,
+    sysPaymentStage1Percent,
+    sysPaymentStage2Percent,
+    sysPaymentStage3Percent,
   ]);
 
   useEffect(() => {
-    // Sync fence 3D simulation when user is on fences settings
-    if (currentView !== "fences") return;
-    if (fencesInnerTab !== "sim") return;
+    const flush = () => {
+      void persistWorkspaceNowRef.current();
+    };
+    const onVis = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== "fence-3d") {
+      setFenceSimLoaded(false);
+    }
+  }, [currentView]);
+
+  useEffect(() => {
+    if (currentView !== "fence-3d") return;
+    if (!fenceSimLoaded) return;
     const iframe = fenceSimIframeRef.current;
     const win = iframe?.contentWindow;
     if (!win) return;
 
-    const segments = fenceSegments
-      .filter((s) => (s.L ?? 0) > 0 && (s.H ?? 0) > 0)
-      .map((s) => ({ L: s.L, H: s.H, P: typeof s.P === "number" ? s.P : 0 }));
-
+    const segments = fenceSegsForSim(fenceSegments);
     if (!segments.length) return;
 
     const gapCm = parseFloat(fenceGap) || 0;
+    const config = {
+      segments,
+      gapCm,
+      slatProfile: fenceSlat,
+      frameHex: fenceResult.frameHex,
+      slatHex: fenceResult.slatHex,
+      spacerHex: fenceResult.spacerHex,
+      inGround: fenceInGround,
+      env: fenceSimEnv,
+      gate: fenceSimGate,
+    };
 
-    win.postMessage(
-      {
-        type: "applyExternalConfig",
-        config: {
-          segments,
-          gapCm,
-          slatProfile: fenceSlat,
-          frameHex: fenceResult.frameHex,
-          slatHex: fenceResult.slatHex,
-          spacerHex: fenceResult.spacerHex,
-          inGround: fenceInGround,
-        },
-      },
-      "*"
-    );
-  }, [currentView, fencesInnerTab, fenceSegments, fenceGap, fenceSlat, fenceInGround, fenceResult.frameHex, fenceResult.slatHex, fenceResult.spacerHex]);
+    const post = () => {
+      try {
+        win.postMessage({ type: "applyExternalConfig", config }, "*");
+      } catch {
+        /* ignore */
+      }
+    };
+    post();
+    const t1 = window.setTimeout(post, 200);
+    const t2 = window.setTimeout(post, 700);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [currentView, fenceSimLoaded, fenceSegments, fenceGap, fenceSlat, fenceInGround, fenceResult.frameHex, fenceResult.slatHex, fenceResult.spacerHex, fenceSimEnv, fenceSimGate]);
+
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      if (ev.data?.type === "simReady" && ev.data.k === "f") {
+        setFenceSimLoaded(true);
+        return;
+      }
+      if (ev.data?.type === "simEnv") {
+        if (ev.data.k === "p") {
+          const env = normPergolaShareEnv(ev.data.env);
+          if (env) setPergolaSimEnv(env);
+        } else if (ev.data.k === "f") {
+          const env = normFenceShareEnv(ev.data.env);
+          if (env) setFenceSimEnv(env);
+        }
+        return;
+      }
+      if (!ev.data || ev.data.type !== "simConfig" || !ev.data.config) return;
+      if (ev.data.config.kind === "f") return;
+      lastLiveSimConfigRef.current = ev.data.config as LiveSimConfig;
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   useEffect(() => {
     if (currentView !== "3d" || !pergolaSimLoaded) return;
@@ -3197,52 +5176,34 @@ ${logoBlock}
     const win = iframe?.contentWindow;
     if (!win) return;
 
-    const L = pergolaResult.L || parseFloat(lengthWall) || 0;
-    const W = pergolaResult.W || parseFloat(exitWidth) || 0;
-    const lW = isLShape ? parseFloat(lWallWidth) || 0 : 0;
-    const lD = isLShape ? parseFloat(lWallDepth) || 0 : 0;
-
     win.postMessage(
       {
         type: "applyExternalConfig",
-        config: {
-          L,
-          W,
-          isLShape,
-          lWallWidth: lW,
-          lWallDepth: lD,
-          lShapeSide,
-          frameType,
-          dividers: Math.max(0, Math.min(8, pergolaResult.nDividersTotal ?? 0)),
-          gap: parseFloat(spacing) || 0,
-          frameHex: pergolaResult.frameHex,
-          slatHex: pergolaResult.shadeHex,
-          santafHex: pergolaResult.santafHex,
-          hasSantaf,
-          captionText: simCaption || "",
-        },
+        config: (() => {
+          const full = buildPergolaShareConfig();
+          const {
+            dividerStates: _ds,
+            hasLed: _hl,
+            hasFan: _hf,
+            ledCount: _lc,
+            fanCount: _fc,
+            env: _env,
+            frameHex: _fh,
+            slatHex: _sh,
+            ...structural
+          } = full;
+          return structural;
+        })(),
       },
       "*"
     );
+    void requestLiveSimConfig(win).then((cfg) => {
+      if (cfg) lastLiveSimConfigRef.current = cfg;
+    });
   }, [
     currentView,
     pergolaSimLoaded,
-    pergolaResult.L,
-    pergolaResult.W,
-    pergolaResult.nDividersTotal,
-    lengthWall,
-    exitWidth,
-    isLShape,
-    lWallWidth,
-    lWallDepth,
-    lShapeSide,
-    frameType,
-    spacing,
-    pergolaResult.frameHex,
-    pergolaResult.shadeHex,
-    pergolaResult.santafHex,
-    hasSantaf,
-    simCaption,
+    buildPergolaShareConfig,
   ]);
 
   scheduleJobsRef.current = scheduleJobs;
@@ -3254,19 +5215,23 @@ ${logoBlock}
       setFieldWindowRecords(records);
       fieldWindowRecordsRef.current = records;
       fieldWindowRecordsCloudRef.current = records;
-      const uid = firebaseUser?.uid;
+      const uid = cloudUserId;
       if (!uid) return;
       try {
         localStorage.setItem(fieldWindowsLocalStorageKey(uid), JSON.stringify(records));
       } catch {}
     },
-    [firebaseUser?.uid]
+    [cloudUserId]
   );
 
   const persistFieldWindowRecordsToCloud = useCallback(
     async (records: FieldWindowRecord[]) => {
-      const uid = firebaseUser?.uid;
+      const uid = cloudUserId;
       if (!uid) return;
+      if (cloudBackend === "supabase") {
+        fieldWindowRecordsCloudRef.current = records;
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) return;
       const cleaned = sanitizeForFirestore(records);
@@ -3295,7 +5260,7 @@ ${logoBlock}
         console.error("[Yarhi Pro] שמירת fieldWindowRecords לענן:", err);
       }
     },
-    [firebaseUser?.uid]
+    [cloudUserId, cloudBackend]
   );
 
   const handleFieldWindowRecordsChange = useCallback(
@@ -3306,8 +5271,42 @@ ${logoBlock}
     [applyFieldWindowRecords, persistFieldWindowRecordsToCloud]
   );
 
+  handleFieldWindowRecordsChangeRef.current = handleFieldWindowRecordsChange;
+
   const handleFieldWindowCrmLink = useCallback(
     (recordId: string, project: CrmProject) => {
+      if (bundleProjectId != null) {
+        const proj = crmData.find((p) => p.id === bundleProjectId);
+        const unit = proj?.units?.find(
+          (u) => u.type === "field-windows" && (u.fieldWindowRecordId === recordId || u.id === activeUnitId)
+        );
+        if (unit) {
+          const inc = typeof project.sellingPriceInc === "number" ? project.sellingPriceInc : 0;
+          setCrmData((prev) =>
+            prev.map((p) => {
+              if (p.id !== bundleProjectId || !p.units) return p;
+              const units = p.units.map((u) =>
+                u.id === unit.id
+                  ? {
+                      ...u,
+                      sellingPriceInc: inc,
+                      incomeExVat: project.incomeExVat ?? 0,
+                      vatAmount: project.vatAmount ?? 0,
+                    }
+                  : u
+              );
+              return { ...p, units, ...recalcBundleTotals(units) };
+            })
+          );
+          handleFieldWindowRecordsChange(
+            fieldWindowRecordsRef.current.map((r) =>
+              r.id === recordId ? { ...r, crmProjectId: bundleProjectId } : r
+            )
+          );
+          showAlert("מחיר עודכן בפרויקט המשולב");
+          return;
+        }
+      }
       setCrmData((prev) => [project, ...prev]);
       handleFieldWindowRecordsChange(
         fieldWindowRecordsRef.current.map((r) =>
@@ -3315,7 +5314,7 @@ ${logoBlock}
         )
       );
     },
-    [handleFieldWindowRecordsChange]
+    [activeUnitId, bundleProjectId, crmData, handleFieldWindowRecordsChange, showAlert]
   );
 
   const applyScheduleJobs = useCallback(
@@ -3323,19 +5322,23 @@ ${logoBlock}
       setScheduleJobs(jobs);
       scheduleJobsRef.current = jobs;
       scheduleJobsCloudRef.current = jobs;
-      const uid = firebaseUser?.uid;
+      const uid = cloudUserId;
       if (!uid) return;
       try {
         localStorage.setItem(scheduleLocalStorageKey(uid), JSON.stringify(jobs));
       } catch {}
     },
-    [firebaseUser?.uid]
+    [cloudUserId]
   );
 
   const persistScheduleJobsToCloud = useCallback(
     async (jobs: ScheduleJob[]) => {
-      const uid = firebaseUser?.uid;
+      const uid = cloudUserId;
       if (!uid) return;
+      if (cloudBackend === "supabase") {
+        scheduleJobsCloudRef.current = jobs;
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) return;
       if (jobs.length === 0) return;
@@ -3365,7 +5368,7 @@ ${logoBlock}
         console.error("[Yarhi Pro] שמירת scheduleJobs לענן:", err);
       }
     },
-    [firebaseUser?.uid]
+    [cloudUserId, cloudBackend]
   );
 
   const handleScheduleJobsChange = useCallback(
@@ -3377,12 +5380,12 @@ ${logoBlock}
   );
 
   useEffect(() => {
-    const uid = firebaseUser?.uid;
+    const uid = cloudUserId;
     if (!uid || fieldWindowRecords.length === 0) return;
     try {
       localStorage.setItem(fieldWindowsLocalStorageKey(uid), JSON.stringify(fieldWindowRecords));
     } catch {}
-  }, [fieldWindowRecords, firebaseUser?.uid]);
+  }, [fieldWindowRecords, cloudUserId]);
 
   useEffect(() => {
     setMobileMoreOpen(false);
@@ -3418,27 +5421,57 @@ ${logoBlock}
     pergolaResult.frameHex || "",
     pergolaResult.shadeHex || "",
     pergolaResult.santafHex || "",
+    postCount || "",
+    postCountFront || "",
+    postCountRight || "",
+    postCountLeft || "",
+    postCountBack || "",
     hasSantaf ? 1 : 0,
+    hasLed ? 1 : 0,
+    hasFan ? 1 : 0,
+    ledCount || "",
+    fanCount || "",
+    ledColor || "",
+    tensionerCount || "",
     simCaption || "",
     frameType || "",
   ].join("|");
   const pergolaSimSrc = (() => {
+    const shareCfg = buildPergolaShareConfig();
     const params = new URLSearchParams();
     params.set("rev", SIM_VERSION);
-    params.set("L", String(pergolaResult.L || parseFloat(lengthWall) || 0));
-    params.set("W", String(pergolaResult.W || parseFloat(exitWidth) || 0));
-    params.set("gap", String(parseFloat(spacing) || 0));
-    params.set("dividers", String(Math.max(0, Math.min(8, pergolaResult.nDividersTotal ?? 0))));
-    params.set("frameType", frameType || "");
-    params.set("frameHex", pergolaResult.frameHex || "#888888");
-    params.set("slatHex", pergolaResult.shadeHex || "#888888");
-    params.set("santafHex", pergolaResult.santafHex || "#888888");
-    params.set("captionText", simCaption || "");
-    params.set("isLShape", isLShape ? "1" : "0");
-    params.set("lWallWidth", String(isLShape ? parseFloat(lWallWidth) || 0 : 0));
-    params.set("lWallDepth", String(isLShape ? parseFloat(lWallDepth) || 0 : 0));
-    params.set("lShapeSide", lShapeSide || "right");
-    params.set("hasSantaf", hasSantaf ? "1" : "0");
+    params.set("L", String(shareCfg.L || 0));
+    params.set("W", String(shareCfg.W || 0));
+    params.set("gap", String(shareCfg.gap || 0));
+    params.set("dividers", String(shareCfg.dividers || 0));
+    params.set("postsFront", String(shareCfg.postsFront || 0));
+    params.set("postsRight", String(shareCfg.postsRight || 0));
+    params.set("postsLeft", String(shareCfg.postsLeft || 0));
+    params.set("postsBack", String(shareCfg.postsBack || 0));
+    params.set("hasPosts", shareCfg.hasPosts ? "1" : "0");
+    params.set("frameType", shareCfg.frameType || "");
+    params.set("frameHex", shareCfg.frameHex || "#888888");
+    params.set("slatHex", shareCfg.slatHex || "#888888");
+    params.set("santafHex", shareCfg.santafHex || (shareCfg.hasSantaf ? "#7ec8e3" : "#888888"));
+    params.set("captionText", shareCfg.captionText || "");
+    params.set("isLShape", shareCfg.isLShape ? "1" : "0");
+    params.set("lWallWidth", String(shareCfg.lWallWidth || 0));
+    params.set("lWallDepth", String(shareCfg.lWallDepth || 0));
+    params.set("lShapeSide", shareCfg.lShapeSide || "right");
+    if (shareCfg.hasSantaf) params.set("hasSantaf", "1");
+    if (shareCfg.hasLed) params.set("hasLed", "1");
+    if (shareCfg.hasFan) params.set("hasFan", "1");
+    if (shareCfg.hasLed) params.set("ledCount", String(shareCfg.ledCount || 1));
+    if (shareCfg.hasFan) params.set("fanCount", String(shareCfg.fanCount || 1));
+    params.set("ledTone", shareCfg.ledTone || "white");
+    if (shareCfg.hasTensioners) {
+      params.set("hasTensioners", "1");
+      params.set("tensionerCount", String(shareCfg.tensionerCount || 2));
+    }
+    const ds = encodeDividerStatesParam(shareCfg.dividerStates);
+    if (ds) params.set("ds", ds);
+    appendPergolaShareUrlParams(params, shareCfg);
+    params.delete("env");
     params.set("sync", encodeURIComponent(pergolaSyncToken));
     return `/sim.html?${params.toString()}`;
   })();
@@ -3471,7 +5504,10 @@ ${logoBlock}
             <span className="text-xl">📐</span>מידות שטח חלונות
           </Link>
           <Link href="/?view=3d" className={navCls("3d")}>
-            <span className="text-xl">🎨</span>הדמיית 3D מורחבת
+            <span className="text-xl">🎨</span>הדמיית פרגולה
+          </Link>
+          <Link href="/?view=fence-3d" className={navCls("fence-3d")}>
+            <span className="text-xl">🧱</span>הדמיית גדר
           </Link>
           <Link href="/?view=schedule" className={navCls("schedule")}>
             <span className="text-xl">📅</span>ניהול לו&quot;ז
@@ -3506,13 +5542,28 @@ ${logoBlock}
         ref={mainScrollRef}
         className={
           "relative z-10 flex min-h-0 min-w-0 flex-1 flex-col bg-slate-100 pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] lg:pb-0 " +
-          (currentView === "3d" || currentView === "schedule" ? "overflow-hidden" : "overflow-y-auto")
+          (currentView === "3d" || currentView === "fence-3d" || currentView === "schedule" ? "overflow-hidden" : "overflow-y-auto")
         }
       >
         {alertMsg && (
           <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[10000] -translate-x-1/2 rounded-xl border border-slate-600 bg-slate-800 px-7 py-3 font-bold text-white shadow-lg lg:bottom-8">
             {alertMsg}
           </div>
+        )}
+
+        {isProductView && (
+          <ProductProjectBar
+            currentView={currentView}
+            project={bundleProject && projectIsBundle(bundleProject) ? bundleProject : null}
+            activeUnitId={activeUnitId}
+            customerPreview={bundleCustomerPreview}
+            onStartProject={startBundleWithCurrentProduct}
+            onSelectUnit={switchBundleUnit}
+            onAddUnit={addBundleUnit}
+            onRemoveUnit={removeBundleUnit}
+            onExit={exitBundleMode}
+            onPrintBundleQuote={printBundleCustomerQuote}
+          />
         )}
 
         {leadModalOpen && (
@@ -3703,6 +5754,70 @@ ${logoBlock}
           </div>
         ) : null}
 
+        {crmPriceEditModal ? (
+          <div
+            className="fixed inset-0 z-[210] flex items-start justify-center overflow-y-auto overscroll-none bg-slate-900/60 p-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-sm sm:items-center sm:p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="crm-price-edit-modal-title"
+          >
+            <button type="button" className="absolute inset-0 cursor-default" aria-label="סגור" onClick={() => setCrmPriceEditModal(null)} />
+            <div className="relative z-10 my-auto w-full max-w-md rounded-3xl border border-slate-100 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-slate-100 p-4 sm:p-5">
+                <h2 id="crm-price-edit-modal-title" className="text-xl font-black text-slate-800">
+                  עריכת מחיר עסקה
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setCrmPriceEditModal(null)}
+                  className="rounded-full bg-slate-100 p-2 text-slate-500 transition hover:bg-slate-200 hover:text-slate-800"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="space-y-4 p-4 sm:p-5">
+                <p className="text-sm font-medium leading-relaxed text-slate-600">
+                  עדכון סכום העסקה עבור{" "}
+                  <span className="font-bold text-slate-800">{crmPriceEditModal.customerName || "הלקוח"}</span>{" "}
+                  (כולל מע״מ). השינוי יתעדכן בלוח, בניהול העסק ובהצעות שמבוססות על מחיר העסקה השמור.
+                </p>
+                <div>
+                  <label className="mb-1 block text-sm font-bold text-slate-700">סכום כולל מע״מ (₪)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    dir="ltr"
+                    autoFocus
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-right text-lg font-black outline-none focus:bg-white focus:ring-2 focus:ring-blue-500"
+                    value={crmPriceEditRaw ? Number(crmPriceEditRaw.replace(/[^0-9]/g, "")).toLocaleString("en-US") : ""}
+                    onChange={(e) => setCrmPriceEditRaw(e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="0"
+                  />
+                </div>
+                <p className="text-[11px] font-semibold text-slate-500">
+                  שינוי מידות בהמשך יחזיר חישוב לפי מטר כמו היום — ואפשר לערוך שוב ידנית מכאן.
+                </p>
+                <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-4 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => setCrmPriceEditModal(null)}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-3 font-bold text-slate-700 transition hover:bg-slate-50 sm:w-auto sm:px-6"
+                  >
+                    ביטול
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyCrmPriceEdit}
+                    className="w-full flex-1 rounded-xl bg-amber-600 py-3 font-bold text-white shadow-md transition hover:bg-amber-700"
+                  >
+                    שמור מחיר
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* VIEW: DASHBOARD */}
         {currentView === "dashboard" && (
           <section className="w-full max-w-none px-3 py-4 sm:px-4 md:px-5 lg:px-6">
@@ -3763,9 +5878,9 @@ ${logoBlock}
                 </div>
               </div>
               <p className="border-b border-slate-100 bg-slate-50/80 px-4 py-2 text-center text-[11px] font-semibold text-slate-500 md:hidden">
-                ← גלילה אופקית ← לכל העמודות
+                גלילה למעלה/למטה על הטבלה · גלילה הצידה לכל העמודות
               </p>
-              <div className="overflow-x-auto overscroll-x-contain touch-pan-x">
+              <div className="overflow-x-auto overscroll-x-contain touch-manipulation [-webkit-overflow-scrolling:touch] [touch-action:pan-x_pan-y]">
                 <table className="w-full min-w-[52rem] text-right">
                 <thead>
                   <tr className="bg-slate-50 text-slate-600 text-sm border-b border-slate-200">
@@ -3800,6 +5915,9 @@ ${logoBlock}
                     const lw = fs.lengthWall ?? "-";
                     const ew = fs.exitWidth ?? "-";
                     let dimStr = p.isFence ? (p.totalLength ? `גדר, אורך ${p.totalLength} ס"מ` : "גדר") : `${lw}x${ew}`;
+                    if (projectIsBundle(p)) {
+                      dimStr = `פרויקט משולב · ${p.units?.length ?? 0} מוצרים`;
+                    }
                     const st = parseCrmStatus(p.crmStatus);
                     if (p.isLead) {
                       const note = String(fs.leadServiceNotes ?? "").trim();
@@ -3813,6 +5931,9 @@ ${logoBlock}
                         <td className="p-4 font-bold text-slate-800">
                           <span className="inline-flex flex-wrap items-center gap-2">
                             {p.customer}
+                            {projectIsBundle(p) ? (
+                              <span className="text-[10px] font-bold rounded-full bg-indigo-100 text-indigo-800 px-2 py-0.5 border border-indigo-200">פרויקט משולב</span>
+                            ) : null}
                             {crmProjectShowsLifecycleLeadClientPill(p) ? (
                               crmLeadEntryShowsAsClient(p.crmStatus) ? (
                                 <span className="text-[10px] font-bold rounded-full bg-emerald-100 text-emerald-900 px-2 py-0.5 border border-emerald-200">לקוח</span>
@@ -3855,6 +5976,13 @@ ${logoBlock}
                         <td className="p-4 text-center">
                           <span className="inline-flex flex-wrap items-center justify-center gap-2">
                             <button type="button" onClick={() => loadProject(p.id)} className="text-blue-600 bg-blue-50 px-3 py-2 rounded-lg hover:bg-blue-100 font-bold transition-colors shadow-sm inline-flex items-center gap-1">טען</button>
+                            <button
+                              type="button"
+                              onClick={() => openCrmPriceEdit(p)}
+                              className="text-amber-800 bg-amber-50 px-3 py-2 rounded-lg hover:bg-amber-100 font-bold transition-colors shadow-sm inline-flex items-center gap-1"
+                            >
+                              ערוך מחיר
+                            </button>
                             {p.isLead ? (
                               <button
                                 type="button"
@@ -3887,6 +6015,7 @@ ${logoBlock}
                   🖨️ דוח ייצור
                 </button>
                 <button type="button" onClick={printCustomerQuote} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-blue-700 transition shadow-md flex items-center gap-2">📄 סיכום ללקוח (עם 3D)</button>
+                <button type="button" onClick={sendPergolaSimToWhatsApp} className="bg-teal-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-teal-700 transition shadow-md flex items-center gap-2">🎥 שלח הדמיה בוואטסאפ</button>
                 {isManagerUser ? (
                   <button type="button" onClick={openKitGuide} className="bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-indigo-700 transition shadow-md flex items-center gap-2">
                     📘 חוברת הרכבה
@@ -4132,7 +6261,50 @@ ${logoBlock}
               <div className="xl:col-span-8 space-y-6">
                 <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 no-print-section">
                   <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-col justify-center"><p className="text-slate-500 text-xs font-bold mb-1">סה&quot;כ שטח מחושב</p><p className="text-2xl font-black text-slate-800">{Number(pergolaResult.sqm ?? 0).toFixed(2)} מ&quot;ר</p></div>
-                  <div className="bg-gradient-to-br from-blue-600 to-blue-500 rounded-2xl p-4 shadow-md text-white flex flex-col justify-center"><p className="text-blue-200 text-xs font-bold mb-1">{hasVitrines ? "מחיר כולל (פרגולה + ויטרינות)" : "מחיר ללקוח כולל מע״מ"}</p><p className="text-2xl font-black">₪ {Math.round(totalPergolaWithVitrines.incVat).toLocaleString()}</p><p className="text-[10px] text-blue-200 mt-1 opacity-80">₪ {Math.round(totalPergolaWithVitrines.exVat).toLocaleString()} לפני מע&quot;מ</p></div>
+                  <div className="bg-gradient-to-br from-blue-600 to-blue-500 rounded-2xl p-4 shadow-md text-white flex flex-col justify-center">
+                    <p className="text-blue-200 text-xs font-bold mb-1">
+                      {hasVitrines ? "מחיר כולל (פרגולה + ויטרינות)" : "מחיר ללקוח כולל מע״מ"}
+                    </p>
+                    {pergolaCustomerPriceDisplay.hasOverride && showPergolaPriceCompare ? (
+                      <>
+                        <p className="text-sm font-bold text-blue-100/80 line-through decoration-2">
+                          ₪ {pergolaCustomerPriceDisplay.liveInc.toLocaleString()}
+                        </p>
+                        <p className="text-2xl font-black">
+                          ₪ {pergolaCustomerPriceDisplay.displayInc.toLocaleString()}
+                        </p>
+                        <p className="text-[10px] font-bold text-amber-200 mt-0.5">
+                          {pergolaCustomerPriceDisplay.isDiscount ? "מחיר אחרי הנחה" : "מחיר עסקה מעודכן"}
+                        </p>
+                        <p className="text-[10px] text-blue-200 mt-1 opacity-80">
+                          ₪ {pergolaCustomerPriceDisplay.displayEx.toLocaleString()} לפני מע&quot;מ
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-2xl font-black">
+                          ₪ {pergolaCustomerPriceDisplay.displayInc.toLocaleString()}
+                        </p>
+                        <p className="text-[10px] text-blue-200 mt-1 opacity-80">
+                          ₪ {pergolaCustomerPriceDisplay.displayEx.toLocaleString()} לפני מע&quot;מ
+                        </p>
+                        {pergolaCustomerPriceDisplay.hasOverride ? (
+                          <p className="text-[10px] font-bold text-amber-200 mt-1">
+                            {pergolaCustomerPriceDisplay.isDiscount ? "כולל הנחה מה-CRM" : "מחיר מעודכן מה-CRM"}
+                          </p>
+                        ) : null}
+                      </>
+                    )}
+                    {pergolaCustomerPriceDisplay.hasOverride ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowPergolaPriceCompare((v) => !v)}
+                        className="mt-2 self-start rounded-lg bg-white/15 px-2 py-1 text-[10px] font-bold text-white hover:bg-white/25 transition"
+                      >
+                        {showPergolaPriceCompare ? "הסתר מחיר מקורי" : "השווה למחיר מקורי"}
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="bg-slate-50 rounded-2xl p-4 shadow-sm border border-dashed border-slate-300 flex flex-col justify-center">
                     <button type="button" onClick={() => setHiddenCostsBox((v) => !v)} className="text-xs font-bold text-slate-600 flex items-center justify-center gap-2 hover:text-slate-900 hover:bg-slate-100 px-3 py-2 rounded-xl transition">🔒 הצג / הסתר פירוט עלויות (לשימוש פנימי)</button>
                   </div>
@@ -4155,7 +6327,13 @@ ${logoBlock}
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500">
                   <h2 className="text-xl font-black mb-4 text-blue-800 border-b border-blue-100 pb-2 flex items-center gap-2">✂️ רשימת חיתוכים (בס&quot;מ)</h2>
-                  <div className="overflow-x-auto"><table className="w-full text-right border-collapse"><thead><tr className="bg-slate-50 text-slate-600 border-y border-slate-200"><th className="p-3 font-bold">פרופיל</th><th className="p-3 font-bold">ייעוד</th><th className="p-3 font-bold text-center">כמות לחיתוך</th><th className="p-3 font-bold text-center">מידה סופית</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: pergolaResult.cuttingHtml }} /></table></div>
+                  <div className="overflow-x-auto"><table className="w-full text-right border-collapse"><thead><tr className="bg-slate-50 text-slate-600 border-y border-slate-200"><th className="p-3 font-bold">פרופיל</th><th className="p-3 font-bold">ייעוד</th><th className="p-3 font-bold text-center">כמות לחיתוך</th><th className="p-3 font-bold text-center">מידה לחיתוך</th><th className="p-3 font-bold text-center">מוט</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: pergolaResult.cuttingHtml }} /></table></div>
+                  {pergolaResult.shadeSlatPlanHtml ? (
+                    <div className="mt-5 pt-4 border-t border-blue-100">
+                      <h3 className="text-base font-black text-blue-900 mb-3">שלבי הצללה — תוכנית חיתוך (מוט 6 מ׳)</h3>
+                      <div dangerouslySetInnerHTML={{ __html: pergolaResult.shadeSlatPlanHtml }} />
+                    </div>
+                  ) : null}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500">
@@ -4187,6 +6365,7 @@ ${logoBlock}
                   🖨️ דוח ייצור
                 </button>
                 <button type="button" onClick={() => fenceResult.sqm > 0 && printFenceQuote()} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-blue-700 shadow">📄 סיכום ללקוח</button>
+                <button type="button" onClick={sendFenceSimToWhatsApp} className="bg-teal-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-teal-700 shadow">🎥 שלח הדמיה בוואטסאפ</button>
                 <button type="button" onClick={() => setKitOrderModal({ kind: "fence" })} className="bg-slate-700 text-white px-5 py-2 rounded-xl font-bold hover:bg-slate-800 shadow">
                   🏭 שלח לייצור
                 </button>
@@ -4215,15 +6394,86 @@ ${logoBlock}
                   </div>
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
-                  <div className="flex justify-between items-center mb-4 border-b pb-2"><h3 className="text-lg font-bold text-slate-700">📏 מקטעי גדר</h3><button type="button" onClick={addFenceSeg} className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded font-bold hover:bg-blue-200">+ הוסף מקטע</button></div>
-                  <div className="space-y-4">{fenceSegments.map((seg) => (
-                    <div key={seg.id} className="bg-white p-5 rounded-2xl border-2 border-slate-200 shadow-sm relative flex flex-col gap-4">
-                      <button type="button" onClick={() => removeFenceSeg(seg.id)} className="absolute top-4 left-4 text-red-500 bg-red-50 w-8 h-8 rounded-lg font-black hover:bg-red-100 border border-red-100 flex items-center justify-center">X</button>
-                      <div><label className="block text-sm font-bold text-slate-600 mb-1">אורך כולל (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "L")} onChange={(e) => setFenceSegDraft(seg.id, "L", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "L")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl" placeholder="0" /></div>
-                      <div><label className="block text-sm font-bold text-slate-600 mb-1">גובה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "H")} onChange={(e) => setFenceSegDraft(seg.id, "H", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "H")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl" placeholder="0" /></div>
-                      <div><label className="block text-xs font-bold text-slate-500 mb-1">מספר עמודים כולל</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "P")} onChange={(e) => setFenceSegDraft(seg.id, "P", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "P")} className="w-full text-center font-black text-xl p-2.5 border border-slate-300 rounded-lg" placeholder="סה״כ" /></div>
+                  <div className="flex justify-between items-center mb-2 border-b pb-2 gap-2 flex-wrap">
+                    <h3 className="text-lg font-bold text-slate-700">📏 מקטעי גדר</h3>
+                    <div className="flex gap-2 flex-wrap">
+                      <button type="button" onClick={addFenceContinue} className="text-xs bg-sky-100 text-sky-800 px-3 py-1 rounded font-bold hover:bg-sky-200">+ המשך (אותו כיוון)</button>
+                      <button type="button" onClick={addFenceCorner} className="text-xs bg-emerald-100 text-emerald-800 px-3 py-1 rounded font-bold hover:bg-emerald-200">+ פינה 90°</button>
+                      <button type="button" onClick={addFenceSeg} className="text-xs bg-slate-800 text-white px-3 py-1 rounded font-bold hover:bg-slate-700">+ מקטע</button>
                     </div>
-                  ))}</div>
+                  </div>
+                  <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                    על כל מקטע לוחצים <strong>שמאל</strong> או <strong>ימין</strong>. «פינה» / «המשך» ממשיכים מאותו צד.
+                  </p>
+                  <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs font-black text-slate-700 mb-2">שער כניסה להדמיה</p>
+                    <div className="flex flex-wrap gap-2">
+                      {([
+                        ["none", "בלי שער"],
+                        ["single", "כנף אחת"],
+                        ["double", "דו-כנפי"],
+                      ] as const).map(([id, label]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setFenceSimGate(id)}
+                          className={`text-xs px-3 py-1.5 rounded-lg font-bold border ${
+                            fenceSimGate === id
+                              ? "bg-slate-800 text-white border-slate-900"
+                              : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-1.5 leading-relaxed">רק בהדמיה. לחיצה על השער פותחת וסוגרת. מידות וחיתוך לשער יגיעו בהמשך.</p>
+                  </div>
+                  <div className="space-y-4">{fenceSegments.map((seg, segIndex) => {
+                    const lab = fenceSegLabel(fenceSegments, segIndex, fenceSimEnv);
+                    const sideNow = fenceSegSideOf(fenceSegments, segIndex);
+                    return (
+                    <div key={seg.id} className={`p-5 rounded-2xl border-2 shadow-sm relative flex flex-col gap-4 ${fenceSegToneClass(lab.tone)}`}>
+                      <button type="button" onClick={() => removeFenceSeg(seg.id)} className="absolute top-4 left-4 text-red-500 bg-red-50 w-8 h-8 rounded-lg font-black hover:bg-red-100 border border-red-100 flex items-center justify-center">X</button>
+                      <div className="pr-2 pl-10">
+                        <p className="text-lg font-black text-slate-800">{lab.title}</p>
+                      </div>
+                      {!seg.connected && fenceSimEnv === "villa" ? (
+                        <div className="grid grid-cols-2 gap-2" dir="ltr">
+                          <button
+                            type="button"
+                            onClick={() => setFenceSegSide(seg.id, "left")}
+                            className={`rounded-2xl py-4 text-xl font-black border-2 transition ${
+                              sideNow === "left"
+                                ? "bg-sky-600 text-white border-sky-700 shadow-md"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-sky-50"
+                            }`}
+                          >
+                            שמאל
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFenceSegSide(seg.id, "right")}
+                            className={`rounded-2xl py-4 text-xl font-black border-2 transition ${
+                              sideNow === "right"
+                                ? "bg-amber-500 text-white border-amber-600 shadow-md"
+                                : "bg-white text-slate-600 border-slate-200 hover:bg-amber-50"
+                            }`}
+                          >
+                            ימין
+                          </button>
+                        </div>
+                      ) : null}
+                      <div><label className="block text-sm font-bold text-slate-600 mb-1">אורך כולל (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "L")} onChange={(e) => setFenceSegDraft(seg.id, "L", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "L")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl bg-white" placeholder="0" /></div>
+                      <div><label className="block text-sm font-bold text-slate-600 mb-1">גובה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "H")} onChange={(e) => setFenceSegDraft(seg.id, "H", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "H")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl bg-white" placeholder="0" /></div>
+                      <div><label className="block text-xs font-bold text-slate-500 mb-1">מספר עמודים כולל{seg.connected ? " (כולל עמוד משותף)" : ""}</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "P")} onChange={(e) => setFenceSegDraft(seg.id, "P", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "P")} className="w-full text-center font-black text-xl p-2.5 border border-slate-300 rounded-lg bg-white" placeholder="סה״כ" /></div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <button type="button" onClick={() => insertFenceAfter(seg.id, "continue")} className="text-[11px] bg-sky-100 text-sky-800 px-2.5 py-1.5 rounded-lg font-bold hover:bg-sky-200">+ המשך אחרי זה</button>
+                        <button type="button" onClick={() => insertFenceAfter(seg.id, "corner")} className="text-[11px] bg-emerald-100 text-emerald-800 px-2.5 py-1.5 rounded-lg font-bold hover:bg-emerald-200">+ פינה אחרי זה</button>
+                      </div>
+                    </div>
+                    );
+                  })}</div>
                   <div className="mt-4 pt-3 border-t">
                     <div className="text-xs text-slate-500 font-bold bg-slate-100 p-2 rounded-lg text-center mt-2">החישוב המלא מתבצע בשרת המערכת</div>
                   </div>
@@ -4244,47 +6494,58 @@ ${logoBlock}
                 <div className="flex gap-2 flex-wrap">
                   <button
                     type="button"
-                    onClick={() => setFencesInnerTab("calc")}
-                    className={`px-4 py-2 rounded-xl font-bold transition shadow-sm border ${
-                      fencesInnerTab === "calc" ? "bg-blue-600 text-white border-blue-700" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                    }`}
+                    onClick={() => switchView("fence-3d")}
+                    className="px-4 py-2 rounded-xl font-bold transition shadow-sm border bg-slate-800 text-white border-slate-900 hover:bg-slate-700"
                   >
-                    📋 חישוב
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFencesInnerTab("sim")}
-                    className={`px-4 py-2 rounded-xl font-bold transition shadow-sm border ${
-                      fencesInnerTab === "sim" ? "bg-slate-800 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                    }`}
-                  >
-                    🧱 הדמיית 3D
+                    🧱 פתח הדמיית גדר
                   </button>
                 </div>
-
-                {fencesInnerTab === "sim" ? (
-                  <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
-                    <div className="p-4 border-b bg-slate-50 flex items-center justify-between">
-                      <h3 className="text-lg font-black text-slate-800">הדמיית 3D לגדרות</h3>
-                      <div className="text-xs font-bold text-slate-500">עמודים + שלבים לפי הנתונים</div>
-                    </div>
-                    <div className="w-full h-[min(720px,calc(100dvh-14rem))] min-h-[min(520px,50dvh)] bg-slate-900">
-                      <iframe
-                        title="Fence 3D"
-                        src="/fence-sim.html"
-                        className="block h-full w-full bg-slate-900"
-                        ref={fenceSimIframeRef}
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {fenceResult.sqm <= 0 && <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm font-bold">💡 הזן <strong>אורך</strong> ו<strong>גובה</strong> במקטע (לפחות במקטע אחד) כדי לראות חישוב ומחירים.</div>}
+                {fenceResult.sqm <= 0 && <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-amber-800 text-sm font-bold">💡 הזן <strong>אורך</strong> ו<strong>גובה</strong> במקטע (לפחות במקטע אחד) כדי לראות חישוב ומחירים.</div>}
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                       <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 text-center"><p className="text-slate-500 text-xs font-bold mb-1">סה&quot;כ מ&quot;ר</p><p className="text-xl font-black text-slate-800">{(fenceResult?.sqm ?? 0).toFixed(2)}</p></div>
                       <div className="bg-slate-50 rounded-2xl p-4 shadow-sm border border-dashed border-slate-300 flex flex-col justify-center"><button type="button" onClick={() => setFenceHiddenCostsBox((v) => !v)} className="text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-100 px-3 py-2 rounded-xl transition">🔒 הצג / הסתר פירוט עלויות</button></div>
-                      <div className="bg-blue-600 rounded-2xl p-4 text-white text-center shadow-md"><p className="text-blue-100 text-xs font-bold mb-1">מכירה ללקוח (כולל מע&quot;מ)</p><p className="text-xl font-black">₪ {fenceResult.sqm > 0 ? Math.round(fenceResult.sellIncVat).toLocaleString() : "0"}</p><p className="text-[10px] text-blue-200 mt-1 opacity-90">₪ {fenceResult.sqm > 0 ? Math.round(fenceResult.sellExVat).toLocaleString() : "0"} לפני מע&quot;מ</p></div>
+                      <div className="bg-blue-600 rounded-2xl p-4 text-white text-center shadow-md">
+                        <p className="text-blue-100 text-xs font-bold mb-1">מכירה ללקוח (כולל מע&quot;מ)</p>
+                        {fenceCustomerPriceDisplay.hasOverride && showFencePriceCompare ? (
+                          <>
+                            <p className="text-sm font-bold text-blue-100/80 line-through decoration-2">
+                              ₪ {fenceResult.sqm > 0 ? fenceCustomerPriceDisplay.liveInc.toLocaleString() : "0"}
+                            </p>
+                            <p className="text-xl font-black">
+                              ₪ {fenceResult.sqm > 0 ? fenceCustomerPriceDisplay.displayInc.toLocaleString() : "0"}
+                            </p>
+                            <p className="text-[10px] font-bold text-amber-200 mt-0.5">
+                              {fenceCustomerPriceDisplay.isDiscount ? "מחיר אחרי הנחה" : "מחיר עסקה מעודכן"}
+                            </p>
+                            <p className="text-[10px] text-blue-200 mt-1 opacity-90">
+                              ₪ {fenceResult.sqm > 0 ? fenceCustomerPriceDisplay.displayEx.toLocaleString() : "0"} לפני מע&quot;מ
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="text-xl font-black">
+                              ₪ {fenceResult.sqm > 0 ? fenceCustomerPriceDisplay.displayInc.toLocaleString() : "0"}
+                            </p>
+                            <p className="text-[10px] text-blue-200 mt-1 opacity-90">
+                              ₪ {fenceResult.sqm > 0 ? fenceCustomerPriceDisplay.displayEx.toLocaleString() : "0"} לפני מע&quot;מ
+                            </p>
+                            {fenceCustomerPriceDisplay.hasOverride ? (
+                              <p className="text-[10px] font-bold text-amber-200 mt-1">
+                                {fenceCustomerPriceDisplay.isDiscount ? "כולל הנחה מה-CRM" : "מחיר מעודכן מה-CRM"}
+                              </p>
+                            ) : null}
+                          </>
+                        )}
+                        {fenceCustomerPriceDisplay.hasOverride ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowFencePriceCompare((v) => !v)}
+                            className="mt-2 rounded-lg bg-white/15 px-2 py-1 text-[10px] font-bold text-white hover:bg-white/25 transition"
+                          >
+                            {showFencePriceCompare ? "הסתר מחיר מקורי" : "השווה למחיר מקורי"}
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                     {fenceHiddenCostsBox && fenceResult.sqm > 0 && (
                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -4294,11 +6555,9 @@ ${logoBlock}
                         <div className="bg-indigo-100 rounded-2xl p-4 text-indigo-900 text-center border border-indigo-200"><p className="text-indigo-700 text-xs font-bold mb-1">רווח גולמי (לפני מע&quot;מ)</p><p className="text-xl font-black">₪ {Math.round(fenceResult.profit).toLocaleString()}</p></div>
                       </div>
                     )}
-                    <div className="bg-white rounded-2xl p-6 shadow-md border-t-4 border-blue-500"><h2 className="text-lg font-black mb-4 text-slate-800 border-b pb-2">✂️ מידות חיתוך (ס&quot;מ)</h2><div className="overflow-x-auto"><table className="w-full text-right text-sm"><thead><tr><th>פרופיל / ייעוד</th><th className="text-center">כמות</th><th className="text-center">מידה סופית</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: fenceResult?.cuttingHtml ?? "" }} /></table></div></div>
+                    <div className="bg-white rounded-2xl p-6 shadow-md border-t-4 border-blue-500"><h2 className="text-lg font-black mb-4 text-slate-800 border-b pb-2">✂️ מידות חיתוך (ס&quot;מ)</h2><div className="overflow-x-auto"><table className="w-full text-right text-sm"><thead><tr><th>פרופיל / ייעוד</th><th className="text-center">כמות</th><th className="text-center">מידה לחיתוך</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: fenceResult?.cuttingHtml ?? "" }} /></table></div></div>
                     <div className="bg-white rounded-2xl p-6 shadow-md border-t-4 border-emerald-500"><h2 className="text-lg font-black mb-4 text-slate-800 border-b pb-2">📦 הזמנה מהמחסן (מוטות 6 מ&apos;)</h2><div className="overflow-x-auto mb-4"><table className="w-full text-right text-sm"><thead><tr><th>סוג פרופיל</th><th className="text-center">כמות מוטות</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: fenceResult?.bomHtml ?? "" }} /></table></div><div className="bg-slate-50 p-4 rounded-xl border border-slate-200"><h4 className="font-bold text-slate-700 mb-2">🔩 פירזול ואביזרים</h4><div className="space-y-2 text-sm text-slate-600" dangerouslySetInnerHTML={{ __html: fenceResult?.hardwareHtml ?? "" }} /></div></div>
                     <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500"><h2 className="text-xl font-black mb-4 text-blue-800 border-b border-blue-100 pb-2">📐 מפרט שדות והוראות</h2><div className="text-base text-slate-800 space-y-3 font-medium" dangerouslySetInnerHTML={{ __html: fenceResult?.instructionsHtml ?? "הוסף מקטעים (אורך, גובה ועמודים) לחישוב מדויק." }} /></div>
-                  </>
-                )}
               </div>
             </div>
           </section>
@@ -4346,9 +6605,14 @@ ${logoBlock}
                 <h2 className="text-xl font-black text-slate-800 sm:text-2xl lg:text-3xl">הדמיה חדשה עם תמונת המקום</h2>
                 <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">הדמיית 3D מתקדמת המשולבת עם תמונת המקום.</p>
               </div>
-              <button type="button" onClick={() => switchView("data")} className="shrink-0 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700">
-                חזור למפרט טכני
-              </button>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button type="button" onClick={sendPergolaSimToWhatsApp} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-teal-700">
+                  שלח הדמיה בוואטסאפ
+                </button>
+                <button type="button" onClick={() => switchView("data")} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700">
+                  חזור למפרט טכני
+                </button>
+              </div>
             </header>
             <div className="min-h-0 flex-1 w-full overflow-hidden bg-slate-900">
               <iframe
@@ -4361,6 +6625,177 @@ ${logoBlock}
                 ref={pergolaSimIframeRef}
                 onLoad={() => setPergolaSimLoaded(true)}
               />
+            </div>
+          </section>
+        )}
+        {/* VIEW: FENCE 3D */}
+        {currentView === "fence-3d" && (
+          <section className="flex min-h-0 w-full max-w-none flex-1 flex-col overflow-hidden">
+            <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-2 sm:px-4 sm:py-3">
+              <div className="min-w-0">
+                <h2 className="text-xl font-black text-slate-800 sm:text-2xl lg:text-3xl">הדמיית גדר</h2>
+                <p className="mt-0.5 text-xs text-slate-500 sm:text-sm">מזינים מידות ושער כאן — ההדמיה מתעדכנת מיד. אותו נתון נשמר גם במסך גדרות.</p>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <button type="button" onClick={sendFenceSimToWhatsApp} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-teal-700">
+                  שלח הדמיה בוואטסאפ
+                </button>
+                <button type="button" onClick={() => switchView("fences")} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700">
+                  למפרט וחישוב
+                </button>
+              </div>
+            </header>
+            <div className="flex min-h-0 flex-1 flex-col lg:flex-row overflow-hidden">
+              {fenceSimPanelVisible && (
+              <aside className="shrink-0 border-b border-slate-200 bg-slate-50 overflow-y-auto max-h-[42vh] lg:max-h-none lg:h-full lg:w-[22rem] xl:w-[24rem] lg:border-b-0 lg:border-l">
+                <div className="space-y-4 p-3 sm:p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                      <h3 className="text-base font-bold text-slate-700">📏 מקטעי גדר</h3>
+                      <div className="flex gap-1.5 flex-wrap">
+                        <button type="button" onClick={addFenceContinue} className="text-[11px] bg-sky-100 text-sky-800 px-2.5 py-1 rounded-lg font-bold hover:bg-sky-200">+ המשך</button>
+                        <button type="button" onClick={addFenceCorner} className="text-[11px] bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-lg font-bold hover:bg-emerald-200">+ פינה 90°</button>
+                        <button type="button" onClick={addFenceSeg} className="text-[11px] bg-slate-800 text-white px-2.5 py-1 rounded-lg font-bold hover:bg-slate-700">+ מקטע</button>
+                      </div>
+                    </div>
+                    <p className="mb-3 text-[11px] font-bold text-slate-600">
+                      לוחצים <span className="text-sky-700">שמאל</span> או <span className="text-amber-700">ימין</span> על המקטע — זהו.
+                    </p>
+                    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                      <p className="text-[11px] font-black text-slate-700 mb-1.5">שער כניסה</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {([
+                          ["none", "בלי שער"],
+                          ["single", "כנף אחת"],
+                          ["double", "דו-כנפי"],
+                        ] as const).map(([id, label]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setFenceSimGate(id)}
+                            className={`text-[11px] px-2.5 py-1 rounded-lg font-bold border ${
+                              fenceSimGate === id
+                                ? "bg-slate-800 text-white border-slate-900"
+                                : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      {fenceSegments.map((seg, segIndex) => {
+                        const lab = fenceSegLabel(fenceSegments, segIndex, fenceSimEnv);
+                        const sideNow = fenceSegSideOf(fenceSegments, segIndex);
+                        return (
+                        <div key={seg.id} className={`relative rounded-xl border-2 p-3 ${fenceSegToneClass(lab.tone)}`}>
+                          <button type="button" onClick={() => removeFenceSeg(seg.id)} className="absolute top-2 left-2 text-red-500 bg-red-50 w-7 h-7 rounded-lg font-black text-xs hover:bg-red-100 border border-red-100">X</button>
+                          <p className="pr-2 pl-8 text-base font-black text-slate-800">{lab.title}</p>
+                          {!seg.connected && fenceSimEnv === "villa" ? (
+                            <div className="mt-2 grid grid-cols-2 gap-2" dir="ltr">
+                              <button
+                                type="button"
+                                onClick={() => setFenceSegSide(seg.id, "left")}
+                                className={`rounded-xl py-3 text-lg font-black border-2 transition ${
+                                  sideNow === "left"
+                                    ? "bg-sky-600 text-white border-sky-700"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-sky-50"
+                                }`}
+                              >
+                                שמאל
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setFenceSegSide(seg.id, "right")}
+                                className={`rounded-xl py-3 text-lg font-black border-2 transition ${
+                                  sideNow === "right"
+                                    ? "bg-amber-500 text-white border-amber-600"
+                                    : "bg-white text-slate-600 border-slate-200 hover:bg-amber-50"
+                                }`}
+                              >
+                                ימין
+                              </button>
+                            </div>
+                          ) : null}
+                          <div className="mt-2 grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-0.5">אורך</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "L")} onChange={(e) => setFenceSegDraft(seg.id, "L", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "L")} className="w-full text-center font-black text-lg p-2 border border-slate-300 rounded-lg bg-white" placeholder="0" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-0.5">גובה</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "H")} onChange={(e) => setFenceSegDraft(seg.id, "H", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "H")} className="w-full text-center font-black text-lg p-2 border border-slate-300 rounded-lg bg-white" placeholder="0" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-0.5">עמודים</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "P")} onChange={(e) => setFenceSegDraft(seg.id, "P", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "P")} className="w-full text-center font-black text-lg p-2 border border-slate-300 rounded-lg bg-white" placeholder="0" />
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <button type="button" onClick={() => insertFenceAfter(seg.id, "continue")} className="text-[10px] bg-sky-100 text-sky-800 px-2 py-1 rounded-md font-bold hover:bg-sky-200">+ המשך אחרי</button>
+                            <button type="button" onClick={() => insertFenceAfter(seg.id, "corner")} className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-1 rounded-md font-bold hover:bg-emerald-200">+ פינה אחרי</button>
+                          </div>
+                        </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <h3 className="mb-3 border-b pb-2 text-base font-bold text-slate-700">🧱 מראה בהדמיה</h3>
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">פרופילים</label>
+                        <select value={fenceSlat} onChange={(e) => setFenceSlat(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white">
+                          <option value="100">רק 100/20</option>
+                          <option value="70">רק 70/20</option>
+                          <option value="40">רק 40/20</option>
+                          <option value="20">רק 20/20</option>
+                          <option value="mix1">מיקס: 2x40 ואז 1x70</option>
+                          <option value="mix2">מיקס: 2x40, 2x20, 1x70</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">מרווח</label>
+                        <select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white">
+                          <option value="1">1</option>
+                          <option value="1.5">1.5</option>
+                          <option value="2">2</option>
+                          <option value="3">3</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">גוון עמודים</label>
+                        <select value={fenceColor} onChange={(e) => setFenceColor(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white">{RAL_OPTIONS.map((o) => <option key={o} value={o}>{getRalLabel(o)}</option>)}</select>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-600 mb-1">גוון שלבים</label>
+                        <select value={fenceSlatColor} onChange={(e) => setFenceSlatColor(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white">{RAL_OPTIONS.map((o) => <option key={o} value={o}>{getRalLabel(o)}</option>)}</select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+              )}
+              <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-slate-900">
+                <div className="pointer-events-none absolute top-3 right-3 z-30 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setFenceSimPanelVisible((v) => !v)}
+                    className="pointer-events-auto rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white shadow-lg transition hover:bg-slate-900 border border-slate-700"
+                  >
+                    {fenceSimPanelVisible ? "👁️ הסתר תפריט" : "👁️ הצג תפריט"}
+                  </button>
+                </div>
+                <iframe
+                  title="הדמיית גדר"
+                  src={`/fence-sim.html?rev=${SIM_VERSION}`}
+                  className="block h-full w-full min-h-0 border-0 bg-slate-900"
+                  referrerPolicy="no-referrer"
+                  ref={fenceSimIframeRef}
+                  onLoad={() => setFenceSimLoaded(true)}
+                />
+              </div>
             </div>
           </section>
         )}
@@ -4563,16 +6998,16 @@ ${logoBlock}
           </Link>
           <Link href="/?view=3d" className={mobileTabCls("3d")}>
             <span className="text-[1.15rem] leading-none">🎨</span>
-            <span className="max-w-full truncate">3D</span>
+            <span className="max-w-full truncate">הדמיית פרגולה</span>
           </Link>
-          <Link href="/?view=dashboard" className={mobileTabCls("dashboard")}>
-            <span className="text-[1.15rem] leading-none">📊</span>
-            <span className="max-w-full truncate">לוח</span>
+          <Link href="/?view=fence-3d" className={mobileTabCls("fence-3d")}>
+            <span className="text-[1.15rem] leading-none">🧱</span>
+            <span className="max-w-full truncate">הדמיית גדר</span>
           </Link>
           <button
             type="button"
             className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 px-0.5 text-[10px] font-bold leading-tight sm:text-[11px] ${
-              mobileMoreOpen || currentView === "settings" || currentView === "business" || currentView === "schedule" || currentView === "field-windows"
+              mobileMoreOpen || currentView === "settings" || currentView === "business" || currentView === "schedule" || currentView === "field-windows" || currentView === "dashboard"
                 ? "bg-slate-700 text-white"
                 : "text-slate-400 active:bg-slate-800"
             }`}
@@ -4615,6 +7050,13 @@ ${logoBlock}
               </button>
             </div>
             <div className="flex flex-col gap-2">
+              <Link
+                href="/?view=dashboard"
+                className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"
+                onClick={() => setMobileMoreOpen(false)}
+              >
+                📊 לוח בקרה
+              </Link>
               <Link
                 href="/?view=field-windows"
                 className="rounded-xl border border-slate-600 bg-slate-700/50 px-4 py-3 text-right font-bold"

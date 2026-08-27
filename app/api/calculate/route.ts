@@ -1,4 +1,13 @@
 import { NextResponse } from "next/server";
+import {
+  buildCutRowHtml,
+  buildShadeSlatPlanHtml,
+  optimizeCuttingParts,
+  pickBarDisplay,
+  pushCutParts,
+  type ShadeSlatPlanItem,
+} from "@/lib/pergola-cutting-plan";
+import { profileNameWithIconHtml } from "@/lib/profile-icons";
 import { DEFAULT_VAT_DECIMAL, parseVatRateDecimalFromApiInput } from "@/lib/vat";
 
 // --- RAL options for color validation (fence) ---
@@ -51,48 +60,12 @@ function getColorHex(colorStr: string): string {
   if (h.includes("שחור")) return "#1a1a1a";
   if (h.includes("לבן") && !h.includes("צדף") && !h.includes("שנהב")) return "#f8fafc";
   if (h.includes("קרם")) return "#fef3c7";
+  if (h.includes("שקוף")) return "#7ec8e3";
+  if (h.includes("כחול")) return "#3b82c4";
   if (h.includes("אפור")) return "#475569";
   if (h.includes("חום")) return "#78350f";
   if (h.includes("דמוי עץ") || h.includes("עץ")) return "#b45309";
   return "#888888";
-}
-
-function optimizeCutting(
-  cutLength: number,
-  quantity: number,
-  weights: { [barLen: number]: number | undefined }
-): { qty: number; barLen: number; weight: number; usedLength: number } {
-  if (cutLength <= 0 || quantity <= 0) return { qty: 0, barLen: 6, weight: 0, usedLength: 0 };
-  let bestWaste = Infinity;
-  let bestOption: { qty: number; barLen: number; weight: number; usedLength: number } | null = null;
-  const checkBarLen = (barLenCm: number, weightKg: number | undefined) => {
-    if (weightKg === undefined) return;
-    let bars = 0;
-    let waste = Infinity;
-    if (cutLength > barLenCm) {
-      const fullBarsPerPiece = Math.floor(cutLength / barLenCm);
-      const remainder = cutLength % barLenCm;
-      let extraBars = 0;
-      if (remainder > 0) {
-        const piecesPerExtraBar = Math.floor(barLenCm / remainder);
-        extraBars = Math.ceil(quantity / piecesPerExtraBar);
-      }
-      bars = fullBarsPerPiece * quantity + extraBars;
-      waste = bars * barLenCm - quantity * cutLength;
-    } else {
-      const perBar = Math.floor(barLenCm / cutLength);
-      bars = perBar > 0 ? Math.ceil(quantity / perBar) : 0;
-      waste = perBar > 0 ? bars * barLenCm - quantity * cutLength : Infinity;
-    }
-    if (waste < bestWaste) {
-      bestWaste = waste;
-      bestOption = { qty: bars, barLen: barLenCm / 100, weight: bars * weightKg, usedLength: quantity * cutLength };
-    }
-  };
-  checkBarLen(450, weights[4.5]);
-  checkBarLen(600, weights[6]);
-  checkBarLen(700, weights[7]);
-  return bestOption || { qty: 0, barLen: 6, weight: 0, usedLength: 0 };
 }
 
 function getPatFence(v: string): { w: number; wt: number; n: string }[] {
@@ -114,6 +87,7 @@ function frameProfileLegendSvg(frameType: string, strokeHex: string, L: number, 
   const bw = 16;
   const bh = 44;
   let ribs = "";
+  let flange = "";
   if (frameType === "doubleT") {
     ribs = `<line x1="${x + 2.5}" y1="${y + 13}" x2="${x + bw - 2.5}" y2="${y + 13}" stroke="${strokeHex}" stroke-width="1.4" stroke-linecap="round" opacity="0.95"/>
 <line x1="${x + 2.5}" y1="${y + 31}" x2="${x + bw - 2.5}" y2="${y + 31}" stroke="${strokeHex}" stroke-width="1.4" stroke-linecap="round" opacity="0.95"/>`;
@@ -121,11 +95,14 @@ function frameProfileLegendSvg(frameType: string, strokeHex: string, L: number, 
     ribs = `<line x1="${x + 2.5}" y1="${y + 10}" x2="${x + bw - 2.5}" y2="${y + 10}" stroke="${strokeHex}" stroke-width="1.2" stroke-linecap="round" opacity="0.95"/>
 <line x1="${x + 2.5}" y1="${y + 22}" x2="${x + bw - 2.5}" y2="${y + 22}" stroke="${strokeHex}" stroke-width="1.2" stroke-linecap="round" opacity="0.95"/>
 <line x1="${x + 2.5}" y1="${y + 34}" x2="${x + bw - 2.5}" y2="${y + 34}" stroke="${strokeHex}" stroke-width="1.2" stroke-linecap="round" opacity="0.95"/>`;
+  } else if (frameType === "smooth") {
+    // חלק — כמו L קיר: גוף + כנף אחת למטה (לא חציץ עם שתי כנפיים)
+    flange = `<path d="M${x + bw} ${y + bh - 2} h12" stroke="${strokeHex}" stroke-width="2.2" stroke-linecap="round" fill="none"/>`;
   }
   return `<g aria-label="frame-profile-legend">
 <text x="${x + bw / 2}" y="${y - 4}" text-anchor="middle" font-size="9" fill="#475569" font-weight="bold">חתך מסגרת</text>
 <rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="#f8fafc" stroke="${strokeHex}" stroke-width="2" rx="1.5"/>
-${ribs}
+${ribs}${flange}
 </g>`;
 }
 
@@ -175,8 +152,12 @@ function generateSketch(
       const fw = fieldWidths.find((f) => f.isShort === isShort);
       if (fw && fw.shadeCutLen !== undefined) {
         const yMid = isShort ? lD_val + (W - lD_val) / 2 : W / 2;
-        const qtyText = shadingP === "mix" ? `${fw.nShadeSets} סטים` : `${fw.nShadeSets} יח'`;
-        innerTextSvg += `<text x="${xCenter}" y="${yMid - fSize * 1.1}" text-anchor="middle" font-size="${fSize * 0.75}" fill="${frameColorHex}" font-weight="bold">שבלונה נטו: ${fw.net.toFixed(1)}</text><text x="${xCenter}" y="${yMid - fSize * 0.2}" text-anchor="middle" font-size="${fSize * 0.95}" fill="#1d4ed8" font-weight="bold">חיתוך: ${fw.shadeCutLen.toFixed(1)}</text><text x="${xCenter}" y="${yMid + fSize * 0.8}" text-anchor="middle" font-size="${fSize * 0.95}" fill="#1d4ed8" font-weight="bold">${qtyText}</text>`;
+        const nSetSketch = fw.nShadeSets ?? 0;
+        const qtyText =
+          shadingP === "mix"
+            ? `${nSetSketch} יח' 20/70 + ${nSetSketch * 2} יח' 20/40`
+            : `${nSetSketch} יח'`;
+        innerTextSvg += `<text x="${xCenter}" y="${yMid - fSize * 1.1}" text-anchor="middle" font-size="${fSize * 0.75}" fill="${frameColorHex}" font-weight="bold">שבלונה נטו: ${fw.net.toFixed(1)}</text><text x="${xCenter}" y="${yMid - fSize * 0.2}" text-anchor="middle" font-size="${fSize * 0.95}" fill="#1d4ed8" font-weight="bold">חיתוך: ${fw.shadeCutLen.toFixed(1)}</text><text x="${xCenter}" y="${yMid + fSize * 0.8}" text-anchor="middle" font-size="${fSize * 0.72}" fill="#1d4ed8" font-weight="bold">${qtyText}</text>`;
       }
     }
   }
@@ -254,7 +235,7 @@ type PergolaSettings = {
 };
 
 // --- Fence types ---
-type FenceSegment = { L: number; H: number; P?: number };
+type FenceSegment = { L: number; H: number; P?: number; connected?: boolean; corner?: boolean };
 type FenceInput = {
   segments?: FenceSegment[];
   fenceSlat?: string;
@@ -304,6 +285,7 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
   profit: number;
   profitMargin: number;
   cuttingHtml: string;
+  shadeSlatPlanHtml: string;
   bomHtml: string;
   hardwareHtml: string;
   wasteHtml: string;
@@ -381,10 +363,40 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
   const autoDividerCount = isLShape ? Math.max(1, Math.ceil(inputL / 120)) + Math.max(1, Math.ceil(lW / 120)) - 1 : (L > 0 ? Math.ceil(L / 120) - 1 : 0);
   const hasLed = bool(pergola.hasLed, false);
   const hasSantaf = bool(pergola.hasSantaf, false);
-  const autoSmoothBase = hasLed ? 0 : autoDividerCount;
-  const autoLedBase = hasLed ? autoDividerCount : 0;
-  let countSmooth = str(pergola.dividerSmoothCount, "").trim() ? parseInt(String(pergola.dividerSmoothCount), 10) || 0 : autoSmoothBase;
-  let countLed = str(pergola.dividerLedCount, "").trim() ? parseInt(String(pergola.dividerLedCount), 10) || 0 : autoLedBase;
+  const smoothRaw = str(pergola.dividerSmoothCount, "").trim();
+  const ledDivRaw = str(pergola.dividerLedCount, "").trim();
+  const ledStripQty = parseInt(String(pergola.ledCount ?? ""), 10);
+  const hasSmoothExplicit = smoothRaw !== "";
+  const hasLedDivExplicit = ledDivRaw !== "";
+  const hasLedStripExplicit = Number.isFinite(ledStripQty) && ledStripQty >= 0;
+
+  /** ברירת מחדל לתצוגה: אם יש כמות לד — מפצלים חלק/לד; בלי כמות — כל החציצים לד */
+  const defaultLedWhenHasLed = hasLedStripExplicit
+    ? Math.min(ledStripQty, autoDividerCount)
+    : autoDividerCount;
+  const autoLedBase = hasLed ? defaultLedWhenHasLed : 0;
+  const autoSmoothBase = hasLed ? Math.max(0, autoDividerCount - autoLedBase) : autoDividerCount;
+
+  let countSmooth: number;
+  let countLed: number;
+  if (hasSmoothExplicit && hasLedDivExplicit) {
+    countSmooth = parseInt(smoothRaw, 10) || 0;
+    countLed = parseInt(ledDivRaw, 10) || 0;
+  } else if (hasLedDivExplicit) {
+    countLed = parseInt(ledDivRaw, 10) || 0;
+    countSmooth = hasSmoothExplicit
+      ? parseInt(smoothRaw, 10) || 0
+      : Math.max(0, autoDividerCount - countLed);
+  } else if (hasSmoothExplicit) {
+    countSmooth = parseInt(smoothRaw, 10) || 0;
+    countLed = hasLed ? Math.max(0, autoDividerCount - countSmooth) : 0;
+  } else if (hasLed) {
+    countLed = autoLedBase;
+    countSmooth = autoSmoothBase;
+  } else {
+    countSmooth = autoDividerCount;
+    countLed = 0;
+  }
   const nDividersTotal = countSmooth + countLed;
   const nFieldsTotal = nDividersTotal + 1;
   let dividerPositions: number[] = [];
@@ -417,16 +429,60 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
   }
   dividerPositions.forEach((x) => { if (isLShape && (isLLeft ? x < lW - 0.1 : x > inputL + 0.1)) shortDividers++; else fullDividers++; });
   let cuttingHtml = "";
+  const shadeSlatPlans: ShadeSlatPlanItem[] = [];
   const wallDisplayName = isDoubleT ? "120/40 חלק (L קיר)" : frameProfileName;
+  const frameWtsForCut = isDoubleT ? weightsMap.doubleT : weightsMap.smooth120_frame;
+  const wallWtsForCut = weightsMap.smooth120_frame;
+  const divWtsForCut = dividerSize === "100" ? weightsMap.smooth100_div : weightsMap.smooth120_div;
+  const cutRow = buildCutRowHtml;
+  const cutBar = (len: number, qty: number, wts: { [barLen: number]: number | undefined }) => pickBarDisplay(len, qty, wts);
   if (L > 0 && W > 0) {
     if (!isLShape) {
-      cuttingHtml += `<tr><td class="p-2 border font-bold">${wallDisplayName}</td><td class="p-2 border">מסגרת קיר</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${cutL_Wall.toFixed(1)}</td></tr><tr><td class="p-2 border font-bold">${frameProfileName}</td><td class="p-2 border">חזית</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${cutFront.toFixed(1)}</td></tr><tr><td class="p-2 border font-bold">${frameProfileName}</td><td class="p-2 border">צדדים</td><td class="p-2 border text-center font-bold">X 2</td><td class="p-2 border text-center highlight">${sideLen.toFixed(1)}</td></tr>`;
+      cuttingHtml += cutRow(wallDisplayName, "מסגרת קיר", 1, cutL_Wall, cutBar(cutL_Wall, 1, wallWtsForCut));
+      cuttingHtml += cutRow(frameProfileName, "חזית", 1, cutFront, cutBar(cutFront, 1, frameWtsForCut));
+      cuttingHtml += cutRow(frameProfileName, "צדדים", 2, sideLen, cutBar(sideLen, 2, frameWtsForCut));
     } else {
-      cuttingHtml += `<tr><td class="p-2 border font-bold">${wallDisplayName}</td><td class="p-2 border">קיר ראשי</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${(cutL_Wall - lW).toFixed(1)}</td></tr><tr class="bg-orange-50"><td class="p-2 border font-bold">${wallDisplayName}</td><td class="p-2 border">מגרעת - עומק</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${lD.toFixed(1)}</td></tr><tr class="bg-orange-50"><td class="p-2 border font-bold">${wallDisplayName}</td><td class="p-2 border">מגרעת - רוחב</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${lW.toFixed(1)}</td></tr><tr><td class="p-2 border font-bold">${frameProfileName}</td><td class="p-2 border">חזית שלמה</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${cutFront.toFixed(1)}</td></tr><tr><td class="p-2 border font-bold">${frameProfileName}</td><td class="p-2 border">צד פנים קיר (צד ארוך)</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${sideLen.toFixed(1)}</td></tr><tr><td class="p-2 border font-bold">${frameProfileName}</td><td class="p-2 border">צד פנים חזית (צד קצר)</td><td class="p-2 border text-center font-bold">X 1</td><td class="p-2 border text-center highlight">${(sideLen - lD).toFixed(1)}</td></tr>`;
+      cuttingHtml += cutRow(wallDisplayName, "קיר ראשי", 1, cutL_Wall - lW, cutBar(cutL_Wall - lW, 1, wallWtsForCut));
+      cuttingHtml += cutRow(wallDisplayName, "מגרעת - עומק", 1, lD, cutBar(lD, 1, wallWtsForCut), "bg-orange-50");
+      cuttingHtml += cutRow(wallDisplayName, "מגרעת - רוחב", 1, lW, cutBar(lW, 1, wallWtsForCut), "bg-orange-50");
+      cuttingHtml += cutRow(frameProfileName, "חזית שלמה", 1, cutFront, cutBar(cutFront, 1, frameWtsForCut));
+      cuttingHtml += cutRow(frameProfileName, "צד פנים קיר (צד ארוך)", 1, sideLen, cutBar(sideLen, 1, frameWtsForCut));
+      cuttingHtml += cutRow(frameProfileName, "צד פנים חזית (צד קצר)", 1, sideLen - lD, cutBar(sideLen - lD, 1, frameWtsForCut));
     }
     if (nDividersTotal > 0) {
-      if (fullDividers > 0) cuttingHtml += `<tr><td class="p-2 border font-bold">${divSizeName}</td><td class="p-2 border">חציצים (אורך מלא)</td><td class="p-2 border text-center font-bold">X ${fullDividers}</td><td class="p-2 border text-center highlight">${cutDivider.toFixed(1)}</td></tr>`;
-      if (shortDividers > 0) cuttingHtml += `<tr><td class="p-2 border font-bold">${divSizeName}</td><td class="p-2 border">חציצים (אזור מגרעת)</td><td class="p-2 border text-center font-bold">X ${shortDividers}</td><td class="p-2 border text-center highlight text-orange-600">${(cutDivider - lD).toFixed(1)}</td></tr>`;
+      const divProfileSmooth = `חציצים ${divSizeName} חלק`;
+      const divProfileLed = `חציצים ${divSizeName} לד`;
+      /** מחלק חציצים מלאים/קצרים לפי כמות חלק מול לד */
+      const splitByType = (typeCount: number) => {
+        if (typeCount <= 0 || nDividersTotal <= 0) return { full: 0, short: 0 };
+        if (countSmooth === 0 || countLed === 0) {
+          return { full: fullDividers, short: shortDividers };
+        }
+        const full = Math.round((fullDividers * typeCount) / nDividersTotal);
+        const short = Math.max(0, typeCount - full);
+        return { full, short };
+      };
+      const addDivCuts = (profile: string, purposeFull: string, purposeShort: string, typeCount: number) => {
+        const { full, short } = splitByType(typeCount);
+        if (full > 0) {
+          cuttingHtml += cutRow(profile, purposeFull, full, cutDivider, cutBar(cutDivider, full, divWtsForCut));
+        }
+        if (short > 0) {
+          cuttingHtml += cutRow(
+            profile,
+            purposeShort,
+            short,
+            cutDivider - lD,
+            cutBar(cutDivider - lD, short, divWtsForCut)
+          );
+        }
+      };
+      if (countSmooth > 0) {
+        addDivCuts(divProfileSmooth, "חציצים חלק (אורך מלא)", "חציצים חלק (אזור מגרעת)", countSmooth);
+      }
+      if (countLed > 0) {
+        addDivCuts(divProfileLed, "חציצים לד (אורך מלא)", "חציצים לד (אזור מגרעת)", countLed);
+      }
     }
     if (fieldWidths.length > 0) {
       fieldWidths.forEach((fw) => {
@@ -434,27 +490,28 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
         const angleLen = divCutLen - 1.5;
         const nAng = fw.count * 2;
         const sub = isLShape ? ` — ${fw.name}` : "";
-        cuttingHtml += `<tr><td class="p-2 border font-bold">זווית 30/30</td><td class="p-2 border">תמיכה${sub}</td><td class="p-2 border text-center font-bold">X ${nAng}</td><td class="p-2 border text-center highlight">${angleLen.toFixed(1)}</td></tr>`;
+        cuttingHtml += cutRow("זווית 30/30", `תמיכה${sub}`, nAng, angleLen, cutBar(angleLen, nAng, weightsMap.angle));
       });
     } else {
-      cuttingHtml += `<tr><td class="p-2 border font-bold">זווית 30/30</td><td class="p-2 border">תמיכה</td><td class="p-2 border text-center font-bold">X ${nFieldsTotal * 2}</td><td class="p-2 border text-center highlight">${(cutDivider - 1.5).toFixed(1)}</td></tr>`;
+      const nAng = nFieldsTotal * 2;
+      const angleLen = cutDivider - 1.5;
+      cuttingHtml += cutRow("זווית 30/30", "תמיכה", nAng, angleLen, cutBar(angleLen, nAng, weightsMap.angle));
     }
     if (hasSantaf) {
       const prepDeduction = isDoubleT ? 10 : 4;
       if (isLShape) {
-        // סנטף תמיד יוצא 15 ס"מ מעבר ליציאה
         const depthLong = (W - lD) + 15;
         const depthNotch = lD + 15;
         const countFull = Math.ceil(depthLong / 50);
         const cutFull = L - prepDeduction;
         const countShort = Math.ceil(depthNotch / 50);
         const cutShort = (L - lW) - prepDeduction;
-        cuttingHtml += `<tr class="bg-green-50"><td class="p-2 border font-bold text-green-800">20/40 (הכנה לסנטף - ארוך)</td><td class="p-2 border text-green-700 text-xs">תשתית לאזור חזית מלא</td><td class="p-2 border text-center font-bold">X ${countFull}</td><td class="p-2 border text-center highlight">${cutFull.toFixed(1)}</td></tr><tr class="bg-green-50"><td class="p-2 border font-bold text-green-800">20/40 (הכנה לסנטף - קצר)</td><td class="p-2 border text-green-700 text-xs">תשתית לאזור המגרעת</td><td class="p-2 border text-center font-bold">X ${countShort}</td><td class="p-2 border text-center highlight">${cutShort.toFixed(1)}</td></tr>`;
+        cuttingHtml += cutRow("20/40 (הכנה לסנטף - ארוך)", "תשתית לאזור חזית מלא", countFull, cutFull, cutBar(cutFull, countFull, weightsMap.s20x40), "bg-green-50");
+        cuttingHtml += cutRow("20/40 (הכנה לסנטף - קצר)", "תשתית לאזור המגרעת", countShort, cutShort, cutBar(cutShort, countShort, weightsMap.s20x40), "bg-green-50");
       } else {
-        // סנטף תמיד יוצא 15 ס"מ מעבר ליציאה
         const prepCount = Math.ceil((W + 15) / 50);
         const cutSantafPrep = L - prepDeduction;
-        cuttingHtml += `<tr class="bg-green-50"><td class="p-2 border font-bold text-green-800">20/40 (הכנה לסנטף)</td><td class="p-2 border text-green-700 text-xs">תשתית לסנטף</td><td class="p-2 border text-center font-bold">X ${prepCount}</td><td class="p-2 border text-center highlight">${cutSantafPrep.toFixed(1)}</td></tr>`;
+        cuttingHtml += cutRow("20/40 (הכנה לסנטף)", "תשתית לסנטף", prepCount, cutSantafPrep, cutBar(cutSantafPrep, prepCount, weightsMap.s20x40), "bg-green-50");
       }
     }
   }
@@ -464,8 +521,8 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
     postHeights.slice(0, pCount).forEach((h) => { heightCounts[String(h)] = (heightCounts[String(h)] || 0) + 1; });
     Object.entries(heightCounts).forEach(([hStr, count]) => {
       const hNum = parseFloat(hStr);
-      const displayHeight = hNum > 0 ? hNum.toFixed(1) : "למידה בשטח";
-      cuttingHtml += `<tr class="bg-slate-50"><td class="p-2 border font-bold">${postType}/${postType}</td><td class="p-2 border">עמודי תמיכה</td><td class="p-2 border text-center font-bold">X ${count}</td><td class="p-2 border text-center highlight">${displayHeight}</td></tr>`;
+      const cutDisplay = hNum > 0 ? undefined : "למידה בשטח";
+      cuttingHtml += cutRow(`${postType}/${postType}`, "עמודי תמיכה", count, hNum, "6 מ׳", "bg-slate-50", cutDisplay);
     });
   }
   let instructionsShades = "";
@@ -480,13 +537,30 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
       (fw as FieldWidth & { nShadeSets?: number }).nShadeSets = Math.floor(fieldDepth / setW);
       const nSet = (fw as FieldWidth & { nShadeSets?: number }).nShadeSets ?? 0;
       const nameSuffix = isLShape ? ` (${fw.name})` : "";
-      if (shadingP === "20x40") cuttingHtml += `<tr class="bg-blue-50"><td class="p-2 border font-bold text-blue-800">הצללה 20/40${nameSuffix}</td><td class="p-2 border text-blue-700 text-xs">שלבים</td><td class="p-2 border text-center font-bold">X ${nSet * fw.count}</td><td class="p-2 border text-center highlight">${cutLen.toFixed(1)}</td></tr>`;
-      else if (shadingP === "20x70") cuttingHtml += `<tr class="bg-blue-50"><td class="p-2 border font-bold text-blue-800">הצללה 20/70${nameSuffix}</td><td class="p-2 border text-blue-700 text-xs">שלבים</td><td class="p-2 border text-center font-bold">X ${nSet * fw.count}</td><td class="p-2 border text-center highlight">${cutLen.toFixed(1)}</td></tr>`;
-      else { cuttingHtml += `<tr class="bg-blue-50"><td class="p-2 border font-bold text-blue-800">הצללה 20/70${nameSuffix}</td><td class="p-2 border text-blue-700 text-xs">שלבים</td><td class="p-2 border text-center font-bold">X ${nSet * fw.count}</td><td class="p-2 border text-center highlight">${cutLen.toFixed(1)}</td></tr><tr class="bg-blue-50"><td class="p-2 border font-bold text-blue-800">הצללה 20/40${nameSuffix}</td><td class="p-2 border text-blue-700 text-xs">שלבים</td><td class="p-2 border text-center font-bold">X ${nSet * 2 * fw.count}</td><td class="p-2 border text-center highlight">${cutLen.toFixed(1)}</td></tr>`; }
-      const txtSet = shadingP === "mix" ? "סטים" : "יח'";
-      instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 mt-1 mb-1 w-full">שדות <strong>${fw.name}</strong> (${fw.count}): שבלונה <span class="text-lg mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך <span class="text-lg mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span> (${nSet} ${txtSet} לשדה).</div>`;
+      if (shadingP === "20x40") {
+        const qty = nSet * fw.count;
+        shadeSlatPlans.push({ label: `הצללה 20/40${nameSuffix} — שלבים`, cutLenCm: cutLen, totalQty: qty });
+        cuttingHtml += cutRow(`הצללה 20/40${nameSuffix}`, "שלבים", qty, cutLen, "6 מ׳", "bg-blue-50");
+        instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 mt-1 mb-1 w-full">שדות <strong>${fw.name}</strong> (${fw.count}): שבלונה <span class="text-lg mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך <span class="text-lg mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span><br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">בכל שדה: ${nSet} יח' 20/40 (סה"כ ${nSet} שלבים לשדה).</span></div>`;
+      } else if (shadingP === "20x70") {
+        const qty = nSet * fw.count;
+        shadeSlatPlans.push({ label: `הצללה 20/70${nameSuffix} — שלבים`, cutLenCm: cutLen, totalQty: qty });
+        cuttingHtml += cutRow(`הצללה 20/70${nameSuffix}`, "שלבים", qty, cutLen, "6 מ׳", "bg-blue-50");
+        instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 mt-1 mb-1 w-full">שדות <strong>${fw.name}</strong> (${fw.count}): שבלונה <span class="text-lg mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך <span class="text-lg mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span><br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">בכל שדה: ${nSet} יח' 20/70 (סה"כ ${nSet} שלבים לשדה).</span></div>`;
+      } else {
+        const qty70 = nSet * fw.count;
+        const qty40 = nSet * 2 * fw.count;
+        const perField70 = nSet;
+        const perField40 = nSet * 2;
+        shadeSlatPlans.push({ label: `הצללה 20/70${nameSuffix} — שלבים`, cutLenCm: cutLen, totalQty: qty70 });
+        shadeSlatPlans.push({ label: `הצללה 20/40${nameSuffix} — שלבים`, cutLenCm: cutLen, totalQty: qty40 });
+        cuttingHtml += cutRow(`הצללה 20/70${nameSuffix}`, "שלבים", qty70, cutLen, "6 מ׳", "bg-blue-50");
+        cuttingHtml += cutRow(`הצללה 20/40${nameSuffix}`, "שלבים", qty40, cutLen, "6 מ׳", "bg-blue-50");
+        instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 mt-1 mb-1 w-full">שדות <strong>${fw.name}</strong> (${fw.count}): שבלונה <span class="text-lg mx-1 text-indigo-900">${fw.net.toFixed(1)} ס"מ</span> | חיתוך <span class="text-lg mx-1 text-indigo-900">${cutLen.toFixed(1)} ס"מ</span><br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">בכל שדה: ${perField70} יח' 20/70, ${perField40} יח' 20/40 (סה"כ ${perField70 + perField40} שלבים לשדה · משולב 70+40+40).</span></div>`;
+      }
     });
   }
+  const shadeSlatPlanHtml = buildShadeSlatPlanHtml(shadeSlatPlans);
   const totalShadeProfiles = fieldWidths.reduce((acc, fw) => acc + ((fw as FieldWidth & { nShadeSets?: number }).nShadeSets ?? 0) * (shadingP === "mix" ? 3 : 1) * fw.count, 0);
   const screwsCount = totalShadeProfiles * 2;
   const uBracketCount = nDividersTotal * 2;
@@ -501,52 +575,53 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
   const wallWts = weightsMap.smooth120_frame;
   if (L > 0 && W > 0) {
     if (!isLShape) {
-      rawItems.push({ name: wallDisplayName, color: frameColorText, ...optimizeCutting(cutL_Wall, 1, wallWts) });
-      rawItems.push({ name: frameProfileName, color: frameColorText, ...optimizeCutting(cutFront, 1, frameWts) });
-      rawItems.push({ name: frameProfileName, color: frameColorText, ...optimizeCutting(sideLen, 2, frameWts) });
+      pushCutParts(rawItems, wallDisplayName, frameColorText, cutL_Wall, 1, wallWts);
+      pushCutParts(rawItems, frameProfileName, frameColorText, cutFront, 1, frameWts);
+      pushCutParts(rawItems, frameProfileName, frameColorText, sideLen, 2, frameWts);
     } else {
       const totalLWall = cutL_Wall - lW + lD + lW;
-      rawItems.push({ name: wallDisplayName + " (ראשי+מגרעת)", color: frameColorText, ...optimizeCutting(totalLWall, 1, wallWts) });
-      rawItems.push({ name: frameProfileName + " (חזית)", color: frameColorText, ...optimizeCutting(cutFront, 1, frameWts) });
-      rawItems.push({ name: frameProfileName + " (צד מלא)", color: frameColorText, ...optimizeCutting(sideLen, 1, frameWts) });
-      rawItems.push({ name: frameProfileName + " (צד קצר)", color: frameColorText, ...optimizeCutting(sideLen - lD, 1, frameWts) });
+      pushCutParts(rawItems, wallDisplayName + " (ראשי+מגרעת)", frameColorText, totalLWall, 1, wallWts);
+      pushCutParts(rawItems, frameProfileName + " (חזית)", frameColorText, cutFront, 1, frameWts);
+      pushCutParts(rawItems, frameProfileName + " (צד מלא)", frameColorText, sideLen, 1, frameWts);
+      pushCutParts(rawItems, frameProfileName + " (צד קצר)", frameColorText, sideLen - lD, 1, frameWts);
     }
     const divWeightKey = dividerSize === "100" ? weightsMap.smooth100_div : weightsMap.smooth120_div;
     const totalDivLength = fullDividers * cutDivider + shortDividers * (cutDivider - lD);
     if (totalDivLength > 0 && nDividersTotal > 0) {
-      if (countSmooth > 0) rawItems.push({ name: `חציצים ${divSizeName} חלק`, color: frameColorText, ...optimizeCutting(totalDivLength / nDividersTotal, countSmooth, divWeightKey) });
-      if (countLed > 0) rawItems.push({ name: `חציצים ${divSizeName} לד`, color: frameColorText, ...optimizeCutting(totalDivLength / nDividersTotal, countLed, divWeightKey) });
+      const divCutAvg = totalDivLength / nDividersTotal;
+      if (countSmooth > 0) pushCutParts(rawItems, `חציצים ${divSizeName} חלק`, frameColorText, divCutAvg, countSmooth, divWeightKey);
+      if (countLed > 0) pushCutParts(rawItems, `חציצים ${divSizeName} לד`, frameColorText, divCutAvg, countLed, divWeightKey);
     }
     if (fieldWidths.length > 0) {
       fieldWidths.forEach((fw) => {
         const divCutLen = isLShape ? (fw.isShort ? cutDivider - lD : cutDivider) : cutDivider;
         const angleLen = divCutLen - 1.5;
         const nAng = fw.count * 2;
-        const piece = optimizeCutting(angleLen, nAng, weightsMap.angle);
-        if (piece.qty > 0) {
-          rawItems.push({
-            name: isLShape ? `זווית 30/30 (${fw.name})` : "זווית 30/30",
-            color: frameColorText,
-            ...piece,
-          });
-        }
+        pushCutParts(
+          rawItems,
+          isLShape ? `זווית 30/30 (${fw.name})` : "זווית 30/30",
+          frameColorText,
+          angleLen,
+          nAng,
+          weightsMap.angle
+        );
       });
     } else {
-      rawItems.push({ name: "זווית 30/30", color: frameColorText, ...optimizeCutting(cutDivider - 1.5, anglesCount, weightsMap.angle) });
+      pushCutParts(rawItems, "זווית 30/30", frameColorText, cutDivider - 1.5, anglesCount, weightsMap.angle);
     }
     if (hasSantaf && L > 0) {
       const prepDeduction = isDoubleT ? 10 : 4;
       if (isLShape) {
         const countFull = Math.ceil((W - lD) / 50);
         const cutFull = L - prepDeduction;
-        rawItems.push({ name: "20/40 (הכנה לסנטף - ארוך)", color: frameColorText, ...optimizeCutting(cutFull, countFull, weightsMap.s20x40) });
+        pushCutParts(rawItems, "20/40 (הכנה לסנטף - ארוך)", frameColorText, cutFull, countFull, weightsMap.s20x40);
         const countShort = Math.ceil(lD / 50);
         const cutShort = (L - lW) - prepDeduction;
-        rawItems.push({ name: "20/40 (הכנה לסנטף - קצר)", color: frameColorText, ...optimizeCutting(cutShort, countShort, weightsMap.s20x40) });
+        pushCutParts(rawItems, "20/40 (הכנה לסנטף - קצר)", frameColorText, cutShort, countShort, weightsMap.s20x40);
       } else {
         const prepCount = Math.ceil(W / 50);
         const cutSantafPrep = L - prepDeduction;
-        rawItems.push({ name: "20/40 (הכנה לסנטף)", color: frameColorText, ...optimizeCutting(cutSantafPrep, prepCount, weightsMap.s20x40) });
+        pushCutParts(rawItems, "20/40 (הכנה לסנטף)", frameColorText, cutSantafPrep, prepCount, weightsMap.s20x40);
       }
     }
   }
@@ -571,8 +646,8 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
       const nSet = (fw as FieldWidth & { nShadeSets?: number }).nShadeSets ?? 0;
       const cutLen = (fw as FieldWidth & { shadeCutLen?: number }).shadeCutLen ?? 0;
       const nameSuffix = isLShape ? ` (${fw.name})` : "";
-      if (shadingP === "20x40" || shadingP === "mix") rawItems.push({ name: "הצללה 20/40" + nameSuffix, color: shadeColorText, ...optimizeCutting(cutLen, shadingP === "mix" ? nSet * 2 * fw.count : nSet * fw.count, weightsMap.s20x40) });
-      if (shadingP === "20x70" || shadingP === "mix") rawItems.push({ name: "הצללה 20/70" + nameSuffix, color: shadeColorText, ...optimizeCutting(cutLen, shadingP === "mix" ? nSet * fw.count : nSet * fw.count, weightsMap.s20x70) });
+      if (shadingP === "20x40" || shadingP === "mix") pushCutParts(rawItems, "הצללה 20/40" + nameSuffix, shadeColorText, cutLen, shadingP === "mix" ? nSet * 2 * fw.count : nSet * fw.count, weightsMap.s20x40);
+      if (shadingP === "20x70" || shadingP === "mix") pushCutParts(rawItems, "הצללה 20/70" + nameSuffix, shadeColorText, cutLen, shadingP === "mix" ? nSet * fw.count : nSet * fw.count, weightsMap.s20x70);
     });
   }
   const consolidated: Record<string, { name: string; color: string; qty: number; barLen: number; weight: number; usedLength: number }> = {};
@@ -592,7 +667,7 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
     bomTotalUsedWeight += usedWeight;
     const totalBarLengthCm = i.qty * i.barLen * 100;
     const wasteMeters = (totalBarLengthCm - i.usedLength) / 100;
-    bomHtml += `<tr><td class="font-bold">${i.name} <span class="text-[11px] text-blue-600 bg-blue-50 px-1 py-0.5 rounded font-normal mr-1 border border-blue-200">${i.color}</span></td><td class="text-center font-bold text-blue-700">${i.qty}</td><td class="text-center">${i.barLen} מ'</td></tr>`;
+    bomHtml += `<tr><td>${profileNameWithIconHtml(i.name)} <span class="text-[11px] text-blue-600 bg-blue-50 px-1 py-0.5 rounded font-normal mr-1 border border-blue-200">${i.color}</span></td><td class="text-center font-bold text-blue-700">${i.qty}</td><td class="text-center">${i.barLen} מ'</td></tr>`;
     if (wasteMeters > 0) wasteHtml += `<tr class="hover:bg-red-50"><td class="font-bold">${i.name} <span class="text-[11px] text-slate-500 mr-1">(${i.color})</span></td><td class="text-center">${i.barLen} מ'</td><td class="font-bold text-red-600">${wasteMeters.toFixed(2)} מ'</td></tr>`;
   });
   if (screwsCount > 0) bomHtml += `<tr><td class="font-bold text-slate-800">ברגי מש"ד (להצללות)</td><td class="text-center font-bold text-blue-700">${screwsCount}</td><td class="text-center">יח'</td></tr>`;
@@ -691,7 +766,7 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
   const santafHex = getColorHex(santafColor);
   return {
     L, W, sqm, incVat, exVat, totalWeight: bomTotalWeight, materialCost: bomTotalCost, installCost, installSqmText: sqm > 0 ? `${sqm.toFixed(1)} מ"ר לפי ${sysInstall}₪` + (sysTransport > 0 ? ` + ${sysTransport}₪ הובלה` : "") : "",
-    profit, profitMargin: exVat > 0 ? Math.round((profit / exVat) * 100) : 0, cuttingHtml, bomHtml, hardwareHtml, wasteHtml,
+    profit, profitMargin: exVat > 0 ? Math.round((profit / exVat) * 100) : 0, cuttingHtml, shadeSlatPlanHtml, bomHtml, hardwareHtml, wasteHtml,
     wasteBadgeText: `${wasteWeight.toFixed(1)} ק"ג (${wastePercent}%)`, instructionsHtml: instructions, viewDimensions, viewColorDisplay, santafInfoHtml,
     autoDividerCount, autoSmoothBase, autoLedBase,
     frameColorText, shadeColorText, frameHex, shadeHex, santafHex, nDividersTotal,
@@ -797,11 +872,15 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
   const insParts: string[] = [];
   segs.forEach((s, i) => {
     const pVal = typeof s.P === "number" ? s.P : 0;
+    const sharesCorner = i > 0 && !!s.connected;
+    const isContinue = sharesCorner && s.corner === false;
+    const isCorner90 = sharesCorner && s.corner !== false;
+    const postsAdded = sharesCorner ? Math.max(0, pVal - 1) : pVal;
     totS += (s.L * s.H) / 10000;
-    totP += pVal;
+    totP += postsAdded;
     const secs = Math.max(0, pVal - 1);
     const inL = secs > 0 ? (s.L - pVal * POST_WIDTH_CM) / secs : 0; // אורך מורידים (עמוד×3.5 ס"מ), מחלקים במספר השדות
-    const slCut = inL - 1;
+    const slCut = Math.floor(inL * 10) / 10; // בלי 1 ס״מ חופש, עיגול למטה לעשירית ס״מ (119.75 → 119.7)
     const pCut = isGr ? s.H + 40 : s.H - 1.5;
     const netH = s.H - 1.5;
     let cH = 0;
@@ -816,8 +895,8 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
       cH += pi.w + gap;
       pIdx++;
     }
-    addC("עמוד גדר", pCut, pVal, 13.5, pCol);
-    addC("ספייסר ארוך (כיסוי עמוד)", pCut, Math.max(0, (pVal - 2) * 1 + 4), 1.5, pCol);
+    addC("עמוד גדר", pCut, postsAdded, 13.5, pCol);
+    addC("ספייסר ארוך (כיסוי עמוד)", pCut, Math.max(0, (pVal - 2) * 1 + (sharesCorner ? 2 : 4)), 1.5, pCol);
     if (secs > 0) {
       let sSp = 0;
       Object.keys(sCnts).forEach((n) => {
@@ -828,15 +907,17 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
       addC("ספייסר קצר (מרווח)", gap, sSp, 1.5, sCol);
     }
     const slatsDetail = Object.keys(sCnts).map((n) => `${sCnts[n]} יח' ${n}`).join(", ");
-    insParts.push(`<div class="mb-4 pb-2 border-b"><strong class="text-blue-800">מקטע ${i + 1}: אורך ${s.L}, גובה ${s.H}</strong><div class="text-sm mt-1">חולק ל-${secs} שדות (${pVal} עמודים). חיתוך שלבים: <span class="font-bold text-blue-600">${slCut.toFixed(1)}</span> ס"מ. ברוטו עמוד: ${pCut.toFixed(1)} ס"מ.<br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">בכל שדה: ${slatsDetail} (סה"כ ${totSInS} שלבים לשדה).</span></div></div>`);
+    insParts.push(`<div class="mb-4 pb-2 border-b"><strong class="text-blue-800">מקטע ${i + 1}${isContinue ? " (המשך באותו כיוון, עמוד משותף)" : isCorner90 ? " (צלע פינה 90°, עמוד משותף)" : ""}: אורך ${s.L}, גובה ${s.H}</strong><div class="text-sm mt-1">חולק ל-${secs} שדות (${pVal} עמודים${sharesCorner ? `, מתוכם ${postsAdded} חדשים` : ""}). חיתוך שלבים: <span class="font-bold text-blue-600">${slCut.toFixed(1)}</span> ס"מ. ברוטו עמוד: ${pCut.toFixed(1)} ס"מ.<br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">בכל שדה: ${slatsDetail} (סה"כ ${totSInS} שלבים לשדה).</span></div></div>`);
   });
   let cutStr = "";
   const raw: { n: string; color: string; qty: number; barLen: number; weight: number; usedLength: number }[] = [];
   const pKg = settings ? num(settings.pricePerKg, 35) : 35;
   Object.values(gCuts).forEach((c) => {
-    cutStr += `<tr><td class="p-2 border font-bold">${c.n} <span class="text-[10px] text-slate-500 mr-1">(${c.c})</span></td><td class="p-2 border text-center font-bold text-blue-600">X ${c.q}</td><td class="p-2 border text-center font-black">${c.l.toFixed(1)}</td></tr>`;
-    const r = optimizeCutting(c.l, c.q, { 6: c.w });
-    raw.push({ n: c.n.includes("ספייסר") ? "פרופיל ספייסר" : c.n.includes("עמוד") ? "עמוד גדר" : c.n.split(" ")[0] + " " + c.n.split(" ")[1], color: c.c, ...r });
+    cutStr += `<tr><td class="p-2 border">${profileNameWithIconHtml(c.n)} <span class="text-[10px] text-slate-500 mr-1">(${c.c})</span></td><td class="p-2 border text-center font-bold text-blue-600">X ${c.q}</td><td class="p-2 border text-center font-black">${c.l.toFixed(1)}</td></tr>`;
+    const nm = c.n.includes("ספייסר") ? "פרופיל ספייסר" : c.n.includes("עמוד") ? "עמוד גדר" : c.n.split(" ")[0] + " " + c.n.split(" ")[1];
+    for (const part of optimizeCuttingParts(c.l, c.q, { 6: c.w })) {
+      if (part.qty > 0) raw.push({ n: nm, color: c.c, ...part });
+    }
   });
   const bom: Record<string, { n: string; c: string; q: number; u: number; t: number }> = {};
   let bU = 0, bT = 0, bC = 0;
@@ -849,7 +930,7 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
     bom[k].t += i.weight;
   });
   let bomStr = "";
-  Object.keys(bom).forEach((k) => { bU += bom[k].u; bT += bom[k].t; bC += bom[k].t * pKg; bomStr += `<tr><td class="p-2 border font-bold">${bom[k].n} <span class="text-[11px] text-blue-600 bg-blue-50 px-1 py-0.5 rounded font-normal mr-1 border border-blue-200">${bom[k].c}</span></td><td class="p-2 border text-center font-black text-blue-600">${bom[k].q}</td></tr>`; });
+  Object.keys(bom).forEach((k) => { bU += bom[k].u; bT += bom[k].t; bC += bom[k].t * pKg; bomStr += `<tr><td class="p-2 border">${profileNameWithIconHtml(bom[k].n)} <span class="text-[11px] text-blue-600 bg-blue-50 px-1 py-0.5 rounded font-normal mr-1 border border-blue-200">${bom[k].c}</span></td><td class="p-2 border text-center font-black text-blue-600">${bom[k].q}</td></tr>`; });
   const fSetP = settings ? num(settings.sysFenceSetPrice, 50) : 50;
   const jumP = settings ? num(settings.sysJumboPrice, 1) : 1;
   bC += totP * fSetP + (!isGr ? totP * 4 * jumP : 0);

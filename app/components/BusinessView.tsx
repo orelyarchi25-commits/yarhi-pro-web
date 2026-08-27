@@ -13,6 +13,7 @@ import {
   parseCrmStatus,
 } from "@/lib/crm-status";
 import { getFieldWindowRecordIdFromProject } from "@/lib/field-windows";
+import { projectIsBundle, type ProjectUnit } from "@/lib/project-bundle";
 import { DEFAULT_VAT_DECIMAL, formatBusinessVatPercentLabel } from "@/lib/vat";
 import {
   buildBusinessReportCsv,
@@ -171,6 +172,14 @@ export type CrmProject = {
   crmStatus?: CrmStatus;
   /** מתי הוגדר crmStatus הנוכחי (ISO) — למעקב 48 שעות בלוח הבקרה */
   crmStatusSince?: string;
+  /** פרויקט משולב — כמה מוצרים (פרגולה / גדר / חלונות) תחת לקוח אחד */
+  isBundle?: boolean;
+  units?: ProjectUnit[];
+  /**
+   * מחיר מחירון מקורי (כולל מע״מ) לפני הנחה ידנית ב«ערוך מחיר».
+   * משמש בסיכום ללקוח להצגת מחיר מקורי מחוק כשיש הנחה.
+   */
+  quoteListPriceInc?: number;
 };
 
 function projectIsFieldWindows(p: CrmProject): boolean {
@@ -403,7 +412,9 @@ export default function BusinessView({
       .map((p) => {
         const paid = transactions.filter((t) => t.projectId === p.id && t.type === "income").reduce((s, t) => s + t.amount, 0);
         const debt = (p.sellingPriceInc ?? 0) - paid;
-        const subtitle = projectIsFieldWindows(p)
+        const subtitle = projectIsBundle(p)
+          ? `פרויקט משולב · ${p.units?.length ?? 0} מוצרים`
+          : projectIsFieldWindows(p)
           ? "מידות שטח חלונות"
           : p.isExternal
             ? "פרויקט חיצוני"
@@ -547,21 +558,26 @@ export default function BusinessView({
       const base = newIncome / (1 + businessVatRate);
       const vat = newIncome - base;
       setCrmData((prev) =>
-        prev.map((p) =>
-          p.id === id
-            ? {
-                ...p,
-                customer: newName,
-                sellingPriceInc: newIncome,
-                income: base,
-                incomeExVat: base,
-                vatAmount: vat,
-                crmStatus: newCrmStatus,
-                crmStatusSince:
-                  parseCrmStatus(p.crmStatus) === newCrmStatus ? p.crmStatusSince : new Date().toISOString(),
-              }
-            : p
-        )
+        prev.map((p) => {
+          if (p.id !== id) return p;
+          const oldTotal = Math.round(Number(p.sellingPriceInc) || 0);
+          const prevList = Math.round(Number(p.quoteListPriceInc) || 0);
+          const listAnchor = Math.max(prevList, oldTotal);
+          const next: CrmProject = {
+            ...p,
+            customer: newName,
+            sellingPriceInc: newIncome,
+            income: base,
+            incomeExVat: base,
+            vatAmount: vat,
+            crmStatus: newCrmStatus,
+            crmStatusSince:
+              parseCrmStatus(p.crmStatus) === newCrmStatus ? p.crmStatusSince : new Date().toISOString(),
+          };
+          if (newIncome > 0 && listAnchor > 0 && newIncome < listAnchor) next.quoteListPriceInc = listAnchor;
+          else delete next.quoteListPriceInc;
+          return next;
+        })
       );
       setProjectEditModal(null);
       addToast("פרטי הלקוח עודכנו בהצלחה", "success");
@@ -961,7 +977,8 @@ export default function BusinessView({
                         <div className="flex flex-wrap items-center gap-2 mb-1">
                           <h4 className="font-black text-xl text-slate-800">{p.customer}</h4>
                           {isFullyPaid && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full">שולם במלואו</span>}
-                          {projectIsFieldWindows(p) && <span className="bg-violet-100 text-violet-800 text-[10px] font-bold px-2 py-0.5 rounded-full">מידות שטח</span>}
+                          {projectIsBundle(p) && <span className="bg-indigo-100 text-indigo-800 text-[10px] font-bold px-2 py-0.5 rounded-full">פרויקט משולב · {p.units?.length ?? 0}</span>}
+                          {projectIsFieldWindows(p) && !projectIsBundle(p) && <span className="bg-violet-100 text-violet-800 text-[10px] font-bold px-2 py-0.5 rounded-full">מידות שטח</span>}
                           {p.isExternal && !projectIsFieldWindows(p) && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full">פרויקט חיצוני</span>}
                           {crmProjectShowsLifecycleLeadClientPill(p) &&
                             (crmLeadEntryShowsAsClient(p.crmStatus) ? (
@@ -982,7 +999,11 @@ export default function BusinessView({
                         </div>
                         <p className="text-xs text-slate-400 mb-3">{p.date}</p>
                         <div className="flex flex-wrap gap-2">
-                          {projectIsFieldWindows(p) ? (
+                          {projectIsBundle(p) ? (
+                            <button type="button" onClick={() => onLoadProject(p.id)} className="text-xs text-indigo-800 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
+                              פתח פרויקט משולב
+                            </button>
+                          ) : projectIsFieldWindows(p) ? (
                             <button type="button" onClick={() => onLoadProject(p.id)} className="text-xs text-slate-600 hover:text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 px-3 py-1.5 rounded-lg font-bold transition-colors shadow-sm">
                               ערוך מידות
                             </button>

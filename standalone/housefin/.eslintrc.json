@@ -1,0 +1,13 @@
+{
+  "root": true,
+  "extends": ["next/core-web-vitals"],
+  "overrides": [
+    {
+      "files": ["components/HouseFinApp.jsx"],
+      "rules": {
+        "react/no-unescaped-entities": "off",
+        "react-hooks/exhaustive-deps": "off"
+      }
+    }
+  ]
+}

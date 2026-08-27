@@ -1,0 +1,17 @@
+---
+description: תזכורת גיבוי CRM והכנסות/הוצאות ל-Yarhi Pro
+alwaysApply: true
+---
+
+# גיבוי נתוני לקוחות
+
+פעם בשבוע, או אחרי שינוי גדול בנתונים (העברה Firebase/Supabase, מחיקה, פריסה), להזכיר למשתמש להריץ:
+
+```powershell
+cd C:\Users\USER\Desktop\YarhiPro-Web
+node scripts/backup-workspaces.mjs
+```
+
+הקובץ נשמר ב-`backups/` (לא ב-Git). להעתיק גם לדיסק/גוגל דרייב.
+
+לא למחוק Firebase אחרי מעבר ל-Supabase בלי גיבוי עדכני.

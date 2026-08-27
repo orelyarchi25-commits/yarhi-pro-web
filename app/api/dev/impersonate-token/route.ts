@@ -25,6 +25,6 @@ export async function POST() {
     return NextResponse.json({ customToken, email: user.email });
   } catch (err) {
     console.error("[api/dev/impersonate-token]", email, err);
-    return NextResponse.json({ error: "getUserByEmail or createCustomToken failed" }, { status: 404 });
+    return NextResponse.json({ error: "getUserByEmail or createCustomToken failed" }, { status: 502 });
   }
 }

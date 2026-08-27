@@ -13,6 +13,33 @@
         body { font-family: 'Assistant', sans-serif; overflow: hidden; background-color: #f1f5f9; transition: background-color 0.5s ease; }
         body.night-mode { background-color: #0b1120; }
         #canvas-container { position: absolute; top: 0; left: 0; right: 0; bottom: 56px; z-index: 1; outline: none; }
+        #canvas-container canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+        body.view-only .controls-panel,
+        body.view-only .top-btn-group,
+        body.view-only #price-badge,
+        body.view-only #pricing-settings-panel,
+        body.view-only #logo-badge,
+        body.view-only #sim-caption-overlay,
+        body.view-only .ui-overlay { display: none !important; }
+        body.view-only #canvas-container,
+        body.view-only #labels-overlay { top: 0; left: 0; right: 0; bottom: 0; }
+        body.view-only #view-orbit-hint { display: block; }
+        #view-orbit-hint {
+            display: none;
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 30;
+            pointer-events: none;
+            background: rgba(15, 23, 42, 0.82);
+            color: #fff;
+            font-weight: 800;
+            font-size: 13px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            white-space: nowrap;
+        }
         .ui-overlay { position: relative; z-index: 10; pointer-events: none; height: 100%; min-height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box; }
         .controls-panel { pointer-events: auto; width: 360px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(15px); border-radius: 24px; box-shadow: 0 10px 50px rgba(0,0,0,0.15); padding: 20px; border: 1px solid #e2e8f0; max-height: 85vh; overflow-y: auto; transition: all 0.3s ease; }
         .night-mode .controls-panel { background: rgba(15, 23, 42, 0.9); border-color: #334155; color: #f8fafc; box-shadow: 0 10px 50px rgba(0,0,0,0.5); }
@@ -40,6 +67,31 @@
         .night-mode .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
         .side-control-card { background: #f8fafc; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 8px; }
         .night-mode .side-control-card { background: #1e293b; border-color: #475569; }
+        .env-chips { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+        .env-chip {
+            pointer-events: auto;
+            border: 1px solid #e2e8f0;
+            background: #fff;
+            border-radius: 14px;
+            padding: 10px 8px;
+            font-size: 12px;
+            font-weight: 800;
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+            line-height: 1.25;
+        }
+        .env-chip small { display: block; font-size: 10px; font-weight: 700; color: #64748b; margin-top: 2px; }
+        .env-chip.active {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            color: #1d4ed8;
+            box-shadow: 0 0 0 2px rgba(59,130,246,0.22);
+        }
+        .night-mode .env-chip { background: #1e293b; border-color: #475569; color: #e2e8f0; }
+        .night-mode .env-chip small { color: #94a3b8; }
+        .night-mode .env-chip.active { background: #1e3a5f; border-color: #60a5fa; color: #bfdbfe; }
         
         @media print {
             @page { size: landscape; margin: 0; }
@@ -54,6 +106,7 @@
 <body>
 
 <div id="canvas-container"></div>
+<div id="view-orbit-hint">גרור לסיבוב · צביטה לזום</div>
 <div id="labels-overlay" style="position: absolute; top: 0; left: 0; right: 0; bottom: 56px; pointer-events: none; z-index: 5;"></div>
 <div id="sim-caption-overlay" style="position: fixed; bottom: 0; left: 0; right: 0; background: #1e293b; color: white; text-align: center; padding: 14px 20px; font-weight: bold; font-size: 1.1rem; z-index: 20; border-top: 1px solid #334155; font-family: 'Assistant', sans-serif; pointer-events: none;" dir="rtl">ירחי אלומיניום מפעל ייצור הסולל 3 חולון</div>
 
@@ -148,6 +201,11 @@
                 <!-- Environment & Furniture -->
                 <div>
                     <div class="section-title">🏡 סביבה וריהוט</div>
+                    <div class="env-chips" id="env-chips">
+                        <button type="button" class="env-chip active" data-env="villa" onclick="applyEnvironment('villa', true)">🏡 וילה<small>דשא פתוח</small></button>
+                        <button type="button" class="env-chip" data-env="balcony" onclick="applyEnvironment('balcony', true)">🏙️ מרפסת<small>בניינים + מעקה זכוכית</small></button>
+                        <button type="button" class="env-chip" data-env="garden" onclick="applyEnvironment('garden', true)">🌿 דירת גן<small>חצר אינטימית</small></button>
+                    </div>
                     <div class="grid grid-cols-2 gap-3 mb-2">
                         <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
                             <input type="checkbox" id="input-grass-toggle" checked onchange="updateModel()"> דשא סינטטי
@@ -311,12 +369,10 @@
                         <div class="grid grid-cols-2 gap-2">
                             <div class="control-group">
                                 <label class="control-label">גוון סנטף BH:</label>
-                                <select id="input-bh-color" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="updateModel()">
+                                <select id="input-bh-color" class="text-xs border p-2 rounded-lg bg-white w-full pointer-events-auto" onchange="onSantafColorPicked()">
                                     <option value="0xffffff">שקוף</option>
-                                    <option value="0xe5e7eb">חלבי</option>
-                                    <option value="0xdbeafe">כחלחל</option>
-                                    <option value="0xd6d3d1">אפור בהיר</option>
-                                    <option value="0x6b7280">עשן כהה</option>
+                                    <option value="0x3b82c4">כחול</option>
+                                    <option value="0x475569">אפור</option>
                                     <option value="0xa16207">ברונזה</option>
                                 </select>
                             </div>
@@ -435,6 +491,80 @@
                     </div>
                 </div>
 
+                <!-- Side slat shading (does not replace zip / vitrines) -->
+                <div>
+                    <div class="section-title">🪵 הצללות צד (שלבים)</div>
+                    <div class="side-control-card">
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer mb-2">
+                            <input type="checkbox" id="side-front-toggle" onchange="updateModel()"> חזית
+                        </label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="side-front-orient" class="text-[10px] border p-1 rounded bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="horizontal">אופקי</option>
+                                <option value="vertical">אנכי</option>
+                            </select>
+                            <select id="side-front-type" class="text-[10px] border p-1 rounded bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="40">20/40</option>
+                                <option value="70">20/70</option>
+                            </select>
+                        </div>
+                        <div class="counter-ui mt-2">
+                            <span class="text-[10px] font-bold">כמות שלבים</span>
+                            <div class="flex items-center gap-2">
+                                <button class="counter-btn" type="button" onclick="updateCounter('slatsFront', -1)">-</button>
+                                <span id="cnt-slatsFront" class="font-bold">12</span>
+                                <button class="counter-btn" type="button" onclick="updateCounter('slatsFront', 1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="side-control-card">
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer mb-2">
+                            <input type="checkbox" id="side-right-toggle" onchange="updateModel()"> צד ימין
+                        </label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="side-right-orient" class="text-[10px] border p-1 rounded bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="horizontal">אופקי</option>
+                                <option value="vertical">אנכי</option>
+                            </select>
+                            <select id="side-right-type" class="text-[10px] border p-1 rounded bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="40">20/40</option>
+                                <option value="70">20/70</option>
+                            </select>
+                        </div>
+                        <div class="counter-ui mt-2">
+                            <span class="text-[10px] font-bold">כמות שלבים</span>
+                            <div class="flex items-center gap-2">
+                                <button class="counter-btn" type="button" onclick="updateCounter('slatsRight', -1)">-</button>
+                                <span id="cnt-slatsRight" class="font-bold">12</span>
+                                <button class="counter-btn" type="button" onclick="updateCounter('slatsRight', 1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="side-control-card">
+                        <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer mb-2">
+                            <input type="checkbox" id="side-left-toggle" onchange="updateModel()"> צד שמאל
+                        </label>
+                        <div class="grid grid-cols-2 gap-2">
+                            <select id="side-left-orient" class="text-[10px] border p-1 rounded bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="horizontal">אופקי</option>
+                                <option value="vertical">אנכי</option>
+                            </select>
+                            <select id="side-left-type" class="text-[10px] border p-1 rounded bg-white pointer-events-auto" onchange="updateModel()">
+                                <option value="40">20/40</option>
+                                <option value="70">20/70</option>
+                            </select>
+                        </div>
+                        <div class="counter-ui mt-2">
+                            <span class="text-[10px] font-bold">כמות שלבים</span>
+                            <div class="flex items-center gap-2">
+                                <button class="counter-btn" type="button" onclick="updateCounter('slatsLeft', -1)">-</button>
+                                <span id="cnt-slatsLeft" class="font-bold">12</span>
+                                <button class="counter-btn" type="button" onclick="updateCounter('slatsLeft', 1)">+</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="grid grid-cols-2 gap-2 pt-2 pb-6">
                     <button onclick="resetCamera()" class="bg-slate-700 text-white py-2.5 rounded-xl font-bold text-xs hover:bg-slate-800 transition pointer-events-auto">🎥 איפוס מבט</button>
                     <button onclick="prepareAndPrint()" class="bg-blue-600 text-white py-2.5 rounded-xl font-bold text-xs hover:bg-blue-700 transition pointer-events-auto">🖨️ ייצא הצעת מחיר / הדפסה</button>
@@ -467,12 +597,20 @@
     let fans = [];
     let frameColor = 0x2c3e50;
     let slatColor = 0xa67c52;
-    let counters = { divider: 2, tension: 2, postsFront: 2, postsRight: 0, postsLeft: 0, postsBack: 0, slatsRight: 12, slatsLeft: 12 };
+    let counters = { divider: 2, tension: 2, postsFront: 2, postsRight: 0, postsLeft: 0, postsBack: 0, slatsFront: 12, slatsRight: 12, slatsLeft: 12 };
     let dividerStates = [{ led: true, fan: false }, { led: true, fan: false }];
     let labelPoints = [];
     let isPanelVisible = true;
     let isNightMode = false;
     let hasCustomBg = false;
+    let glassEnvMap = null;
+    let envSceneryGroup = null;
+    let currentEnv = 'villa';
+    const ENV_PRESETS = {
+        villa:   { bg: 0xf1f5f9, floorGrass: 0x4d7c0f, floorHard: 0xc4b7a0, grass: true,  wall: true,  furniture: true },
+        balcony: { bg: 0x7eb6e6, floorGrass: 0x4d7c0f, floorHard: 0xe4d7c5, grass: false, wall: true,  furniture: true },
+        garden:  { bg: 0xf3ebe0, floorGrass: 0x5c7a32, floorHard: 0xb8a88a, grass: true,  wall: true,  furniture: true }
+    };
     // External config for L-shape pergola sync
     window._extIsLShape = false;
     window._extLWallWidth = 0;
@@ -595,28 +733,92 @@
             window._extFrameType = String(cfg.frameType);
         }
 
-        // Divider count
+        // Divider count + LED / fan on each divider
         if (typeof cfg.dividers === 'number') {
             counters.divider = Math.max(0, Math.min(8, cfg.dividers));
             const el = document.getElementById('cnt-divider');
             if (el) el.innerText = counters.divider;
-            dividerStates = Array.from({ length: Math.max(1, counters.divider) }).map(() => ({ led: false, fan: false }));
-            renderDividerControls();
         }
-        // Posts by side (backward compatible: cfg.posts -> front)
+        (function applyDividerAccessories() {
+            var n = Math.max(0, Math.min(8, typeof cfg.dividers === 'number' ? cfg.dividers : counters.divider));
+            var states = null;
+            if (Array.isArray(cfg.dividerStates) && cfg.dividerStates.length) {
+                n = Math.max(n, Math.min(8, cfg.dividerStates.length));
+                states = cfg.dividerStates.map(function (s) {
+                    var isFan = !!(s && s.fan);
+                    var isLed = !!(s && s.led) && !isFan;
+                    return { led: isLed, fan: isFan };
+                });
+            } else if (cfg.hasLed || cfg.hasFan || cfg.ledCount || cfg.fanCount) {
+                var fans = cfg.hasFan === false ? 0 : Math.max(0, Number(cfg.fanCount) || 0);
+                if (cfg.hasFan && fans <= 0) fans = 1;
+                var leds = cfg.hasLed === false ? 0 : Math.max(0, Number(cfg.ledCount) || 0);
+                if (cfg.hasLed && leds <= 0) leds = 1;
+                var need = fans + leds;
+                if (need > n) n = Math.min(8, need);
+                fans = Math.min(fans, n);
+                leds = Math.min(leds, Math.max(0, n - fans));
+                states = Array.from({ length: Math.max(1, n) }, function (_, i) {
+                    var isFan = i < fans;
+                    return { led: !isFan && i < fans + leds, fan: isFan };
+                });
+            }
+            if (states) {
+                counters.divider = Math.max(counters.divider, Math.min(8, states.length));
+                var elD = document.getElementById('cnt-divider');
+                if (elD) elD.innerText = counters.divider;
+                dividerStates = Array.from({ length: Math.max(1, counters.divider) }, function (_, i) {
+                    return states[i] || { led: false, fan: false };
+                });
+                renderDividerControls();
+            } else if (typeof cfg.dividers === 'number') {
+                // משנים כמות בלי למחוק אביזרים קיימים אם לא נשלחו במפורש
+                dividerStates = Array.from({ length: Math.max(1, n) }, function (_, i) {
+                    return dividerStates[i] || { led: false, fan: false };
+                });
+                renderDividerControls();
+            }
+        })();
+        if (cfg.ledTone && document.getElementById('input-led-tone')) {
+            document.getElementById('input-led-tone').value = String(cfg.ledTone) === 'warm' ? 'warm' : 'white';
+        }
+        // מותחני קיר
+        if (cfg.hasTensioners || (typeof cfg.tensionerCount === 'number' && cfg.tensionerCount > 0)) {
+            var tToggle = document.getElementById('input-tensions-toggle');
+            if (tToggle) tToggle.checked = true;
+            counters.tension = Math.max(1, Math.min(12, Number(cfg.tensionerCount) || 2));
+            var tEl = document.getElementById('cnt-tension');
+            if (tEl) tEl.innerText = counters.tension;
+        } else if (cfg.hasTensioners === false || cfg.tensionerCount === 0) {
+            var tOff = document.getElementById('input-tensions-toggle');
+            if (tOff) tOff.checked = false;
+        }
+        // Posts by side — רק אם באמת יש עמודים בקונפיג (לא מאפסים ברירת מחדל של ההדמיה)
         const sidePostCfg = {
             postsFront: typeof cfg.postsFront === 'number' ? cfg.postsFront : (typeof cfg.posts === 'number' ? cfg.posts : undefined),
             postsRight: typeof cfg.postsRight === 'number' ? cfg.postsRight : undefined,
             postsLeft: typeof cfg.postsLeft === 'number' ? cfg.postsLeft : undefined,
             postsBack: typeof cfg.postsBack === 'number' ? cfg.postsBack : undefined,
         };
-        Object.keys(sidePostCfg).forEach((k) => {
-            const v = sidePostCfg[k];
+        var anyPostsApplied = false;
+        Object.keys(sidePostCfg).forEach(function (k) {
+            var v = sidePostCfg[k];
             if (typeof v !== 'number') return;
-            counters[k] = Math.max(0, Math.min(12, v));
-            const el = document.getElementById('cnt-' + k);
-            if (el) el.innerText = counters[k];
+            if (v > 0) anyPostsApplied = true;
         });
+        var postsToggle = document.getElementById('input-posts-toggle');
+        if (cfg.hasPosts === true || anyPostsApplied) {
+            Object.keys(sidePostCfg).forEach(function (k) {
+                var v = sidePostCfg[k];
+                if (typeof v !== 'number') return;
+                counters[k] = Math.max(0, Math.min(12, v));
+                var el = document.getElementById('cnt-' + k);
+                if (el) el.innerText = counters[k];
+            });
+            if (postsToggle) postsToggle.checked = true;
+        } else if (cfg.hasPosts === false) {
+            if (postsToggle) postsToggle.checked = false;
+        }
 
         // Gap (spacing between slats) – mapped to UI gap slider
         if (cfg.gap !== undefined && document.getElementById('input-gap')) {
@@ -634,16 +836,31 @@
             slatColor = parseInt(String(chosen).replace('#', '0x'));
         }
         if (cfg.santafHex) {
-            window._extSantafHex = parseInt(String(cfg.santafHex).replace('#', '0x'));
-        } else {
+            var parsedSantaf = parseInt(String(cfg.santafHex).replace('#', '0x'), 16);
+            if (!isFinite(parsedSantaf)) parsedSantaf = 0xffffff;
+            var parentChanged = window._lastParentSantafHex !== parsedSantaf;
+            window._lastParentSantafHex = parsedSantaf;
+            if (parentChanged || !window._userPickedSantaf) {
+                window._extSantafHex = parsedSantaf;
+                window._userPickedSantaf = false;
+                syncBhColorSelect(parsedSantaf);
+            }
+        } else if (cfg.hasSantaf) {
+            if (window._extSantafHex == null) window._extSantafHex = 0xffffff;
+        } else if (cfg.hasSantaf === false) {
             window._extSantafHex = null;
+            window._userPickedSantaf = false;
         }
         if (cfg.hasSantaf !== undefined) {
             window._extHasSantaf = !!cfg.hasSantaf;
+            if (cfg.hasSantaf && window._extSantafHex == null) window._extSantafHex = 0xffffff;
         }
 
         if (cfg.roofType && document.getElementById('input-roof-type')) {
             document.getElementById('input-roof-type').value = String(cfg.roofType);
+            toggleRoofControls();
+        } else if (cfg.hasSantaf && document.getElementById('input-roof-type')) {
+            // נשארים על הצללה + שכבת סנטף (_extHasSantaf) — לא מחליפים ל-PVC
             toggleRoofControls();
         }
 
@@ -651,6 +868,48 @@
             const el = document.getElementById('sim-caption-overlay');
             if (el) el.textContent = cfg.captionText;
         }
+
+        (function applyClosures() {
+            function setSel(id, val) {
+                var el = document.getElementById(id);
+                if (!el || val == null || val === '') return;
+                el.value = String(val);
+            }
+            function setScr(id, val, valId) {
+                if (typeof val !== 'number' || isNaN(val)) return;
+                var el = document.getElementById(id);
+                if (!el) return;
+                var n = Math.max(0, Math.min(100, val));
+                el.value = String(n);
+                if (valId) {
+                    var vs = document.getElementById(valId);
+                    if (vs) vs.innerText = n + '%';
+                }
+            }
+            if (cfg.vitrineFront) setSel('input-vitrine-front', cfg.vitrineFront);
+            if (cfg.vitrineRight) setSel('input-vitrine-right', cfg.vitrineRight);
+            if (cfg.vitrineLeft) setSel('input-vitrine-left', cfg.vitrineLeft);
+            if (cfg.glassType) setSel('input-glass', cfg.glassType);
+            if (cfg.screenColor) setSel('input-screen-color', cfg.screenColor);
+            if (typeof cfg.scrFront === 'number') setScr('input-scr-front', cfg.scrFront, 'val-scr-front');
+            if (typeof cfg.scrRight === 'number') setScr('input-scr-right', cfg.scrRight, 'val-scr-right');
+            if (typeof cfg.scrLeft === 'number') setScr('input-scr-left', cfg.scrLeft, 'val-scr-left');
+            function setSide(prefix, on, orient, type, countKey) {
+                var tog = document.getElementById('side-' + prefix + '-toggle');
+                if (tog && on != null && on !== '') tog.checked = on === true || on === 1 || on === '1' || on === 'true';
+                setSel('side-' + prefix + '-orient', orient);
+                setSel('side-' + prefix + '-type', type);
+                if (typeof countKey === 'number' && !isNaN(countKey)) {
+                    counters['slats' + prefix.charAt(0).toUpperCase() + prefix.slice(1)] = Math.max(0, Math.min(20, countKey));
+                    var cnt = document.getElementById('cnt-slats' + prefix.charAt(0).toUpperCase() + prefix.slice(1));
+                    if (cnt) cnt.innerText = counters['slats' + prefix.charAt(0).toUpperCase() + prefix.slice(1)];
+                }
+            }
+            if (cfg.sideFrontOn != null) setSide('front', cfg.sideFrontOn, cfg.sideFrontOrient, cfg.sideFrontType, cfg.slatsFront);
+            if (cfg.sideRightOn != null) setSide('right', cfg.sideRightOn, cfg.sideRightOrient, cfg.sideRightType, cfg.slatsRight);
+            if (cfg.sideLeftOn != null) setSide('left', cfg.sideLeftOn, cfg.sideLeftOrient, cfg.sideLeftType, cfg.slatsLeft);
+            if (cfg.env && ENV_PRESETS[cfg.env]) applyEnvironment(cfg.env, false);
+        })();
 
         updateModel();
     }
@@ -663,11 +922,11 @@
                 L: p.get('L') ? Number(p.get('L')) : undefined,
                 W: p.get('W') ? Number(p.get('W')) : undefined,
                 gap: p.get('gap') ? Number(p.get('gap')) : undefined,
-                dividers: p.get('dividers') ? Number(p.get('dividers')) : undefined,
-                postsFront: p.get('postsFront') ? Number(p.get('postsFront')) : undefined,
-                postsRight: p.get('postsRight') ? Number(p.get('postsRight')) : undefined,
-                postsLeft: p.get('postsLeft') ? Number(p.get('postsLeft')) : undefined,
-                postsBack: p.get('postsBack') ? Number(p.get('postsBack')) : undefined,
+                dividers: p.get('dividers') != null && p.get('dividers') !== '' ? Number(p.get('dividers')) : undefined,
+                postsFront: p.get('postsFront') != null && p.get('postsFront') !== '' ? Number(p.get('postsFront')) : undefined,
+                postsRight: p.get('postsRight') != null && p.get('postsRight') !== '' ? Number(p.get('postsRight')) : undefined,
+                postsLeft: p.get('postsLeft') != null && p.get('postsLeft') !== '' ? Number(p.get('postsLeft')) : undefined,
+                postsBack: p.get('postsBack') != null && p.get('postsBack') !== '' ? Number(p.get('postsBack')) : undefined,
                 isLShape: p.get('isLShape') === '1' || p.get('isLShape') === 'true',
                 lWallWidth: p.get('lWallWidth') ? Number(p.get('lWallWidth')) : undefined,
                 lWallDepth: p.get('lWallDepth') ? Number(p.get('lWallDepth')) : undefined,
@@ -676,10 +935,32 @@
                 slatHex: p.get('slatHex') || undefined,
                 roofType: p.get('roofType') || undefined,
                 santafHex: p.get('santafHex') || undefined,
-                hasSantaf: p.get('hasSantaf') === '1' || p.get('hasSantaf') === 'true',
                 captionText: p.get('captionText') ? decodeURIComponent(p.get('captionText')) : undefined,
                 frameType: p.get('frameType') || undefined,
+                ledTone: p.get('ledTone') || undefined,
             };
+            if (p.has('hasPosts')) cfg.hasPosts = p.get('hasPosts') === '1' || p.get('hasPosts') === 'true';
+            if (p.has('hasSantaf')) cfg.hasSantaf = p.get('hasSantaf') === '1' || p.get('hasSantaf') === 'true';
+            if (p.has('hasLed')) cfg.hasLed = p.get('hasLed') === '1' || p.get('hasLed') === 'true';
+            if (p.has('hasFan')) cfg.hasFan = p.get('hasFan') === '1' || p.get('hasFan') === 'true';
+            if (p.has('ledCount')) cfg.ledCount = Number(p.get('ledCount'));
+            if (p.has('fanCount')) cfg.fanCount = Number(p.get('fanCount'));
+            if (p.has('hasTensioners')) cfg.hasTensioners = p.get('hasTensioners') === '1' || p.get('hasTensioners') === 'true';
+            if (p.has('tensionerCount')) cfg.tensionerCount = Number(p.get('tensionerCount'));
+            if (p.get('ds')) {
+                cfg.dividerStates = String(p.get('ds')).split('').map(function (ch) {
+                    return { fan: ch === 'f' || ch === 'F', led: ch === 'l' || ch === 'L' };
+                });
+            }
+            if (p.get('vf')) cfg.vitrineFront = p.get('vf');
+            if (p.get('vr')) cfg.vitrineRight = p.get('vr');
+            if (p.get('vl')) cfg.vitrineLeft = p.get('vl');
+            if (p.get('gt')) cfg.glassType = p.get('gt');
+            if (p.get('sc')) cfg.screenColor = p.get('sc');
+            if (p.has('sf')) cfg.scrFront = Number(p.get('sf'));
+            if (p.has('sr')) cfg.scrRight = Number(p.get('sr'));
+            if (p.has('sl')) cfg.scrLeft = Number(p.get('sl'));
+            if (p.get('env')) cfg.env = p.get('env');
             applyExternalConfig(cfg);
         } catch (e) {}
     }
@@ -760,7 +1041,10 @@
         } else {
             btn.innerHTML = '🌙 מצב לילה';
             btn.className = "bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-lg hover:bg-indigo-700 transition flex items-center border border-indigo-500";
-            if (!hasCustomBg) scene.background = new THREE.Color(0xf1f5f9);
+            if (!hasCustomBg) {
+                var dayBg = (ENV_PRESETS[currentEnv] && ENV_PRESETS[currentEnv].bg) || 0xf1f5f9;
+                scene.background = new THREE.Color(dayBg);
+            }
             ambientLight.intensity = 0.7;
             sun.intensity = 0.8;
             if(logo) logo.className = "pointer-events-auto bg-white/95 border border-slate-200 px-8 py-4 rounded-3xl shadow-2xl flex flex-col items-center ml-4 mb-2 transition-all duration-300";
@@ -775,7 +1059,7 @@
         const roofType = document.getElementById('input-roof-type').value;
         document.getElementById('roof-slats-config').style.display = roofType === 'slats' ? 'block' : 'none';
         document.getElementById('roof-pvc-config').style.display = roofType === 'pvc' ? 'block' : 'none';
-        document.getElementById('roof-bh-config').style.display = roofType === 'santafBH' ? 'block' : 'none';
+        document.getElementById('roof-bh-config').style.display = (roofType === 'santafBH' || !!window._extHasSantaf) ? 'block' : 'none';
         
         document.getElementById('slat-color-section').style.opacity = (roofType === 'slats' || roofType === 'santafBH') ? '1' : '0.4';
         document.getElementById('slat-color-section').style.pointerEvents = (roofType === 'slats' || roofType === 'santafBH') ? 'auto' : 'none';
@@ -808,6 +1092,153 @@
         pergolaGroup.scale.set(scale, scale, scale);
     }
 
+    function applyEnvironmentLook() {
+        if (!floor || !scene) return;
+        var p = ENV_PRESETS[currentEnv] || ENV_PRESETS.villa;
+        var grassEl = document.getElementById('input-grass-toggle');
+        var grassOn = grassEl ? grassEl.checked : true;
+        if (hasCustomBg) {
+            floor.visible = grassOn;
+            scene.fog = null;
+            return;
+        }
+        var elevated = currentEnv === 'balcony';
+        floor.visible = !elevated;
+        if (!elevated && floor.material && floor.material.color) {
+            floor.material.color.setHex(grassOn ? p.floorGrass : p.floorHard);
+            floor.material.roughness = grassOn ? 0.95 : 0.62;
+        }
+        var bg = isNightMode ? 0x0b1120 : p.bg;
+        scene.background = new THREE.Color(bg);
+        if (elevated) {
+            scene.fog = new THREE.Fog(bg, isNightMode ? 18 : 38, isNightMode ? 55 : 95);
+        } else {
+            scene.fog = null;
+        }
+    }
+
+    function applyEnvCamera() {
+        if (!camera || !controls || hasCustomBg) return;
+        camera.position.set(12, 8, 12);
+        controls.target.set(0, 1.55, 0);
+        controls.update();
+    }
+
+    function applyEnvironment(id, fromUser) {
+        if (!ENV_PRESETS[id]) return;
+        currentEnv = id;
+        var chips = document.querySelectorAll('.env-chip');
+        for (var i = 0; i < chips.length; i++) {
+            chips[i].classList.toggle('active', chips[i].getAttribute('data-env') === id);
+        }
+        if (fromUser && !hasCustomBg) {
+            var p = ENV_PRESETS[id];
+            var g = document.getElementById('input-grass-toggle');
+            var w = document.getElementById('input-wall-toggle');
+            var f = document.getElementById('input-furniture-toggle');
+            if (g) g.checked = !!p.grass;
+            if (w) w.checked = !!p.wall;
+            if (f) f.checked = !!p.furniture;
+        } else if (!fromUser && !hasCustomBg) {
+            var pShare = ENV_PRESETS[id];
+            var gShare = document.getElementById('input-grass-toggle');
+            var wShare = document.getElementById('input-wall-toggle');
+            if (gShare) gShare.checked = !!pShare.grass;
+            if (wShare) wShare.checked = true;
+        }
+        applyEnvironmentLook();
+        if (fromUser) {
+            updateModel();
+            applyEnvCamera();
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({ type: 'simEnv', k: 'p', env: currentEnv }, '*');
+                }
+            } catch (e) {}
+        } else if (pergolaGroup) {
+            updateModel();
+        }
+    }
+
+    function ensureGlassEnvMap() {
+        if (glassEnvMap || !renderer || typeof THREE.PMREMGenerator !== 'function') return glassEnvMap;
+        try {
+            var pmrem = new THREE.PMREMGenerator(renderer);
+            var envScene = new THREE.Scene();
+            var sky = new THREE.Mesh(
+                new THREE.SphereGeometry(12, 16, 12),
+                new THREE.MeshBasicMaterial({ color: 0xf4efe6, side: THREE.BackSide })
+            );
+            envScene.add(sky);
+            var rt = pmrem.fromScene(envScene, 0.04);
+            glassEnvMap = rt && rt.texture ? rt.texture : null;
+            pmrem.dispose();
+        } catch (e) {
+            glassEnvMap = null;
+        }
+        return glassEnvMap;
+    }
+
+    function isClearSantafColor(hex) {
+        var c = Number(hex);
+        if (!isFinite(c)) return true;
+        c = c >>> 0;
+        if (c === 0xffffff || c === 0x7ec8e3 || c === 0xf8fafc) return true;
+        var r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255;
+        if (r > 245 && g > 245 && b > 245) return true;
+        if (r > 110 && r < 145 && g > 180 && g < 220 && b > 210) return true;
+        return false;
+    }
+
+    function syncBhColorSelect(hexNum) {
+        var el = document.getElementById('input-bh-color');
+        if (!el) return;
+        if (isClearSantafColor(hexNum)) {
+            el.value = '0xffffff';
+            return;
+        }
+        var n = Number(hexNum) >>> 0;
+        if (n === 0x78350f) n = 0xa16207;
+        for (var i = 0; i < el.options.length; i++) {
+            if ((parseInt(el.options[i].value) >>> 0) === n) {
+                el.value = el.options[i].value;
+                return;
+            }
+        }
+    }
+
+    function onSantafColorPicked() {
+        var el = document.getElementById('input-bh-color');
+        if (!el) return;
+        window._userPickedSantaf = true;
+        window._extSantafHex = parseInt(el.value);
+        updateModel();
+    }
+
+    function createSantafMaterial(hex) {
+        var clear = isClearSantafColor(hex);
+        if (clear) {
+            return new THREE.MeshStandardMaterial({
+                color: 0xe8f4fa,
+                transparent: true,
+                opacity: 0.58,
+                roughness: 0.12,
+                metalness: 0.05,
+                depthWrite: true,
+                side: THREE.DoubleSide
+            });
+        }
+        return new THREE.MeshStandardMaterial({
+            color: hex,
+            transparent: true,
+            opacity: 0.88,
+            roughness: 0.28,
+            metalness: 0.04,
+            depthWrite: true,
+            side: THREE.DoubleSide
+        });
+    }
+
     function handleBgUpload(event) {
         const file = event.target.files[0];
         if (file) {
@@ -817,8 +1248,9 @@
             reader.onload = function(e) {
                 const container = document.getElementById('canvas-container');
                 container.style.backgroundImage = `url(${e.target.result})`;
-                container.style.backgroundSize = '100% 100%'; 
+                container.style.backgroundSize = 'cover';
                 container.style.backgroundPosition = 'center';
+                container.style.backgroundRepeat = 'no-repeat';
                 
                 const wallToggle = document.getElementById('input-wall-toggle');
                 if (wallToggle) wallToggle.checked = false;
@@ -849,12 +1281,20 @@
 
         controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.enableRotate = true;
+        controls.enableZoom = true;
+        controls.enablePan = true;
+        controls.minDistance = 2;
+        controls.maxDistance = 80;
+        controls.maxPolarAngle = Math.PI / 2.02;
+        renderer.domElement.style.touchAction = 'none';
 
-        ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        ambientLight = new THREE.AmbientLight(0xffffff, 0.72);
         scene.add(ambientLight);
         
-        sun = new THREE.DirectionalLight(0xffffff, 0.8);
-        sun.position.set(15, 25, 15);
+        sun = new THREE.DirectionalLight(0xffffff, 1.05);
+        sun.position.set(12, 22, 10);
         sun.castShadow = true;
         sun.shadow.mapSize.width = 2048;
         sun.shadow.mapSize.height = 2048;
@@ -870,11 +1310,23 @@
 
         pergolaGroup = new THREE.Group();
         scene.add(pergolaGroup);
+        envSceneryGroup = new THREE.Group();
+        scene.add(envSceneryGroup);
 
         setupColorPickers();
         renderDividerControls();
         toggleRoofControls();
         applyConfigFromUrlParams();
+        try {
+            if (new URLSearchParams(location.search || '').get('viewOnly') === '1') {
+                document.body.classList.add('view-only');
+                var panel = document.getElementById('controls-panel');
+                if (panel) panel.style.display = 'none';
+                onWindowResize();
+                var hint = document.getElementById('view-orbit-hint');
+                if (hint) window.setTimeout(function () { hint.style.opacity = '0'; hint.style.transition = 'opacity 0.6s'; }, 4200);
+            }
+        } catch (e) {}
         updateModel();
         animate();
 
@@ -944,18 +1396,48 @@
         updateModel();
     }
 
-    function createBox(w, h, l, color, isLed = false, opacity = 1) {
-        const matOpts = { color: color, side: THREE.DoubleSide, transparent: opacity < 1, opacity: opacity };
-        if (!isLed) {
-            matOpts.roughness = 0.5;
-            matOpts.metalness = 0.3;
-        } else {
-            matOpts.emissive = new THREE.Color(color);
-            matOpts.emissiveIntensity = isNightMode ? 2.5 : 0.8;
-            matOpts.roughness = 1.0;
-            matOpts.metalness = 0.0;
+    function createAluminumMaterial(color, opacity) {
+        if (opacity == null) opacity = 1;
+        var cr = (color >> 16) & 255, cg = (color >> 8) & 255, cb = color & 255;
+        var lum = cr * 0.299 + cg * 0.587 + cb * 0.114;
+        var isNearWhite = lum > 220;
+        var env = ensureGlassEnvMap();
+        // לבן: בלי emissive (נבלע בקיר) — גוון קר קל + ברק כדי שיראו קווי פרופיל
+        var matColor = color;
+        if (isNearWhite) {
+            matColor = 0xe6eaef;
         }
-        const mat = new THREE.MeshStandardMaterial(matOpts);
+        var matOpts = {
+            color: matColor,
+            side: THREE.DoubleSide,
+            transparent: opacity < 1,
+            opacity: opacity,
+            roughness: isNearWhite ? 0.38 : 0.45,
+            metalness: isNearWhite ? 0.28 : 0.32,
+        };
+        if (env) {
+            matOpts.envMap = env;
+            matOpts.envMapIntensity = isNearWhite ? 0.55 : 0.4;
+        }
+        return new THREE.MeshStandardMaterial(matOpts);
+    }
+
+    function createBox(w, h, l, color, isLed = false, opacity = 1) {
+        var mat;
+        if (isLed) {
+            mat = new THREE.MeshStandardMaterial({
+                color: color,
+                side: THREE.DoubleSide,
+                transparent: opacity < 1,
+                opacity: opacity,
+                emissive: new THREE.Color(color),
+                emissiveIntensity: isNightMode ? 2.5 : 0.8,
+                roughness: 1.0,
+                metalness: 0.0,
+            });
+        } else {
+            mat = createAluminumMaterial(color, opacity);
+        }
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
         if(!isLed) mesh.castShadow = true;
         mesh.receiveShadow = true;
@@ -972,8 +1454,7 @@
         geom.setAttribute('position', new THREE.BufferAttribute(v, 3));
         geom.setIndex([0, 1, 2, 3, 5, 4, 0, 3, 4, 0, 4, 1, 1, 4, 5, 1, 5, 2, 2, 5, 3, 2, 3, 0]);
         geom.computeVertexNormals();
-        const matOpts = { color: color, side: THREE.DoubleSide, roughness: 0.5, metalness: 0.3 };
-        const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial(matOpts));
+        const mesh = new THREE.Mesh(geom, createAluminumMaterial(color, 1));
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         group.add(mesh);
@@ -990,8 +1471,8 @@
         const cy = (y0 + y1) / 2;
         const h = y1 - y0;
         const thick = 0.0035;
-        const seamCol = new THREE.Color(baseColor).multiplyScalar(0.86);
-        const mat = new THREE.MeshStandardMaterial({ color: seamCol, side: THREE.DoubleSide, roughness: 0.42, metalness: 0.38 });
+        const seamCol = new THREE.Color(baseColor).multiplyScalar(0.92);
+        const mat = createAluminumMaterial(seamCol.getHex(), 1);
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(len, h, thick), mat);
         mesh.position.set(cx, cy, cz);
         mesh.rotation.y = Math.atan2(dz, dx);
@@ -1066,6 +1547,607 @@
         const table = createBox(0.8, 0.4, 0.8, 0x333333);
         table.position.set(0, 0.2, 0); group.add(table);
         return group;
+    }
+
+    function envGlassMaterial() {
+        var env = ensureGlassEnvMap();
+        var opts = {
+            color: 0xffffff,
+            metalness: 0.05,
+            roughness: 0.06,
+            transparent: true,
+            opacity: 0.22,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        };
+        try {
+            if (typeof THREE.MeshPhysicalMaterial === 'function' && env) {
+                opts.transmission = 0.95;
+                opts.opacity = 1;
+                opts.ior = 1.5;
+                opts.envMap = env;
+                opts.envMapIntensity = 0.55;
+                return new THREE.MeshPhysicalMaterial(opts);
+            }
+        } catch (e) {}
+        return new THREE.MeshStandardMaterial(opts);
+    }
+
+    function addGlassBalustrade(parent, length, x, z, rotY) {
+        var g = new THREE.Group();
+        var railH = 1.12;
+        var postW = 0.04;
+        var n = Math.max(2, Math.round(length / 1.05));
+        var span = length / n;
+        var metal = 0xc0c6ce;
+        var glassMat = envGlassMaterial();
+        for (var i = 0; i <= n; i++) {
+            var post = createBox(postW, railH, postW, metal);
+            post.position.set(-length / 2 + i * span, railH / 2, 0);
+            g.add(post);
+        }
+        for (var j = 0; j < n; j++) {
+            var gw = Math.max(0.12, span - 0.055);
+            var pane = new THREE.Mesh(new THREE.BoxGeometry(gw, 0.94, 0.012), glassMat);
+            pane.position.set(-length / 2 + (j + 0.5) * span, 0.14 + 0.47, 0);
+            pane.castShadow = false;
+            pane.receiveShadow = false;
+            g.add(pane);
+        }
+        var cap = createBox(length + 0.04, 0.035, 0.07, metal);
+        cap.position.set(0, railH, 0);
+        g.add(cap);
+        var kick = createBox(length, 0.08, 0.05, metal);
+        kick.position.set(0, 0.04, 0);
+        g.add(kick);
+        g.position.set(x, 0, z);
+        g.rotation.y = rotY || 0;
+        parent.add(g);
+    }
+
+    var _plasterTexCache = {};
+    var _roofTexCache = null;
+
+    function getPlasterTexture(hex) {
+        var key = String(hex >>> 0);
+        if (_plasterTexCache[key]) return _plasterTexCache[key];
+        var c = document.createElement('canvas');
+        c.width = 128;
+        c.height = 128;
+        var ctx = c.getContext('2d');
+        var r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+        // צבעים בהירים: מעט רעש לכיוון בהיר בלבד — שלא יהפכו אפורים
+        var lum = (r * 0.299 + g * 0.587 + b * 0.114);
+        var light = lum > 200;
+        ctx.fillStyle = 'rgb(' + r + ',' + g + ',' + b + ')';
+        ctx.fillRect(0, 0, 128, 128);
+        var nCount = light ? 900 : 2200;
+        for (var i = 0; i < nCount; i++) {
+            var spread = light ? 10 : 22;
+            var bias = light ? 4 : 0;
+            var nr = Math.max(0, Math.min(255, r + ((Math.random() * spread) | 0) - (spread / 2 | 0) + bias));
+            var ng = Math.max(0, Math.min(255, g + ((Math.random() * spread) | 0) - (spread / 2 | 0) + bias));
+            var nb = Math.max(0, Math.min(255, b + ((Math.random() * (spread * 0.7)) | 0) - ((spread * 0.35) | 0) + bias));
+            ctx.fillStyle = 'rgba(' + nr + ',' + ng + ',' + nb + ',' + (light ? 0.12 : 0.28) + ')';
+            ctx.fillRect(Math.random() * 128, Math.random() * 128, 1 + Math.random() * 1.5, 1 + Math.random() * 1.5);
+        }
+        if (!light) {
+            for (var y = 8; y < 128; y += 16) {
+                ctx.fillStyle = 'rgba(80,70,60,0.03)';
+                ctx.fillRect(0, y, 128, 1);
+            }
+        }
+        var tex = new THREE.CanvasTexture(c);
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(2.2, 2.2);
+        if (THREE.sRGBEncoding !== undefined) tex.encoding = THREE.sRGBEncoding;
+        tex.needsUpdate = true;
+        _plasterTexCache[key] = tex;
+        return tex;
+    }
+
+    function getRoofTileTexture() {
+        if (_roofTexCache) return _roofTexCache;
+        var c = document.createElement('canvas');
+        c.width = 64;
+        c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = '#b34f35';
+        ctx.fillRect(0, 0, 64, 64);
+        for (var row = 0; row < 8; row++) {
+            for (var col = 0; col < 8; col++) {
+                var shade = 140 + ((row * 7 + col * 3) % 40);
+                ctx.fillStyle = 'rgb(' + shade + ',' + (shade - 55) + ',' + (shade - 70) + ')';
+                var ox = (row % 2) * 4;
+                ctx.fillRect(col * 8 + ox, row * 8, 7, 6);
+                ctx.fillStyle = 'rgba(60,30,20,0.25)';
+                ctx.fillRect(col * 8 + ox, row * 8 + 5, 7, 1);
+            }
+        }
+        _roofTexCache = new THREE.CanvasTexture(c);
+        _roofTexCache.wrapS = _roofTexCache.wrapT = THREE.RepeatWrapping;
+        _roofTexCache.repeat.set(4, 3);
+        if (THREE.sRGBEncoding !== undefined) _roofTexCache.encoding = THREE.sRGBEncoding;
+        return _roofTexCache;
+    }
+
+    /** קיר בית / חזית — טיח עם רעש עדין (לא אלומיניום) */
+    function createHouseBox(w, h, l, color) {
+        var tex = getPlasterTexture(color);
+        var mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            color: 0xffffff,
+            roughness: 0.78,
+            metalness: 0,
+        });
+        var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    function createRoofBox(w, h, l, color) {
+        var tex = getRoofTileTexture();
+        var mat = new THREE.MeshStandardMaterial({
+            map: tex,
+            color: color != null ? color : 0xffffff,
+            roughness: 0.82,
+            metalness: 0.05,
+        });
+        var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    function createWoodDoor(w, h, l, color) {
+        var mat = new THREE.MeshStandardMaterial({
+            color: color,
+            roughness: 0.72,
+            metalness: 0.08,
+        });
+        var mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+    }
+
+    function addBuildingWindows(parent, w, h, d, x, y, z, night, faceSign, winColor) {
+        var cols = Math.max(2, Math.round(w / 1.6));
+        var rows = Math.max(3, Math.round(h / 2.4));
+        var winW = Math.min(0.72, w / (cols + 1) * 0.58);
+        var winH = 0.92;
+        var dayCol = winColor != null ? winColor : 0x7eb4d4;
+        var face = (faceSign == null ? 1 : faceSign);
+        var frameMat = new THREE.MeshStandardMaterial({ color: 0x3a414c, roughness: 0.55, metalness: 0.4 });
+        var env = ensureGlassEnvMap();
+        var glassMat = new THREE.MeshStandardMaterial({
+            color: night ? 0xffe08a : dayCol,
+            emissive: night ? 0xffc14d : 0x0d1a24,
+            emissiveIntensity: night ? 0.85 : 0.04,
+            roughness: night ? 0.35 : 0.08,
+            metalness: 0.18,
+            transparent: !night,
+            opacity: night ? 1 : 0.52,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        if (env && !night) {
+            glassMat.envMap = env;
+            glassMat.envMapIntensity = 0.7;
+        }
+        for (var r = 0; r < rows; r++) {
+            for (var c = 0; c < cols; c++) {
+                var wx = x - w / 2 + (c + 1) * (w / (cols + 1));
+                var wy = y - h / 2 + 1.35 + r * ((h - 2.0) / Math.max(1, rows - 0.2));
+                var zFrame = z + face * (d / 2 + 0.02);
+                var zGlass = z + face * (d / 2 + 0.045);
+                var frame = new THREE.Mesh(new THREE.BoxGeometry(winW + 0.07, winH + 0.07, 0.045), frameMat);
+                frame.position.set(wx, wy, zFrame);
+                frame.castShadow = true;
+                parent.add(frame);
+                var pane = new THREE.Mesh(new THREE.BoxGeometry(winW - 0.04, winH - 0.04, 0.02), glassMat);
+                pane.position.set(wx, wy, zGlass);
+                parent.add(pane);
+                var mullion = new THREE.Mesh(new THREE.BoxGeometry(0.03, winH - 0.06, 0.025), frameMat);
+                mullion.position.set(wx, wy, zGlass + face * 0.01);
+                parent.add(mullion);
+                var sill = new THREE.Mesh(new THREE.BoxGeometry(winW + 0.12, 0.035, 0.09), frameMat);
+                sill.position.set(wx, wy - winH / 2 - 0.015, z + face * (d / 2 + 0.055));
+                sill.castShadow = true;
+                parent.add(sill);
+            }
+        }
+    }
+
+    function addSideWindows(parent, w, h, d, x, y, z, night, xSign, winColor) {
+        var cols = Math.max(2, Math.round(d / 1.7));
+        var rows = Math.max(3, Math.round(h / 2.4));
+        var winW = Math.min(0.7, d / (cols + 1) * 0.5);
+        var winH = 0.9;
+        var dayCol = winColor != null ? winColor : 0x7eb4d4;
+        var frameMat = new THREE.MeshStandardMaterial({ color: 0x3a414c, roughness: 0.55, metalness: 0.4 });
+        var env = ensureGlassEnvMap();
+        var glassMat = new THREE.MeshStandardMaterial({
+            color: night ? 0xffe08a : dayCol,
+            emissive: night ? 0xffc14d : 0x0d1a24,
+            emissiveIntensity: night ? 0.85 : 0.04,
+            roughness: night ? 0.35 : 0.08,
+            metalness: 0.18,
+            transparent: !night,
+            opacity: night ? 1 : 0.52,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        if (env && !night) {
+            glassMat.envMap = env;
+            glassMat.envMapIntensity = 0.7;
+        }
+        for (var r = 0; r < rows; r++) {
+            for (var c = 0; c < cols; c++) {
+                var wz = z - d / 2 + (c + 1) * (d / (cols + 1));
+                var wy = y - h / 2 + 1.35 + r * ((h - 2.0) / Math.max(1, rows - 0.2));
+                var xFrame = x + xSign * (w / 2 + 0.02);
+                var xGlass = x + xSign * (w / 2 + 0.045);
+                var frame = new THREE.Mesh(new THREE.BoxGeometry(0.045, winH + 0.07, winW + 0.07), frameMat);
+                frame.position.set(xFrame, wy, wz);
+                frame.castShadow = true;
+                parent.add(frame);
+                var pane = new THREE.Mesh(new THREE.BoxGeometry(0.02, winH - 0.04, winW - 0.04), glassMat);
+                pane.position.set(xGlass, wy, wz);
+                parent.add(pane);
+                var sill = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.035, winW + 0.12), frameMat);
+                sill.position.set(x + xSign * (w / 2 + 0.055), wy - winH / 2 - 0.015, wz);
+                sill.castShadow = true;
+                parent.add(sill);
+            }
+        }
+    }
+
+    function addPlanter(parent, x, z) {
+        var pot = createBox(0.52, 0.28, 0.32, 0xc4784a);
+        pot.position.set(x, 0.16, z);
+        parent.add(pot);
+        var leaf = createBox(0.46, 0.34, 0.26, 0x3d8c45);
+        leaf.position.set(x, 0.44, z);
+        parent.add(leaf);
+        var leaf2 = createBox(0.22, 0.22, 0.18, 0x2f6b36);
+        leaf2.position.set(x + 0.08, 0.58, z);
+        parent.add(leaf2);
+    }
+
+    /** פתח גדול בקיר מתחת לפרגולה — חלון/יציאה עם תריס גלילה.
+     *  opts.maxTop: גובה מקסימלי לראש הקסטה (מתחת לקורת הפרגולה) */
+    function addWallShutterWindow(parent, x, z, maxW, opts) {
+        opts = opts || {};
+        var span = Math.max(1.8, maxW || 3);
+        var doorW = opts.w != null ? opts.w : Math.min(span * 0.62, Math.max(2.4, span - 0.9));
+        var cassH = 0.18;
+        var maxTop = opts.maxTop != null ? opts.maxTop : 2.05;
+        var doorH = opts.h != null ? opts.h : Math.min(2.05, maxTop - cassH - 0.08);
+        doorH = Math.max(1.45, Math.min(doorH, maxTop - cassH - 0.08));
+        var dropRatio = opts.drop != null ? opts.drop : 0.48;
+        var alu = 0xb9c0c8;
+        var glass = new THREE.MeshStandardMaterial({
+            color: 0xd6eef8,
+            transparent: true,
+            opacity: 0.38,
+            roughness: 0.06,
+            metalness: 0.12,
+            depthWrite: false,
+            side: THREE.DoubleSide
+        });
+        var g = new THREE.Group();
+        var recess = createHouseBox(doorW + 0.22, doorH + 0.28, 0.14, 0x6b7280);
+        recess.position.set(0, doorH / 2 + 0.04, -0.1);
+        g.add(recess);
+        var bot = createBox(doorW, 0.06, 0.08, alu);
+        bot.position.set(0, 0.03, 0.01);
+        g.add(bot);
+        var top = createBox(doorW, 0.06, 0.08, alu);
+        top.position.set(0, doorH - 0.03, 0.01);
+        g.add(top);
+        var panelW = doorW * 0.52;
+        var paneH = doorH - 0.14;
+        var addPanel = function (px, pz) {
+            var pg = new THREE.Group();
+            var gl = new THREE.Mesh(new THREE.BoxGeometry(panelW - 0.1, paneH - 0.1, 0.012), glass);
+            pg.add(gl);
+            var fL = createBox(0.045, paneH, 0.04, alu); fL.position.set(-panelW / 2 + 0.022, 0, 0);
+            var fR = createBox(0.045, paneH, 0.04, alu); fR.position.set(panelW / 2 - 0.022, 0, 0);
+            var fT = createBox(panelW - 0.09, 0.045, 0.04, alu); fT.position.set(0, paneH / 2 - 0.022, 0);
+            var fB = createBox(panelW - 0.09, 0.045, 0.04, alu); fB.position.set(0, -paneH / 2 + 0.022, 0);
+            pg.add(fL, fR, fT, fB);
+            pg.position.set(px, doorH / 2, pz);
+            g.add(pg);
+        };
+        addPanel(-doorW * 0.24, 0.02);
+        addPanel(doorW * 0.24, 0.04);
+        var cassW = doorW + 0.18;
+        var cassette = createBox(cassW, cassH, 0.16, alu);
+        cassette.position.set(0, doorH + cassH / 2, 0.02);
+        g.add(cassette);
+        var railL = createBox(0.04, doorH, 0.045, alu);
+        railL.position.set(-doorW / 2 - 0.025, doorH / 2, 0.04);
+        var railR = createBox(0.04, doorH, 0.045, alu);
+        railR.position.set(doorW / 2 + 0.025, doorH / 2, 0.04);
+        g.add(railL, railR);
+        var drop = doorH * dropRatio;
+        var slatH = 0.048;
+        var nSlats = Math.max(6, Math.round(drop / slatH));
+        var shutterCol = 0x6a7380;
+        for (var i = 0; i < nSlats; i++) {
+            var slat = createBox(doorW - 0.05, slatH * 0.82, 0.012, shutterCol);
+            slat.position.set(0, doorH - 0.1 - i * slatH, 0.055);
+            g.add(slat);
+        }
+        var bar = createBox(doorW - 0.02, 0.035, 0.022, alu);
+        bar.position.set(0, doorH - 0.1 - nSlats * slatH, 0.055);
+        g.add(bar);
+        g.position.set(x, 0, z);
+        parent.add(g);
+    }
+
+    function addBalconyExitDoor(parent, x, z, maxW) {
+        addWallShutterWindow(parent, x, z, maxW, { w: Math.min(2.45, Math.max(1.45, (maxW || 2.45) - 0.3)), h: 2.0, drop: 0.42, maxTop: 2.15 });
+    }
+
+    function addLShapeBuildingWalls(group, L, W, notchW, notchD, isLLeft, height, color) {
+        var cxProt, cxMain;
+        if (isLLeft) {
+            cxProt = -L / 2 + notchW / 2;
+            cxMain = notchW / 2;
+        } else {
+            cxMain = -notchW / 2;
+            cxProt = L / 2 - notchW / 2;
+        }
+        var wallMain = createHouseBox(Math.max(0.2, L - notchW), height, 0.4, color);
+        wallMain.position.set(cxMain, height / 2, -W / 2 - 0.21);
+        group.add(wallMain);
+        var wallProt = createHouseBox(notchW, height, notchD + 0.4, color);
+        wallProt.position.set(cxProt, height / 2, -W / 2 + notchD / 2 - 0.21);
+        group.add(wallProt);
+    }
+
+    function rebuildEnvScenery(L, W, hasLNotch, notchW, notchD, isLLeft, pergolaH) {
+        if (!envSceneryGroup) return;
+        clearGroup(envSceneryGroup);
+        if (hasCustomBg) return;
+        var Hwall = pergolaH != null && isFinite(pergolaH) ? pergolaH : 2.7;
+        // רצועת קיר ברורה מעל הפתח — הקורה יושבת על הקיר, לא על החלון
+        var openMaxTop = Math.max(1.7, Hwall - 0.65);
+        var wallOpenZ = -W / 2 - 0.22;
+        var wallOpenOpts = { maxTop: openMaxTop, drop: 0.45 };
+
+        if (currentEnv === 'balcony') {
+            var overhangF = 0.95;
+            var overhangS = 0.85;
+            var slabW = L + overhangS * 2;
+            var slabD = W + overhangF + 0.25;
+            var slabZ = (overhangF - 0.25) / 2;
+            var slab = createBox(slabW, 0.12, slabD, 0xe9dcc8);
+            slab.position.set(0, -0.06, slabZ);
+            envSceneryGroup.add(slab);
+            var edge = createBox(slabW + 0.04, 0.22, 0.08, 0xc4a574);
+            edge.position.set(0, -0.12, slabZ + slabD / 2);
+            envSceneryGroup.add(edge);
+
+            var frontZ = slabZ + slabD / 2 - 0.04;
+            var leftX = -slabW / 2 + 0.03;
+            var rightX = slabW / 2 - 0.03;
+            addGlassBalustrade(envSceneryGroup, slabW - 0.08, 0, frontZ, 0);
+            addGlassBalustrade(envSceneryGroup, slabD - 0.08, leftX, slabZ, Math.PI / 2);
+            addGlassBalustrade(envSceneryGroup, slabD - 0.08, rightX, slabZ, Math.PI / 2);
+
+            addPlanter(envSceneryGroup, -slabW / 2 + 0.85, frontZ - 0.28);
+            addPlanter(envSceneryGroup, slabW / 2 - 0.85, frontZ - 0.28);
+
+            var showWallEl = document.getElementById('input-wall-toggle');
+            if (!showWallEl || showWallEl.checked) {
+                var doorX = 0;
+                var doorMax = L;
+                if (hasLNotch) {
+                    addLShapeBuildingWalls(envSceneryGroup, L, W, notchW, notchD, isLLeft, 5.6, 0xfaf9f7);
+                    doorX = isLLeft ? notchW / 2 : -notchW / 2;
+                    doorMax = Math.max(0.2, L - notchW);
+                } else {
+                    var facadeH = 5.6;
+                    var facade = createHouseBox(slabW + 0.4, facadeH, 0.4, 0xfaf9f7);
+                    facade.position.set(0, facadeH / 2 - 0.08, -W / 2 - 0.21);
+                    envSceneryGroup.add(facade);
+                    addBuildingWindows(envSceneryGroup, slabW - 0.5, 1.8, 0.4, 0, 4.15, -W / 2 - 0.21, isNightMode, 1, 0x8ecae6);
+                    doorMax = L;
+                }
+                addWallShutterWindow(envSceneryGroup, doorX, wallOpenZ, doorMax, wallOpenOpts);
+            }
+
+            var night = isNightMode;
+            var city = [
+                { x: -11.5, z: 2.2, w: 5.4, d: 4.6, h: 16, c: 0xf0d7c0, win: 0x6eb5d4 },
+                { x: -13.8, z: -5.5, w: 5.8, d: 5.0, h: 22, c: 0xe07a4a, win: 0xd9f0ff },
+                { x: -9.5, z: -11.0, w: 6.2, d: 5.2, h: 18, c: 0xfff1de, win: 0x8fd3ea },
+                { x: -2.0, z: -14.5, w: 7.0, d: 5.5, h: 26, c: 0xf3c98b, win: 0x7ec8e3 },
+                { x: 6.5, z: -13.0, w: 5.6, d: 4.8, h: 20, c: 0xd9a066, win: 0xb8e0f0 },
+                { x: 14.5, z: -8.5, w: 5.2, d: 4.6, h: 15, c: 0x7aa8c4, win: 0xdff6ff },
+                { x: -16.5, z: 6.5, w: 4.8, d: 4.2, h: 13, c: 0xc45c3e, win: 0xa8d8ea },
+                { x: 16.8, z: -2.0, w: 5.0, d: 4.4, h: 17, c: 0x88b089, win: 0xe8f8d8 },
+                { x: 3.2, z: -18.5, w: 6.4, d: 5.4, h: 24, c: 0xead9c4, win: 0x9ad1e8 }
+            ];
+            city.forEach(function (b) {
+                var cy = b.h / 2 - 2.4;
+                var mesh = createHouseBox(b.w, b.h, b.d, b.c);
+                mesh.position.set(b.x, cy, b.z);
+                envSceneryGroup.add(mesh);
+                addBuildingWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, night, 1, b.win);
+                if (b.x < -6) addSideWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, night, 1, b.win);
+                if (b.x > 6) addSideWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, night, -1, b.win);
+            });
+
+            var sun = new THREE.Mesh(
+                new THREE.SphereGeometry(2.2, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xffe08a })
+            );
+            sun.position.set(-22, 20, -18);
+            envSceneryGroup.add(sun);
+            return;
+        }
+
+        if (currentEnv === 'garden') {
+            var nightG = isNightMode;
+            var showWallElG = document.getElementById('input-wall-toggle');
+            if (!showWallElG || showWallElG.checked) {
+                var homeH = 16.5;
+                var homeD = 8.2;
+                var homeW = Math.max(L + 3.6, 9);
+                if (hasLNotch) {
+                    addLShapeBuildingWalls(envSceneryGroup, L, W, notchW, notchD, isLLeft, homeH, 0xfaf9f7);
+                    var homeZ = -W / 2 - 0.55 - homeD / 2;
+                    var home = createHouseBox(Math.max(0.2, L - notchW + 2.4), homeH, homeD, 0xfaf9f7);
+                    var homeX = isLLeft ? notchW / 2 : -notchW / 2;
+                    home.position.set(homeX, homeH / 2, homeZ);
+                    envSceneryGroup.add(home);
+                    addBuildingWindows(envSceneryGroup, Math.max(2, L - notchW), homeH - 3.8, homeD, homeX, homeH / 2 + 1.6, homeZ, nightG, 1, 0x8ecae6);
+                    addWallShutterWindow(envSceneryGroup, homeX, wallOpenZ, Math.max(0.2, L - notchW), wallOpenOpts);
+                } else {
+                    var homeZ2 = -W / 2 - 0.22 - homeD / 2;
+                    var home2 = createHouseBox(homeW, homeH, homeD, 0xfaf9f7);
+                    home2.position.set(0, homeH / 2, homeZ2);
+                    envSceneryGroup.add(home2);
+                    addBuildingWindows(envSceneryGroup, homeW - 0.8, homeH - 3.8, homeD, 0, homeH / 2 + 1.6, homeZ2, nightG, 1, 0x8ecae6);
+                    addSideWindows(envSceneryGroup, homeW, homeH - 3.2, homeD, 0, homeH / 2 + 1.2, homeZ2, nightG, 1, 0x8ecae6);
+                    addSideWindows(envSceneryGroup, homeW, homeH - 3.2, homeD, 0, homeH / 2 + 1.2, homeZ2, nightG, -1, 0x8ecae6);
+                    addWallShutterWindow(envSceneryGroup, 0, wallOpenZ, L, wallOpenOpts);
+                }
+            }
+
+            var hedge = function (w, h, d, x, z) {
+                var m = createBox(w, h, d, 0x3f6b32);
+                m.position.set(x, h / 2, z);
+                envSceneryGroup.add(m);
+            };
+            hedge(0.38, 1.05, W + 1.6, -L / 2 - 2.4, 0.2);
+            hedge(0.38, 1.05, W + 1.6, L / 2 + 2.4, 0.2);
+            addPlanter(envSceneryGroup, -L / 2 - 1.35, W / 2 - 0.4);
+            addPlanter(envSceneryGroup, L / 2 + 1.35, W / 2 - 0.4);
+
+            var neighbors = [
+                { x: -13.2, z: -1.5, w: 6.0, d: 5.2, h: 11, c: 0xe8c9a8, win: 0x7eb8d4 },
+                { x: -12.5, z: -9.8, w: 5.6, d: 5.0, h: 14, c: 0xd9a066, win: 0xb8e0f0 },
+                { x: -6.5, z: -15.5, w: 6.4, d: 5.4, h: 12, c: 0xf7e6d0, win: 0x70b8d4 },
+                { x: 5.8, z: -15.0, w: 5.8, d: 5.0, h: 13, c: 0xc45c3e, win: 0xa8d8ea },
+                { x: 14.2, z: -8.5, w: 5.4, d: 4.8, h: 10, c: 0xead9c4, win: 0x9ad1e8 },
+                { x: 15.5, z: -1.2, w: 5.2, d: 4.6, h: 9, c: 0x88b089, win: 0xe8f8d8 }
+            ];
+            neighbors.forEach(function (b) {
+                var cy = b.h / 2;
+                var mesh = createHouseBox(b.w, b.h, b.d, b.c);
+                mesh.position.set(b.x, cy, b.z);
+                envSceneryGroup.add(mesh);
+                addBuildingWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, nightG, 1, b.win);
+                if (b.x < -6) addSideWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, nightG, 1, b.win);
+                if (b.x > 6) addSideWindows(envSceneryGroup, b.w, b.h, b.d, b.x, cy, b.z, nightG, -1, b.win);
+            });
+        }
+
+        if (currentEnv === 'villa') {
+            var nightV = isNightMode;
+            var showWallElV = document.getElementById('input-wall-toggle');
+            if (!showWallElV || showWallElV.checked) {
+                var vW = Math.max(L + 5.5, 11);
+                var vH = 6.4;
+                var vD = 7.4;
+                if (hasLNotch) {
+                    addLShapeBuildingWalls(envSceneryGroup, L, W, notchW, notchD, isLLeft, vH, 0xf4f2ee);
+                    var vZ = -W / 2 - 0.55 - vD / 2;
+                    var houseX = isLLeft ? notchW / 2 : -notchW / 2;
+                    var houseW = Math.max(0.2, L - notchW + 3.2);
+                    var house = createHouseBox(houseW, vH, vD, 0xf4f2ee);
+                    house.position.set(houseX, vH / 2, vZ);
+                    envSceneryGroup.add(house);
+                    var roofCol = 0xc45c3e;
+                    var roofA = createRoofBox(houseW + 0.7, 0.16, vD * 0.78, roofCol);
+                    roofA.rotation.x = 0.42;
+                    roofA.position.set(houseX, vH + 0.85, vZ - vD * 0.16);
+                    envSceneryGroup.add(roofA);
+                    var roofB = createRoofBox(houseW + 0.7, 0.16, vD * 0.78, roofCol);
+                    roofB.rotation.x = -0.42;
+                    roofB.position.set(houseX, vH + 0.85, vZ + vD * 0.16);
+                    envSceneryGroup.add(roofB);
+                    addBuildingWindows(envSceneryGroup, Math.max(2, houseW - 1.2), 2.4, vD, houseX, 4.55, vZ, nightV, 1, 0x9ad4ea);
+                    addWallShutterWindow(envSceneryGroup, houseX, wallOpenZ, Math.max(0.2, L - notchW), wallOpenOpts);
+                } else {
+                    var vZ2 = -W / 2 - 0.22 - vD / 2;
+                    var house2 = createHouseBox(vW, vH, vD, 0xf4f2ee);
+                    house2.position.set(0, vH / 2, vZ2);
+                    envSceneryGroup.add(house2);
+                    var wing = createHouseBox(3.6, 4.4, 5.2, 0xf7f5f2);
+                    wing.position.set(vW / 2 + 1.1, 2.2, vZ2 - 0.6);
+                    envSceneryGroup.add(wing);
+                    var roofCol2 = 0xc45c3e;
+                    var roofA2 = createRoofBox(vW + 0.7, 0.16, vD * 0.78, roofCol2);
+                    roofA2.rotation.x = 0.42;
+                    roofA2.position.set(0, vH + 0.85, vZ2 - vD * 0.16);
+                    envSceneryGroup.add(roofA2);
+                    var roofB2 = createRoofBox(vW + 0.7, 0.16, vD * 0.78, roofCol2);
+                    roofB2.rotation.x = -0.42;
+                    roofB2.position.set(0, vH + 0.85, vZ2 + vD * 0.16);
+                    envSceneryGroup.add(roofB2);
+                    var roofWing = createRoofBox(4.2, 0.16, 4.4, roofCol2);
+                    roofWing.rotation.x = -0.38;
+                    roofWing.position.set(vW / 2 + 1.1, 4.9, vZ2 - 0.3);
+                    envSceneryGroup.add(roofWing);
+                    var chim = createHouseBox(0.42, 1.35, 0.42, 0xe8e4df);
+                    chim.position.set(-vW * 0.22, vH + 1.55, vZ2);
+                    envSceneryGroup.add(chim);
+                    addBuildingWindows(envSceneryGroup, vW - 1.2, 2.4, vD, 0, 4.55, vZ2, nightV, 1, 0x9ad4ea);
+                    addSideWindows(envSceneryGroup, vW, vH - 1.5, vD, 0, vH / 2 + 0.4, vZ2, nightV, 1, 0x9ad4ea);
+                    addSideWindows(envSceneryGroup, vW, vH - 1.5, vD, 0, vH / 2 + 0.4, vZ2, nightV, -1, 0x9ad4ea);
+                    addWallShutterWindow(envSceneryGroup, 0, wallOpenZ, L, wallOpenOpts);
+                    var sideDoor = createWoodDoor(1.0, 2.1, 0.08, 0x6b3f24);
+                    sideDoor.position.set(vW / 2 + 1.1, 1.05, vZ2 + 2.4);
+                    envSceneryGroup.add(sideDoor);
+                }
+            }
+
+            var poolX = -L / 2 - 5.1;
+            var poolZ = 0.35;
+            var deck = createBox(6.6, 0.07, 4.4, 0xe6dccf);
+            deck.position.set(poolX, 0.02, poolZ);
+            envSceneryGroup.add(deck);
+            var water = new THREE.Mesh(
+                new THREE.BoxGeometry(4.9, 0.08, 2.85),
+                new THREE.MeshStandardMaterial({
+                    color: 0x2f9fd4,
+                    roughness: 0.06,
+                    metalness: 0.35,
+                    transparent: true,
+                    opacity: 0.82
+                })
+            );
+            water.position.set(poolX, 0.055, poolZ);
+            envSceneryGroup.add(water);
+            var copA = createBox(5.3, 0.1, 0.22, 0xd9d0c4);
+            copA.position.set(poolX, 0.08, poolZ + 1.52);
+            envSceneryGroup.add(copA);
+            var copB = createBox(5.3, 0.1, 0.22, 0xd9d0c4);
+            copB.position.set(poolX, 0.08, poolZ - 1.52);
+            envSceneryGroup.add(copB);
+            var copC = createBox(0.22, 0.1, 3.05, 0xd9d0c4);
+            copC.position.set(poolX - 2.55, 0.08, poolZ);
+            envSceneryGroup.add(copC);
+            var copD = createBox(0.22, 0.1, 3.05, 0xd9d0c4);
+            copD.position.set(poolX + 2.55, 0.08, poolZ);
+            envSceneryGroup.add(copD);
+            addPlanter(envSceneryGroup, poolX - 2.7, poolZ + 1.85);
+            addPlanter(envSceneryGroup, poolX + 2.7, poolZ + 1.85);
+            var hedgeV = function (w, h, d, x, z) {
+                var m = createBox(w, h, d, 0x3f6b32);
+                m.position.set(x, h / 2, z);
+                envSceneryGroup.add(m);
+            };
+            hedgeV(0.35, 0.85, 3.2, poolX - 3.4, poolZ);
+            hedgeV(1.8, 0.7, 0.35, L / 2 + 2.3, -W / 2 + 0.8);
+        }
     }
 
     function drawSideWall(xPos, zPos, width, orientation, count, slatType, isLateral, frameH) {
@@ -1254,7 +2336,6 @@
 
         const showPosts = document.getElementById('input-posts-toggle') ? document.getElementById('input-posts-toggle').checked : true;
         const showTensions = document.getElementById('input-tensions-toggle') ? document.getElementById('input-tensions-toggle').checked : false;
-        const showGrass = document.getElementById('input-grass-toggle') ? document.getElementById('input-grass-toggle').checked : true;
         const showFurniture = document.getElementById('input-furniture-toggle') ? document.getElementById('input-furniture-toggle').checked : true;
         const showWall = document.getElementById('input-wall-toggle') ? document.getElementById('input-wall-toggle').checked : true;
         
@@ -1284,7 +2365,7 @@
         // ניקוי מלא למניעת זליגת זיכרון וקריסה
         clearGroup(pergolaGroup);
         fans = []; labelPoints = [];
-        floor.visible = showGrass;
+        applyEnvironmentLook();
 
         const notchW = isLShapeExt ? Math.min(Math.max(0, lW), Math.max(0, L - 0.2)) : 0;
         const notchD = isLShapeExt ? Math.min(Math.max(0, lD), Math.max(0, W - 0.2)) : 0;
@@ -1306,9 +2387,10 @@
                 cxProt = L / 2 - notchW / 2;
             }
         }
+        rebuildEnvScenery(L, W, hasLNotch, notchW, notchD, isLLeft, H);
 
         if (!hasLNotch) {
-            if (showWall) {
+            if (showWall && currentEnv !== 'balcony' && currentEnv !== 'garden' && currentEnv !== 'villa') {
                 const wall = createBox(L + 6, 6, 0.4, 0xffffff);
                 wall.position.set(0, 3, -W / 2 - 0.21);
                 pergolaGroup.add(wall);
@@ -1338,7 +2420,7 @@
                 addFrameProfileRibsAlongZ(pergolaGroup, frameColor, z0, z1, -L / 2, H, frameHeight, frameWidth, frameVisualMode);
             }
         } else {
-            if (showWall) {
+            if (showWall && currentEnv !== 'balcony' && currentEnv !== 'garden' && currentEnv !== 'villa') {
                 // בלי הרחבות ±6 / ±0.4 בציר X — כך קו פינת הבליטה בקיר תואם ל־depthX ולקורת החלוקה על קו המגרעת
                 const wallMain = createBox(Math.max(0.2, L - notchW), 6, 0.4, 0xffffff);
                 wallMain.position.set(cxMain, 3, -W / 2 - 0.21);
@@ -1598,22 +2680,12 @@
             }
             pos.needsUpdate = true;
             geom.computeVertexNormals();
-            const roofMat = new THREE.MeshPhysicalMaterial({
-                color: bhColor,
-                transparent: true,
-                opacity: 0.58,
-                roughness: 0.18,
-                metalness: 0.0,
-                transmission: 0.2,
-                clearcoat: 0.7,
-                clearcoatRoughness: 0.1,
-                side: THREE.DoubleSide,
-            });
+            const roofMat = createSantafMaterial(bhColor);
             const roof = new THREE.Mesh(geom, roofMat);
             roof.rotation.x = -Math.PI / 2;
             roof.position.set(0, santafPlaneY, roofZ);
             roof.castShadow = false;
-            roof.receiveShadow = true;
+            roof.receiveShadow = !isClearSantafColor(bhColor);
             pergolaGroup.add(roof);
             // פסי סנטף מעל קורות הצד (ימין/שמאל) — יושבים על הפרופיל מהצד; המישור המרכזי (חזית/אחור) לא משתנה
             if (!hasLNotch) {
@@ -1636,7 +2708,7 @@
                     sideRoof.rotation.x = -Math.PI / 2;
                     sideRoof.position.set(centerX, santafPlaneY, roofZ);
                     sideRoof.castShadow = false;
-                    sideRoof.receiveShadow = true;
+                    sideRoof.receiveShadow = !isClearSantafColor(bhColor);
                     pergolaGroup.add(sideRoof);
                 };
                 addSideStrip(L / 2 - frameWidth / 2);
@@ -1655,6 +2727,7 @@
         if (scrRight > 0) { const blind = createRollerBlind(W, maxDrop, scrRight, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(L/2 - frameWidth/2 - 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
         if (scrLeft > 0) { const blind = createRollerBlind(W, maxDrop, scrLeft, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(-L/2 + frameWidth/2 + 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
 
+        if(document.getElementById('side-front-toggle') && document.getElementById('side-front-toggle').checked) drawSideWall(0, W/2, L, document.getElementById('side-front-orient').value, counters.slatsFront, document.getElementById('side-front-type').value, false, frameHeight);
         if(document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked) drawSideWall(L/2, 0, W, document.getElementById('side-right-orient').value, counters.slatsRight, document.getElementById('side-right-type').value, true, frameHeight);
         if(document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked) drawSideWall(-L/2, 0, W, document.getElementById('side-left-orient').value, counters.slatsLeft, document.getElementById('side-left-type').value, true, frameHeight);
 
@@ -1670,6 +2743,84 @@
         updateLabels();
         
         if(document.getElementById('image-adjust-controls') && document.getElementById('image-adjust-controls').style.display === 'block') updateModelPosition();
+        if (window._liveCfgTimer) clearTimeout(window._liveCfgTimer);
+        window._liveCfgTimer = setTimeout(notifyParentLiveConfig, 160);
+    }
+
+    function colorToHex(n) {
+        var x = (Number(n) >>> 0) & 0xffffff;
+        var h = x.toString(16);
+        while (h.length < 6) h = '0' + h;
+        return '#' + h;
+    }
+
+    function collectLiveSimConfig() {
+        var postsOn = document.getElementById('input-posts-toggle');
+        var tensOn = document.getElementById('input-tensions-toggle');
+        var fanN = 0, ledN = 0;
+        (dividerStates || []).forEach(function (s) {
+            if (s && s.fan) fanN++;
+            if (s && s.led) ledN++;
+        });
+        var roofEl = document.getElementById('input-roof-type');
+        var roofVal = roofEl ? String(roofEl.value || '') : '';
+        var liveSantaf = !!window._extHasSantaf || roofVal === 'santafBH';
+        var vFrontEl = document.getElementById('input-vitrine-front');
+        var vRightEl = document.getElementById('input-vitrine-right');
+        var vLeftEl = document.getElementById('input-vitrine-left');
+        var glassEl = document.getElementById('input-glass');
+        var scrFrontEl = document.getElementById('input-scr-front');
+        var scrRightEl = document.getElementById('input-scr-right');
+        var scrLeftEl = document.getElementById('input-scr-left');
+        var scrColorEl = document.getElementById('input-screen-color');
+        var ledToneEl = document.getElementById('input-led-tone');
+        return {
+            postsFront: counters.postsFront || 0,
+            postsRight: counters.postsRight || 0,
+            postsLeft: counters.postsLeft || 0,
+            postsBack: counters.postsBack || 0,
+            hasPosts: postsOn ? !!postsOn.checked : true,
+            tensionerCount: counters.tension || 0,
+            hasTensioners: tensOn ? !!tensOn.checked : false,
+            dividers: counters.divider || 0,
+            dividerStates: (dividerStates || []).map(function (s) {
+                return { led: !!(s && s.led), fan: !!(s && s.fan) };
+            }),
+            hasFan: fanN > 0,
+            fanCount: fanN,
+            hasLed: ledN > 0,
+            ledCount: ledN,
+            hasSantaf: liveSantaf,
+            santafHex: window._extSantafHex != null
+                ? colorToHex(window._extSantafHex)
+                : (liveSantaf ? '#ffffff' : undefined),
+            vitrineFront: vFrontEl ? String(vFrontEl.value || 'none') : 'none',
+            vitrineRight: vRightEl ? String(vRightEl.value || 'none') : 'none',
+            vitrineLeft: vLeftEl ? String(vLeftEl.value || 'none') : 'none',
+            glassType: glassEl ? String(glassEl.value || 'clear') : 'clear',
+            scrFront: scrFrontEl ? parseFloat(scrFrontEl.value) || 0 : 0,
+            scrRight: scrRightEl ? parseFloat(scrRightEl.value) || 0 : 0,
+            scrLeft: scrLeftEl ? parseFloat(scrLeftEl.value) || 0 : 0,
+            screenColor: scrColorEl ? String(scrColorEl.value || 'black') : 'black',
+            env: currentEnv,
+            frameHex: colorToHex(frameColor),
+            slatHex: colorToHex(slatColor),
+            ledTone: ledToneEl && String(ledToneEl.value) === 'warm' ? 'warm' : 'white',
+            sideFrontOn: !!(document.getElementById('side-front-toggle') && document.getElementById('side-front-toggle').checked),
+            sideRightOn: !!(document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked),
+            sideLeftOn: !!(document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked),
+            slatsFront: counters.slatsFront || 0,
+            slatsRight: counters.slatsRight || 0,
+            slatsLeft: counters.slatsLeft || 0,
+        };
+    }
+
+    function notifyParentLiveConfig() {
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'simConfig', config: collectLiveSimConfig() }, '*');
+            }
+        } catch (e) {}
     }
 
     function updateLabels() {
@@ -1690,8 +2841,7 @@
     }
 
     function resetCamera() {
-        camera.position.set(12, 10, 12);
-        controls.target.set(0, 1.5, 0); controls.update();
+        applyEnvCamera();
     }
 
     var CAPTION_BAR_HEIGHT = 56;
@@ -1821,6 +2971,16 @@
             if (el) el.textContent = event.data.text || 'ירחי אלומיניום מפעל ייצור הסולל 3 חולון';
         } else if (event.data && event.data.type === 'applyExternalConfig') {
             applyExternalConfig(event.data.config || {});
+        } else if (event.data && event.data.type === 'requestSimConfig') {
+            try {
+                if (event.source) {
+                    event.source.postMessage({
+                        type: 'simConfig',
+                        reqId: event.data.reqId || null,
+                        config: collectLiveSimConfig()
+                    }, '*');
+                }
+            } catch (e) {}
         }
     });
 
