@@ -233,6 +233,11 @@ export default function LoginPage() {
                 אין לך חשבון? הרשמה
               </Link>
             </div>
+            <div className="text-center text-xs">
+              <Link href="/landing" className="font-semibold text-amber-300/90 hover:text-amber-200">
+                ← חזרה לדף הנחיתה
+              </Link>
+            </div>
             <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-white/10 bg-[#060910]/80 p-3.5">
               <input
                 type="checkbox"

@@ -47,8 +47,8 @@ export default function RegisterPage() {
 
   const buildWhatsAppMessage = () => {
     const planLabel =
-      selectedPlan === "monthly" ? "מסלול חודשי — 250 ₪ + מע\"מ"
-      : selectedPlan === "annual" ? "מסלול שנתי — 2,400 ₪ + מע\"מ"
+      selectedPlan === "monthly" ? "מסלול חודשי — 220 ₪ כולל מע\"מ"
+      : selectedPlan === "annual" ? "מסלול שנתי — 2,200 ₪ כולל מע\"מ"
       : "מסלול ניסיון — 7 ימים חינם";
     const paymentLabel = paymentMethod === "bank" ? "העברה בנקאית" : "ביט (Bit)";
     const lines = [
@@ -287,7 +287,7 @@ export default function RegisterPage() {
             }
           >
             <p className="mb-1 text-xs font-semibold tracking-wide text-amber-200">מסלול חודשי</p>
-            <p className="text-2xl font-extrabold text-white">250 ₪ + מע&quot;מ</p>
+            <p className="text-2xl font-extrabold text-white">220 ₪ כולל מע&quot;מ</p>
             <p className="mt-1 text-sm font-medium text-slate-300">ללא התחייבות שנתית.</p>
             {selectedPlan === "monthly" && (
               <p className="mt-3 text-sm font-semibold text-blue-300">נבחר ✓</p>
@@ -304,8 +304,8 @@ export default function RegisterPage() {
             }
           >
             <p className="mb-1 text-xs font-semibold tracking-wide text-emerald-200">מסלול שנתי משתלם</p>
-            <p className="text-2xl font-extrabold text-white">2,400 ₪ + מע&quot;מ</p>
-            <p className="mt-1 text-sm font-medium text-slate-300">משלמים על פחות מ-10 חודשים ומקבלים שנה מלאה.</p>
+            <p className="text-2xl font-extrabold text-white">2,200 ₪ כולל מע&quot;מ</p>
+            <p className="mt-1 text-sm font-medium text-slate-300">משלמים על 10 חודשים ומקבלים שנה מלאה (חודשיים מתנה).</p>
             {selectedPlan === "annual" && (
               <p className="mt-3 text-sm font-semibold text-blue-300">נבחר ✓</p>
             )}
@@ -524,11 +524,18 @@ export default function RegisterPage() {
             </button>
           </form>
 
-          <div className="mt-6 text-center text-sm text-slate-400">
-            כבר רשום?{" "}
-            <Link href="/login" className="font-bold text-blue-400 hover:underline">
-              מעבר להתחברות
-            </Link>
+          <div className="mt-6 text-center text-sm text-slate-400 space-y-2">
+            <div>
+              כבר רשום?{" "}
+              <Link href="/login" className="font-bold text-blue-400 hover:underline">
+                מעבר להתחברות
+              </Link>
+            </div>
+            <div>
+              <Link href="/landing" className="font-semibold text-amber-300/90 hover:text-amber-200">
+                ← חזרה לדף הנחיתה
+              </Link>
+            </div>
           </div>
         </div>
       </div>

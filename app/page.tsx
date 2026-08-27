@@ -495,6 +495,7 @@ const PERGOLA_IDS = [
 
 /** שער ללא useSearchParams – מונע תקיעת Suspense לפני אתחול Auth (Next.js) */
 function HomeGate() {
+  const router = useRouter();
   const {
     isLoggedIn,
     hasAcceptedTerms,
@@ -512,7 +513,14 @@ function HomeGate() {
   const accountEmail = supabaseUser?.email ?? firebaseUser?.email ?? null;
   const hasCloudAccount = Boolean(supabaseUser || firebaseUser);
 
-  if (!authReady || (isLoggedIn && profileLoading)) {
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isLoggedIn) {
+      router.replace("/landing");
+    }
+  }, [authReady, isLoggedIn, router]);
+
+  if (!authReady || (isLoggedIn && profileLoading) || !isLoggedIn) {
     const isDev = process.env.NODE_ENV === "development";
     return (
       <main
@@ -526,9 +534,11 @@ function HomeGate() {
         />
         <p className="text-xl font-bold">טוען…</p>
         <p className="text-sm text-slate-400 text-center max-w-sm leading-relaxed">
-          {isLoggedIn && profileLoading
-            ? "טוען את פרטי החשבון מהענן…"
-            : "מאמתים התחברות…"}
+          {!isLoggedIn && authReady
+            ? "מעביר לדף הנחיתה…"
+            : isLoggedIn && profileLoading
+              ? "טוען את פרטי החשבון מהענן…"
+              : "מאמתים התחברות…"}
         </p>
         {isDev && (
           <p className="text-xs text-slate-500 text-center max-w-md leading-relaxed border border-slate-700 rounded-xl px-4 py-2 bg-slate-800/50">
@@ -596,51 +606,27 @@ function HomeGate() {
     );
   }
 
-  if (!isLoggedIn || !hasAcceptedTerms) {
-    if (isLoggedIn && !hasAcceptedTerms && hasCloudAccount) {
-      return (
-        <main className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-6" dir="rtl">
-          <div className="w-full max-w-xl rounded-3xl border border-amber-600/50 bg-slate-800/95 shadow-2xl p-8 md:p-10 text-center space-y-4">
-            <h1 className="text-2xl md:text-3xl font-black text-amber-300">מחובר – אבל אין אישור תקנון בענן</h1>
-            <p className="text-slate-200 text-sm leading-relaxed">
-              ההתחברות הצליחה, אבל כרגע לא ניתן להשלים את הגישה לחשבון.
-            </p>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              נסה להתנתק ולהתחבר שוב בעוד רגע. אם הבעיה נמשכת, פנה לתמיכה.
-            </p>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 font-black text-white transition"
-            >
-              התנתק ונסה שוב
-            </button>
-            <Link href="/login" className="block text-blue-300 font-bold hover:underline">
-              מעבר לדף התחברות
-            </Link>
-          </div>
-        </main>
-      );
-    }
+  if (isLoggedIn && !hasAcceptedTerms) {
     return (
       <main className="min-h-screen bg-slate-900 text-white flex items-center justify-center p-6" dir="rtl">
-        <div className="w-full max-w-2xl rounded-3xl border border-slate-700 bg-slate-800/90 shadow-2xl p-8 md:p-10 text-center">
-          <h1 className="text-4xl md:text-5xl font-black text-blue-400 mb-3">Yarhi Pro</h1>
-          <p className="text-slate-200 text-lg md:text-xl font-bold mb-2">גישה למערכת מותנית בהרשמה / התחברות ואישור תקנון מחייב</p>
-          <p className="text-slate-400 text-sm md:text-base mb-8">ללא השלמת התהליך לא ניתן להמשיך לתוכנה.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Link href="/login" className="py-3 rounded-xl bg-blue-600 hover:bg-blue-700 transition font-black">
-              🔐 התחברות
-            </Link>
-            <Link href="/register" className="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 transition font-black">
-              📝 הרשמה
-            </Link>
-          </div>
-          <div className="mt-4">
-            <Link href="/terms" target="_blank" className="text-blue-300 underline hover:no-underline font-bold">
-              צפייה בתקנון המחייב
-            </Link>
-          </div>
+        <div className="w-full max-w-xl rounded-3xl border border-amber-600/50 bg-slate-800/95 shadow-2xl p-8 md:p-10 text-center space-y-4">
+          <h1 className="text-2xl md:text-3xl font-black text-amber-300">מחובר – אבל אין אישור תקנון בענן</h1>
+          <p className="text-slate-200 text-sm leading-relaxed">
+            ההתחברות הצליחה, אבל כרגע לא ניתן להשלים את הגישה לחשבון.
+          </p>
+          <p className="text-slate-400 text-xs leading-relaxed">
+            נסה להתנתק ולהתחבר שוב בעוד רגע. אם הבעיה נמשכת, פנה לתמיכה.
+          </p>
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-700 font-black text-white transition"
+          >
+            התנתק ונסה שוב
+          </button>
+          <Link href="/login" className="block text-blue-300 font-bold hover:underline">
+            מעבר לדף התחברות
+          </Link>
         </div>
       </main>
     );
