@@ -64,6 +64,23 @@ const PATH_BODY: Record<ProfileIconKey, ReactNode> = {
       <path d="M15 35h10v5H15z" />
     </>
   ),
+  "fence-spacer": <path d="M2 18h10V8h24v10h10" />,
+  "fence-post": (
+    <>
+      <path d="M4 6h12v4H10v18h6v6H4V26h4V14H4V6z" />
+      <path d="M28 6h12v8h-4v12h4v6H28v-6h6V14h-6V6z" />
+      <rect x="16" y="10" width="12" height="24" />
+      <path d="M8 2v4M36 2v4" />
+      <circle cx="9" cy="16" r="1.3" />
+      <circle cx="9" cy="24" r="1.3" />
+      <circle cx="35" cy="16" r="1.3" />
+      <circle cx="35" cy="24" r="1.3" />
+      <rect x="6" y="38" width="8" height="8" />
+      <rect x="30" y="38" width="8" height="8" />
+      <path d="M18 40h3v5h-3zM23 40h3v5h-3z" />
+    </>
+  ),
+  "fence-zigzag": <path d="M2 16V4h10v12h10V4h10v12h10V4h4" />,
 };
 
 /**

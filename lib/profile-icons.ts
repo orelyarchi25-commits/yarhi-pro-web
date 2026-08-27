@@ -20,7 +20,10 @@ export type ProfileIconKey =
   | "t-beam-100"
   | "t-beam-120"
   | "t-led-100"
-  | "t-led-120";
+  | "t-led-120"
+  | "fence-spacer"
+  | "fence-post"
+  | "fence-zigzag";
 
 const SVG_ATTR =
   'xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -104,6 +107,21 @@ const PATHS: Record<ProfileIconKey, { viewBox: string; body: string }> = {
     viewBox: "0 0 40 52",
     body: `<rect x="12" y="2" width="16" height="40"/><path d="M2 42h36"/><path d="M12 34h16"/><path d="M15 35h10v5H15z"/>`,
   },
+  // ספייסר לעמוד גדר השחלה (BTA9084) — כובע שטוח: גג מרכזי + כנפיים לצדדים
+  "fence-spacer": {
+    viewBox: "0 0 48 22",
+    body: `<path d="M2 18h10V8h24v10h10"/>`,
+  },
+  // עמוד גדר השחלה — תא מרכזי, תעלות צד עם נקבי בורג, סנפירים למעלה, תאים למטה
+  "fence-post": {
+    viewBox: "0 0 44 48",
+    body: `<path d="M4 6h12v4H10v18h6v6H4V26h4V14H4V6z"/><path d="M28 6h12v8h-4v12h4v6H28v-6h6V14h-6V6z"/><rect x="16" y="10" width="12" height="24"/><path d="M8 2v4M36 2v4"/><circle cx="9" cy="16" r="1.3"/><circle cx="9" cy="24" r="1.3"/><circle cx="35" cy="16" r="1.3"/><circle cx="35" cy="24" r="1.3"/><rect x="6" y="38" width="8" height="8"/><rect x="30" y="38" width="8" height="8"/><path d="M18 40h3v5h-3zM23 40h3v5h-3z"/>`,
+  },
+  // זיגזג אטום 120/20 — גל מרובע (3 שיאים / 2 עמקים)
+  "fence-zigzag": {
+    viewBox: "0 0 48 18",
+    body: `<path d="M2 16V4h10v12h10V4h10v12h10V4h4"/>`,
+  },
 };
 
 /** Map free-text profile labels from cutting/BOM tables to an icon key. */
@@ -128,10 +146,16 @@ export function resolveProfileIconKey(profileName: string): ProfileIconKey | nul
 
   if (/זווית\s*30|30\/30|30x30/.test(n)) return "angle-30";
 
+  // ספייסר גדר השחלה (BTA9084) — לפני עמודים
+  if (/ספייסר|BTA9084/.test(n)) return "fence-spacer";
+
+  // זיגזג אטום 120/20
+  if (/זיגזג/.test(n)) return "fence-zigzag";
+
   if (/(?:^|\s)(?:עמוד\s*)?130[\/x]130/.test(n) || /^130\/130$/.test(n)) return "post-130";
   if (/(?:^|\s)(?:עמוד\s*)?80[\/x]80/.test(n) || /^80\/80$/.test(n)) return "post-80";
   if (/(?:^|\s)(?:עמוד\s*)?100[\/x]100/.test(n) || /^100\/100$/.test(n)) return "post-100";
-  if (/עמוד\s*גדר/.test(n)) return "post-100";
+  if (/עמוד\s*גדר/.test(n)) return "fence-post";
 
   // לד לפני חציץ רגיל — "חציצים 120/40 לד" לא ייפול ל־t-beam
   if (/120\/40/.test(n) && /לד/.test(n)) return "t-led-120";
@@ -147,7 +171,15 @@ export function resolveProfileIconKey(profileName: string): ProfileIconKey | nul
   if (/פרופיל\s*חלק/.test(n) || (/120\/40\s*חלק/.test(n) && !/חציץ/.test(n))) return "l-wall-120";
   if (/100\/40\s*חלק/.test(n) && !/חציץ/.test(n)) return "rect-100-40";
 
-  // 20/xx — לא להתחיל באמצע מספר (מונע 120/40 → 20/40)
+  // מילוי גדר — כתיב גדר 100/20 / 70/20… (= אותו חתך כמו 20/100 בהצללה)
+  if (/מילוי/.test(n) || /(?:^|[^0-9])(?:100|70|40)[\/x]20([^0-9]|$)/.test(n)) {
+    if (/(?:^|[^0-9])100[\/x]20([^0-9]|$)/.test(n)) return "rect-20-100";
+    if (/(?:^|[^0-9])70[\/x]20([^0-9]|$)/.test(n)) return "rect-20-70";
+    if (/(?:^|[^0-9])40[\/x]20([^0-9]|$)/.test(n)) return "rect-20-40";
+  }
+  if (/מילוי/.test(n) && /(?:^|[^0-9])20[\/x]20([^0-9]|$)/.test(n)) return "rect-20-20";
+
+  // 20/xx הצללה / סנטף — לא להתחיל באמצע מספר (מונע 120/40 → 20/40)
   if (/(^|[^0-9])20[\/x]20([^0-9]|$)/.test(n)) return "rect-20-20";
   if (/(^|[^0-9])20[\/x]100([^0-9]|$)/.test(n)) return "rect-20-100";
   if (/(^|[^0-9])20[\/x]70([^0-9]|$)/.test(n) || /הצללה\s*20\/70/.test(n)) return "rect-20-70";

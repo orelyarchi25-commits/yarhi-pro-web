@@ -9,6 +9,7 @@ import FieldWindowsView from "@/app/components/FieldWindowsView";
 import ProductProjectBar from "@/app/components/ProductProjectBar";
 import ScheduleView from "@/app/components/ScheduleView";
 import { useAuth } from "@/components/AuthProvider";
+import { ProfileIcon } from "@/components/ProfileIcon";
 import { useSearchString } from "@/hooks/useSearchString";
 import { getFirebaseDb } from "@/lib/firebase";
 import { loadWorkspaceFromSupabase, saveWorkspaceToSupabase } from "@/lib/supabase-workspace";
@@ -99,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "wall-mount-v6";
+const SIM_VERSION = "fence-zigzag-v12";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {
@@ -6481,8 +6482,30 @@ ${logoBlock}
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 bg-slate-50">
                   <h3 className="text-lg font-bold mb-4 border-b border-slate-200 pb-2 text-slate-700">🧱 מפרט טכני</h3>
                   <div className="grid grid-cols-2 gap-3 mb-4">
-                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">שילוב פרופילים</label><select value={fenceSlat} onChange={(e) => setFenceSlat(e.target.value)} className="w-full border rounded-lg p-2 bg-white"><option value="100">רק 100/20</option><option value="70">רק 70/20</option><option value="40">רק 40/20</option><option value="20">רק 20/20</option><option value="mix1">מיקס: 2x40 ואז 1x70</option><option value="mix2">מיקס: 2x40, 2x20, 1x70</option></select></div>
-                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">מרווח (ס&quot;מ)</label><select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 bg-white"><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3</option></select></div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">שילוב פרופילים</label>
+                      <select value={fenceSlat} onChange={(e) => {
+                        const v = e.target.value;
+                        setFenceSlat(v);
+                        if (v === "zigzag") setFenceGap("0");
+                      }} className="w-full border rounded-lg p-2 bg-white">
+                        <option value="100">רק 100/20</option>
+                        <option value="70">רק 70/20</option>
+                        <option value="40">רק 40/20</option>
+                        <option value="20">רק 20/20</option>
+                        <option value="zigzag">זיגזג אטום 120/20</option>
+                        <option value="mix1">מיקס: 2x40 ואז 1x70</option>
+                        <option value="mix2">מיקס: 2x40, 2x20, 1x70</option>
+                      </select>
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-slate-600 font-semibold">
+                        <span className="inline-flex items-center gap-1"><ProfileIcon profileName="מילוי 100/20" className="w-4 h-5 text-slate-700" />100/20</span>
+                        <span className="inline-flex items-center gap-1"><ProfileIcon profileName="מילוי 70/20" className="w-4 h-5 text-slate-700" />70/20</span>
+                        <span className="inline-flex items-center gap-1"><ProfileIcon profileName="מילוי 40/20" className="w-4 h-5 text-slate-700" />40/20</span>
+                        <span className="inline-flex items-center gap-1"><ProfileIcon profileName="מילוי 20/20" className="w-4 h-5 text-slate-700" />20/20</span>
+                        <span className="inline-flex items-center gap-1"><ProfileIcon profileName="מילוי זיגזג אטום 120/20" className="w-5 h-4 text-slate-700" />זיגזג</span>
+                      </div>
+                    </div>
+                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">מרווח (ס&quot;מ)</label><select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 bg-white" disabled={fenceSlat === "zigzag"}><option value="0">0 (אטום)</option><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3</option></select>{fenceSlat === "zigzag" ? <p className="text-[10px] text-emerald-700 mt-1 font-semibold">זיגזג אטום — בלי מרווח בין שלבים</p> : null}</div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">גוון עמודים ומסגרת</label><select value={fenceColor} onChange={(e) => setFenceColor(e.target.value)} className="w-full border rounded-lg p-2 bg-white">{RAL_OPTIONS.map((o) => <option key={o} value={o}>{getRalLabel(o)}</option>)}</select></div>
@@ -6746,18 +6769,24 @@ ${logoBlock}
                     <div className="grid grid-cols-2 gap-2 mb-2">
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-600 mb-1">פרופילים</label>
-                        <select value={fenceSlat} onChange={(e) => setFenceSlat(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white">
+                        <select value={fenceSlat} onChange={(e) => {
+                          const v = e.target.value;
+                          setFenceSlat(v);
+                          if (v === "zigzag") setFenceGap("0");
+                        }} className="w-full border rounded-lg p-2 text-xs bg-white">
                           <option value="100">רק 100/20</option>
                           <option value="70">רק 70/20</option>
                           <option value="40">רק 40/20</option>
                           <option value="20">רק 20/20</option>
+                          <option value="zigzag">זיגזג אטום 120/20</option>
                           <option value="mix1">מיקס: 2x40 ואז 1x70</option>
                           <option value="mix2">מיקס: 2x40, 2x20, 1x70</option>
                         </select>
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-600 mb-1">מרווח</label>
-                        <select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white">
+                        <select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white" disabled={fenceSlat === "zigzag"}>
+                          <option value="0">0</option>
                           <option value="1">1</option>
                           <option value="1.5">1.5</option>
                           <option value="2">2</option>

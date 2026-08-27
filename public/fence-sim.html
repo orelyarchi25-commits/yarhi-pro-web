@@ -153,7 +153,7 @@
       let gateRightPivot = null;
       let gateOpen = false;
       let gateAngle = 0;
-      const GATE_OPEN_ANGLE = 1.52;
+      const GATE_OPEN_ANGLE = 1.35;
       const gateRaycaster = new THREE.Raycaster();
       const gatePointer = new THREE.Vector2();
       let gatePtrDown = null;
@@ -193,6 +193,65 @@
       const stepGeom = new THREE.BoxGeometry(1, 0.1, stepDepth);
       const spacerGeom = new THREE.BoxGeometry(0.03, 1, 0.015);
 
+      /** זיגזג אטום 120/20 — 3 שיאים בולטים, ניכר גם מרחוק */
+      function createZigzagSlat(widthM, heightM, colorHex) {
+        const group = new THREE.Group();
+        const bands = 5; // 3 בולטים + 2 שקועים
+        const bandH = Math.max(0.01, heightM / bands);
+        const deep = 0.095;
+        const shallow = 0.014;
+        const hex = hexToInt(colorHex);
+        const cr = (hex >> 16) & 255, cg = (hex >> 8) & 255, cb = hex & 255;
+        const isNearWhite = (cr * 0.299 + cg * 0.587 + cb * 0.114) > 220;
+        const baseCol = isNearWhite ? 0xe6eaef : hex;
+        // שקועים קצת כהים יותר — קונטרסט שרואים מרחוק
+        const recessCol = isNearWhite
+          ? 0xb8c0c8
+          : (Math.floor(cr * 0.72) << 16) | (Math.floor(cg * 0.72) << 8) | Math.floor(cb * 0.72);
+
+        for (let i = 0; i < bands; i++) {
+          const raised = i % 2 === 0;
+          const d = raised ? deep : shallow;
+          const mat = new THREE.MeshStandardMaterial({
+            color: raised ? baseCol : recessCol,
+            roughness: raised ? 0.36 : 0.55,
+            metalness: raised ? 0.32 : 0.18,
+          });
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(widthM, bandH * 0.992, d), mat);
+          mesh.position.set(0, -heightM / 2 + bandH * (i + 0.5), raised ? 0.01 : -0.02);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          group.add(mesh);
+        }
+        // קווי צל בצדדים — מדגישים את הגל
+        const edgeMat = new THREE.MeshStandardMaterial({
+          color: isNearWhite ? 0x9aa3ad : recessCol,
+          roughness: 0.5,
+          metalness: 0.25,
+        });
+        for (let i = 0; i < bands; i++) {
+          if (i % 2 !== 0) continue;
+          const lip = new THREE.Mesh(new THREE.BoxGeometry(widthM, Math.min(0.012, bandH * 0.22), deep + 0.008), edgeMat);
+          lip.position.set(0, -heightM / 2 + bandH * (i + 0.5) + bandH * 0.38, 0.012);
+          group.add(lip);
+          const lip2 = lip.clone();
+          lip2.position.y = -heightM / 2 + bandH * (i + 0.5) - bandH * 0.38;
+          group.add(lip2);
+        }
+        return group;
+      }
+
+      function placeSlatMesh(widthM, heightM, colorHex, slatProfile, midX, midY, midZ, yaw) {
+        if (slatProfile === "zigzag") {
+          const mesh = createZigzagSlat(widthM, heightM, colorHex);
+          placeOriented(mesh, midX, midY, midZ, yaw);
+          return mesh;
+        }
+        const step = createBox(widthM, heightM, stepDepth, colorHex, 1);
+        placeOriented(step, midX, midY, midZ, yaw);
+        return step;
+      }
+
       function clearFence() {
         if (fenceGroup) {
           scene.remove(fenceGroup);
@@ -205,6 +264,7 @@
       }
 
       function applyGateAngle() {
+        // פתיחה פנימה (לחצר, מול המצלמה = −Z)
         if (gateLeftPivot) gateLeftPivot.rotation.y = gateAngle;
         if (gateRightPivot) gateRightPivot.rotation.y = -gateAngle;
       }
@@ -219,114 +279,143 @@
         return mesh;
       }
 
-      function buildGateHandle(parent, x, y, towardZ) {
-        const metal = new THREE.MeshStandardMaterial({
-          color: 0x4b5563,
-          metalness: 0.82,
-          roughness: 0.22,
+      /** ידית דקורטיבית 20/40 — מבחוץ על מילוי הזיגזג, מבפנים חצי */
+      function buildGateHandles(parent, x, Hm, colorHex, faceOutZ) {
+        const barW = 0.04;
+        const barT = 0.02;
+        const standLen = 0.055;
+        const standSec = 0.016;
+        const faceZ = faceOutZ || 0.05;
+        const fullH = Math.min(Hm * 0.7, Math.max(0.55, Hm - 0.26));
+        const halfH = fullH * 0.5;
+        const midY = Hm * 0.52;
+
+        function addBar(yCenter, height, zSign, face) {
+          const zBar = zSign * (face + standLen + barT / 2);
+          const bar = markGateMesh(createBox(barW, height, barT, colorHex, 1));
+          bar.position.set(x, yCenter, zBar);
+          parent.add(bar);
+          const yTop = yCenter + height / 2 - 0.02;
+          const yBot = yCenter - height / 2 + 0.02;
+          [yTop, yBot].forEach(function (yy) {
+            const stub = markGateMesh(createBox(standSec, standSec, standLen, colorHex, 1));
+            stub.position.set(x, yy, zSign * (face + standLen / 2));
+            parent.add(stub);
+          });
+        }
+
+        // חוץ: ידית מלאה על פני הזיגזג
+        addBar(midY, fullH, 1, faceZ);
+        // פנים: חצי ידית
+        addBar(midY, halfH, -1, faceZ * 0.85);
+
+        const lockMat = new THREE.MeshStandardMaterial({
+          color: 0xc0c4c8,
+          metalness: 0.85,
+          roughness: 0.25,
         });
-        const plate = markGateMesh(new THREE.Mesh(new THREE.BoxGeometry(0.038, 0.24, 0.012), metal));
-        plate.position.set(x, y, towardZ * 0.048);
-        parent.add(plate);
-        const neck = markGateMesh(new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.014, 0.038), metal));
-        neck.position.set(x, y + 0.07, towardZ * 0.068);
-        parent.add(neck);
-        const grip = markGateMesh(new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.17, 12), metal));
-        grip.position.set(x, y - 0.01, towardZ * 0.088);
-        parent.add(grip);
-        const knob = markGateMesh(new THREE.Mesh(new THREE.SphereGeometry(0.02, 14, 12), metal));
-        knob.position.set(x, y - 0.1, towardZ * 0.088);
-        parent.add(knob);
-        const ring = markGateMesh(new THREE.Mesh(new THREE.TorusGeometry(0.026, 0.006, 8, 18), metal));
-        ring.rotation.y = Math.PI / 2;
-        ring.position.set(x, y + 0.055, towardZ * 0.07);
-        parent.add(ring);
+        const lock = markGateMesh(new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.018, 14), lockMat));
+        lock.rotation.x = Math.PI / 2;
+        lock.position.set(x + 0.03, midY, faceZ + 0.008);
+        parent.add(lock);
       }
 
       function buildEntranceGate(opts) {
         if (!fenceGroup || currentEnv === "garden") return;
         const Hcm = Math.max(80, Number(opts.Hcm || 0));
         const Hm = Hcm * CM_TO_M;
-        const gapCm = Number(opts.gapCm || 0);
-        const patternCm = getSlatPattern(opts.slatProfile);
+        const slatProfile = opts.slatProfile || "100";
+        const isZigzag = slatProfile === "zigzag";
+        const gapCm = isZigzag ? 0 : Number(opts.gapCm || 0);
+        const patternCm = getSlatPattern(slatProfile);
         const frameHex = opts.frameHex || "#555555";
         const slatHex = opts.slatHex || "#ffffff";
         const spacerHex = opts.spacerHex || frameHex;
         const g = GATE_M / 2;
-        const hingeInset = postWm / 2 + 0.012;
+        const hingeInset = postWm / 2 + 0.003;
         const hingeL = -g + hingeInset;
         const hingeR = g - hingeInset;
         const opening = Math.max(0.4, hingeR - hingeL);
-        const midGap = 0.018;
+        const midGap = 0.01;
         const leafW = (opening - midGap) / 2;
-        const stile = 0.042;
-        const rail = 0.038;
-        const leafDepth = postDepth * 0.92;
+        const stile = 0.04;
+        const rail = 0.035;
+        const leafDepth = postDepth * 0.95;
         const leaves = opts.leaves === "single" ? "single" : "double";
 
         gateRoot = new THREE.Group();
         gateRoot.position.set(0, 0, 0.01);
         fenceGroup.add(gateRoot);
 
-        function fillLeaf(pivot, sign, width) {
-          const w = Math.max(0.2, width);
-          function addMesh(mesh, x, y, z) {
-            markGateMesh(mesh);
-            mesh.position.set(x, y, z);
-            pivot.add(mesh);
+        function addToPivot(pivot, mesh, x, y, z) {
+          markGateMesh(mesh);
+          mesh.position.set(x, y, z);
+          pivot.add(mesh);
+          if (mesh.isGroup) {
+            mesh.traverse(function (ch) {
+              if (ch.isMesh) markGateMesh(ch);
+            });
           }
-          addMesh(createBox(stile, Hm, leafDepth, frameHex), sign * (stile / 2), Hm / 2, 0);
-          addMesh(createBox(stile, Hm, leafDepth, frameHex), sign * (w - stile / 2), Hm / 2, 0);
-          const railW = Math.max(0.02, w - stile);
-          addMesh(createBox(railW, rail, leafDepth, frameHex), sign * (w / 2), rail / 2 + 0.018, 0);
-          addMesh(createBox(railW, rail, leafDepth, frameHex), sign * (w / 2), Hm - rail / 2, 0);
+        }
 
-          const innerW = Math.max(0.02, w - stile * 2 - 0.004);
-          const netHcm = Math.max(0, Hcm - rail / CM_TO_M * 2 - 1.5);
-          const bottomOffsetCm = (rail / CM_TO_M) + 1.1;
+        function fillLeaf(pivot, sign, width) {
+          const w = Math.max(0.25, width);
+          // משקופים אנכיים + אופקיים — מסגרת מלאה
+          addToPivot(pivot, createBox(stile, Hm, leafDepth, frameHex), sign * (stile / 2), Hm / 2, 0);
+          addToPivot(pivot, createBox(stile, Hm, leafDepth, frameHex), sign * (w - stile / 2), Hm / 2, 0);
+          const railW = Math.max(0.02, w - stile * 2);
+          addToPivot(pivot, createBox(railW, rail, leafDepth, frameHex), sign * (w / 2), rail / 2, 0);
+          addToPivot(pivot, createBox(railW, rail, leafDepth, frameHex), sign * (w / 2), Hm - rail / 2, 0);
+
+          // מילוי ממלא בדיוק בין המשקופים (מרכז העלה)
+          const innerW = Math.max(0.05, w - stile * 2 + 0.004);
+          const midX = sign * (w / 2);
+          const railCm = rail / CM_TO_M;
+          const netHcm = isZigzag ? Math.max(0, Hcm - 1.5) : Math.max(0, Hcm - 1.5 - railCm * 2);
+          const bottomOffsetCm = isZigzag ? 0.75 : railCm;
           let cumulativeCm = 0;
           let stepIndex = 0;
           const steps = [];
           while (true) {
             const tCm = patternCm[stepIndex % patternCm.length];
-            if (cumulativeCm + tCm > netHcm) break;
-            const centerCm = bottomOffsetCm + cumulativeCm + tCm / 2;
-            steps.push({ tCm, centerCm });
+            if (cumulativeCm + tCm > netHcm + 1e-9) break;
+            steps.push({ tCm, centerCm: bottomOffsetCm + cumulativeCm + tCm / 2 });
             cumulativeCm += tCm + Math.max(0, gapCm);
             stepIndex++;
           }
-          const midX = sign * (w / 2);
           steps.forEach(function (st) {
             const h = st.tCm * CM_TO_M;
             const y = st.centerCm * CM_TO_M;
-            addMesh(createBox(innerW, h, stepDepth, slatHex, 1), midX, y, 0);
+            if (isZigzag) {
+              addToPivot(pivot, createZigzagSlat(innerW, h, slatHex), midX, y, 0);
+            } else {
+              addToPivot(pivot, createBox(innerW, h, stepDepth, slatHex, 1), midX, y, 0);
+            }
           });
           if (steps.length >= 2 && gapCm > 0) {
             const spacerH = Math.max(0.005, gapCm * CM_TO_M);
             for (let i = 0; i < steps.length - 1; i++) {
               const sy = ((steps[i].centerCm + steps[i + 1].centerCm) / 2) * CM_TO_M;
-              addMesh(createBox(0.018, spacerH, 0.03, spacerHex, 1), sign * (stile + 0.012), sy, 0);
-              addMesh(createBox(0.018, spacerH, 0.03, spacerHex, 1), sign * (w - stile - 0.012), sy, 0);
+              addToPivot(pivot, createBox(0.016, spacerH, 0.028, spacerHex, 1), sign * (stile + 0.01), sy, 0);
+              addToPivot(pivot, createBox(0.016, spacerH, 0.028, spacerHex, 1), sign * (w - stile - 0.01), sy, 0);
             }
           }
-          const hinge = markGateMesh(new THREE.Mesh(
-            new THREE.CylinderGeometry(0.012, 0.012, 0.08, 10),
-            new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.7, roughness: 0.3 })
-          ));
-          hinge.position.set(0, Hm * 0.22, 0);
-          pivot.add(hinge);
-          const hinge2 = hinge.clone();
-          hinge2.position.set(0, Hm * 0.78, 0);
-          markGateMesh(hinge2);
-          pivot.add(hinge2);
-          buildGateHandle(pivot, sign * (w - stile * 0.45), Math.min(1.02, Hm * 0.55), 1);
+          const hingeMat = new THREE.MeshStandardMaterial({ color: 0x374151, metalness: 0.7, roughness: 0.3 });
+          const hinge = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.08, 10), hingeMat);
+          addToPivot(pivot, hinge, 0, Hm * 0.22, 0);
+          const hinge2 = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.08, 10), hingeMat);
+          addToPivot(pivot, hinge2, 0, Hm * 0.78, 0);
+          // ידית על מילוי הזיגזג — ליד צד הפתיחה (לא באמצע, לא על המשקוף)
+          const handleX = sign * (w - stile - 0.08);
+          const zigFaceZ = isZigzag ? 0.055 : postDepth * 0.45;
+          buildGateHandles(pivot, handleX, Hm, frameHex, zigFaceZ);
         }
 
         if (leaves === "single") {
           gateLeftPivot = new THREE.Group();
           gateLeftPivot.position.set(hingeL, 0, 0);
           gateRoot.add(gateLeftPivot);
-          fillLeaf(gateLeftPivot, 1, opening - 0.012);
+          fillLeaf(gateLeftPivot, 1, opening - 0.006);
           gateRightPivot = null;
         } else {
           gateLeftPivot = new THREE.Group();
@@ -340,6 +429,8 @@
           fillLeaf(gateRightPivot, -1, leafW);
         }
 
+        gateOpen = false;
+        gateAngle = 0;
         applyGateAngle();
       }
 
@@ -362,6 +453,7 @@
         if (slatProfile === "70") return [7];
         if (slatProfile === "40") return [4];
         if (slatProfile === "20") return [2];
+        if (slatProfile === "zigzag") return [12];
         if (slatProfile === "mix1") return [4, 4, 7];
         if (slatProfile === "mix2") return [4, 4, 2, 2, 7];
         return [1.0];
@@ -664,8 +756,9 @@
           return;
         }
         const segments = Array.isArray(config?.segments) ? config.segments : [];
-        const gapCm = Number(config?.gapCm ?? 0);
+        const gapCmRaw = Number(config?.gapCm ?? 0);
         const slatProfile = config?.slatProfile ?? "100";
+        const gapCm = slatProfile === "zigzag" ? 0 : gapCmRaw;
         const frameHex = config?.frameHex ?? "#555555";
         const slatHex = config?.slatHex ?? "#ffffff";
         const spacerHex = config?.spacerHex ?? frameHex;
@@ -732,8 +825,11 @@
           }
 
           if (fields > 0) {
+            // בגדר תמיד מורידים 1.5 ס״מ מגובה המילוי
             const netHcm = Math.max(0, Hcm - 1.5);
             const bottomOffsetCm = 0.75;
+            // מילוי נכנס לחריץ העמוד (~1 ס״מ מכל צד) — בלי רווח בין מילוי לעמוד
+            const insertM = slatProfile === "zigzag" ? 0.012 : 0.008;
 
             for (let f = 0; f < fields; f++) {
               const leftPost = postCenters[f];
@@ -746,7 +842,7 @@
 
               while (true) {
                 const tCm = patternCm[stepIndex % patternCm.length];
-                if (cumulativeCm + tCm > netHcm) break;
+                if (cumulativeCm + tCm > netHcm + 1e-9) break;
                 const centerCm = bottomOffsetCm + cumulativeCm + tCm / 2;
                 steps.push({ tCm, centerCm });
                 cumulativeCm += tCm + Math.max(0, gapCm);
@@ -755,15 +851,14 @@
 
               const dist = Math.hypot(rightPost.x - leftPost.x, rightPost.z - leftPost.z);
               const clearWidthM = Math.max(0, dist - postWm);
-              const w = Math.max(0.001, clearWidthM - 0.002);
+              const w = Math.max(0.001, clearWidthM + insertM * 2);
               const midX = (leftPost.x + rightPost.x) / 2;
               const midZ = (leftPost.z + rightPost.z) / 2;
 
               steps.forEach((st) => {
                 const h = st.tCm * CM_TO_M;
                 const y = st.centerCm * CM_TO_M;
-                const step = createBox(w, h, stepDepth, slatHex, 1);
-                placeOriented(step, midX, y, midZ, yaw);
+                placeSlatMesh(w, h, slatHex, slatProfile, midX, y, midZ, yaw);
               });
 
               if (steps.length >= 2 && gapCm > 0) {
@@ -1125,7 +1220,7 @@
       function animate() {
         requestAnimationFrame(animate);
         const target = gateOpen ? GATE_OPEN_ANGLE : 0;
-        gateAngle += (target - gateAngle) * 0.14;
+        gateAngle += (target - gateAngle) * 0.18;
         if (Math.abs(target - gateAngle) < 0.004) gateAngle = target;
         applyGateAngle();
         if (controls) controls.update();

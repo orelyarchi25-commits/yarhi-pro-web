@@ -9,7 +9,7 @@ import {
   type ShareSimPayload,
 } from "@/lib/share-sim";
 
-const SIM_REV = "fence-flex-v2";
+const SIM_REV = "fence-zigzag-v12";
 
 function pergolaIframeSrc(p: SharePergolaConfig): string {
   const params = new URLSearchParams();

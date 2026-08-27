@@ -73,6 +73,8 @@ function getPatFence(v: string): { w: number; wt: number; n: string }[] {
   if (v === "70") return [{ w: 7, wt: 2.8, n: "70/20" }];
   if (v === "40") return [{ w: 4, wt: 2.4, n: "40/20" }];
   if (v === "20") return [{ w: 2, wt: 1.8, n: "20/20" }];
+  // זיגזג אטום 120/20 — רוחב פנים 12 ס״מ, 5.6 ק״ג למוט 6 מ׳
+  if (v === "zigzag") return [{ w: 12, wt: 5.6, n: "זיגזג אטום 120/20" }];
   if (v === "mix1") return [{ w: 4, wt: 2.4, n: "40/20" }, { w: 4, wt: 2.4, n: "40/20" }, { w: 7, wt: 2.8, n: "70/20" }];
   if (v === "mix2") return [{ w: 4, wt: 2.4, n: "40/20" }, { w: 4, wt: 2.4, n: "40/20" }, { w: 2, wt: 1.8, n: "20/20" }, { w: 2, wt: 1.8, n: "20/20" }, { w: 7, wt: 2.8, n: "70/20" }];
   return [{ w: 10, wt: 4.5, n: "100/20" }];
@@ -783,11 +785,13 @@ function fenceSlatDisplayLabels(slatT: string): { slatProfileLabel: string; slat
           ? "40/20"
           : slatT === "20"
             ? "20/20"
-            : slatT === "mix1"
-              ? "40/20+70/20"
-              : slatT === "mix2"
-                ? "40/20+20/20+70/20"
-                : slatT || "-";
+            : slatT === "zigzag"
+              ? "זיגזג אטום 120/20"
+              : slatT === "mix1"
+                ? "40/20+70/20"
+                : slatT === "mix2"
+                  ? "40/20+20/20+70/20"
+                  : slatT || "-";
   const slatLabel =
     slatT === "100"
       ? "רק 100/20"
@@ -797,11 +801,13 @@ function fenceSlatDisplayLabels(slatT: string): { slatProfileLabel: string; slat
           ? "רק 40/20"
           : slatT === "20"
             ? "רק 20/20"
-            : slatT === "mix1"
-              ? "מיקס: 2x40 ואז 1x70"
-              : slatT === "mix2"
-                ? "מיקס: 2x40, 2x20, 1x70"
-                : "-";
+            : slatT === "zigzag"
+              ? "זיגזג אטום 120/20"
+              : slatT === "mix1"
+                ? "מיקס: 2x40 ואז 1x70"
+                : slatT === "mix2"
+                  ? "מיקס: 2x40, 2x20, 1x70"
+                  : "-";
   return { slatProfileLabel, slatLabel };
 }
 
@@ -828,8 +834,8 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
   basicQuoteExVat: number;
   vatAmount: number;
 } {
-  const gap = num(fence.fenceGap, 2);
   const slatT = str(fence.fenceSlat, "100");
+  const gap = slatT === "zigzag" ? 0 : num(fence.fenceGap, 2);
   const isGr = bool(fence.fenceInGround, false);
   const pCol = RAL_OPTIONS.includes(str(fence.fenceColor, "")) ? str(fence.fenceColor, "RAL 9016") : "לבן (9016)";
   const sCol = RAL_OPTIONS.includes(str(fence.fenceSlatColor, "")) ? str(fence.fenceSlatColor, "RAL 9016") : "לבן (9016)";
@@ -882,6 +888,7 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
     const inL = secs > 0 ? (s.L - pVal * POST_WIDTH_CM) / secs : 0; // אורך מורידים (עמוד×3.5 ס"מ), מחלקים במספר השדות
     const slCut = Math.floor(inL * 10) / 10; // בלי 1 ס״מ חופש, עיגול למטה לעשירית ס״מ (119.75 → 119.7)
     const pCut = isGr ? s.H + 40 : s.H - 1.5;
+    // בגדר תמיד מורידים 1.5 ס״מ מגובה (זיגזג: מרווח 0 → בגובה 100 נכנסים 8×12 ב־98.5)
     const netH = s.H - 1.5;
     let cH = 0;
     let pIdx = 0;
@@ -889,7 +896,7 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
     let totSInS = 0;
     while (true) {
       const pi = pat[pIdx % pat.length];
-      if (cH + pi.w > netH) break;
+      if (cH + pi.w > netH + 1e-9) break;
       sCnts[pi.n] = (sCnts[pi.n] || 0) + 1;
       totSInS++;
       cH += pi.w + gap;
@@ -904,7 +911,7 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
         addC(`מילוי ${n}`, slCut, q, pat.find((x) => x.n === n)!.wt, sCol);
         sSp += q * 2;
       });
-      addC("ספייסר קצר (מרווח)", gap, sSp, 1.5, sCol);
+      if (gap > 0) addC("ספייסר קצר (מרווח)", gap, sSp, 1.5, sCol);
     }
     const slatsDetail = Object.keys(sCnts).map((n) => `${sCnts[n]} יח' ${n}`).join(", ");
     insParts.push(`<div class="mb-4 pb-2 border-b"><strong class="text-blue-800">מקטע ${i + 1}${isContinue ? " (המשך באותו כיוון, עמוד משותף)" : isCorner90 ? " (צלע פינה 90°, עמוד משותף)" : ""}: אורך ${s.L}, גובה ${s.H}</strong><div class="text-sm mt-1">חולק ל-${secs} שדות (${pVal} עמודים${sharesCorner ? `, מתוכם ${postsAdded} חדשים` : ""}). חיתוך שלבים: <span class="font-bold text-blue-600">${slCut.toFixed(1)}</span> ס"מ. ברוטו עמוד: ${pCut.toFixed(1)} ס"מ.<br><span class="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded mt-1 inline-block">בכל שדה: ${slatsDetail} (סה"כ ${totSInS} שלבים לשדה).</span></div></div>`);
@@ -914,7 +921,13 @@ function calcFence(fence: FenceInput, settings?: FenceSettings | null, vatRate: 
   const pKg = settings ? num(settings.pricePerKg, 35) : 35;
   Object.values(gCuts).forEach((c) => {
     cutStr += `<tr><td class="p-2 border">${profileNameWithIconHtml(c.n)} <span class="text-[10px] text-slate-500 mr-1">(${c.c})</span></td><td class="p-2 border text-center font-bold text-blue-600">X ${c.q}</td><td class="p-2 border text-center font-black">${c.l.toFixed(1)}</td></tr>`;
-    const nm = c.n.includes("ספייסר") ? "פרופיל ספייסר" : c.n.includes("עמוד") ? "עמוד גדר" : c.n.split(" ")[0] + " " + c.n.split(" ")[1];
+    const nm = c.n.includes("ספייסר")
+      ? "פרופיל ספייסר"
+      : c.n.includes("עמוד")
+        ? "עמוד גדר"
+        : c.n.includes("מילוי")
+          ? c.n
+          : c.n.split(" ")[0] + " " + c.n.split(" ")[1];
     for (const part of optimizeCuttingParts(c.l, c.q, { 6: c.w })) {
       if (part.qty > 0) raw.push({ n: nm, color: c.c, ...part });
     }
