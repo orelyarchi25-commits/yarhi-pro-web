@@ -50,6 +50,19 @@ export type SharePergolaConfig = {
   scrRight?: number;
   scrLeft?: number;
   screenColor?: ShareScreenColor;
+  /** הצללות צד (שלבים) — נבחרות בהדמיה */
+  sideFrontOn?: boolean;
+  sideRightOn?: boolean;
+  sideLeftOn?: boolean;
+  sideFrontOrient?: "horizontal" | "vertical";
+  sideRightOrient?: "horizontal" | "vertical";
+  sideLeftOrient?: "horizontal" | "vertical";
+  sideFrontType?: string;
+  sideRightType?: string;
+  sideLeftType?: string;
+  slatsFront?: number;
+  slatsRight?: number;
+  slatsLeft?: number;
   /** רקע הדמיה: וילה / מרפסת / דירת גן */
   env?: "villa" | "balcony" | "garden";
 };
@@ -142,6 +155,29 @@ export function appendPergolaShareUrlParams(params: URLSearchParams, p: SharePer
   if (typeof p.uWingWallRight === "number" && p.uWingWallRight > 0) params.set("uWingWallRight", String(p.uWingWallRight));
   if (p.uNotchDepthLeft !== undefined && p.uNotchDepthLeft !== "") params.set("uNotchDepthLeft", String(p.uNotchDepthLeft));
   if (p.uNotchDepthRight !== undefined && p.uNotchDepthRight !== "") params.set("uNotchDepthRight", String(p.uNotchDepthRight));
+  const sideOrient = (v: unknown): "horizontal" | "vertical" | "" =>
+    v === "vertical" || v === "horizontal" ? v : "";
+  if (p.sideFrontOn) {
+    params.set("sideFront", "1");
+    params.set("slatsFront", String(Math.max(0, Math.min(20, Number(p.slatsFront) || 12))));
+    const o = sideOrient(p.sideFrontOrient);
+    if (o) params.set("sideFrontOrient", o);
+    if (p.sideFrontType) params.set("sideFrontType", String(p.sideFrontType));
+  }
+  if (p.sideRightOn) {
+    params.set("sideRight", "1");
+    params.set("slatsRight", String(Math.max(0, Math.min(20, Number(p.slatsRight) || 12))));
+    const o = sideOrient(p.sideRightOrient);
+    if (o) params.set("sideRightOrient", o);
+    if (p.sideRightType) params.set("sideRightType", String(p.sideRightType));
+  }
+  if (p.sideLeftOn) {
+    params.set("sideLeft", "1");
+    params.set("slatsLeft", String(Math.max(0, Math.min(20, Number(p.slatsLeft) || 12))));
+    const o = sideOrient(p.sideLeftOrient);
+    if (o) params.set("sideLeftOrient", o);
+    if (p.sideLeftType) params.set("sideLeftType", String(p.sideLeftType));
+  }
 }
 
 export type LiveSimConfig = Partial<
@@ -170,6 +206,18 @@ export type LiveSimConfig = Partial<
     | "scrRight"
     | "scrLeft"
     | "screenColor"
+    | "sideFrontOn"
+    | "sideRightOn"
+    | "sideLeftOn"
+    | "sideFrontOrient"
+    | "sideRightOrient"
+    | "sideLeftOrient"
+    | "sideFrontType"
+    | "sideRightType"
+    | "sideLeftType"
+    | "slatsFront"
+    | "slatsRight"
+    | "slatsLeft"
     | "env"
     | "frameHex"
     | "slatHex"
@@ -278,6 +326,36 @@ export function mergePergolaShareWithLive(base: SharePergolaConfig, live: LiveSi
     ...(liveFrame ? { frameHex: liveFrame } : {}),
     ...(liveSlat ? { slatHex: liveSlat } : {}),
     ledTone: live.ledTone === "warm" || live.ledTone === "white" ? live.ledTone : base.ledTone,
+    sideFrontOn: live.sideFrontOn === true || !!base.sideFrontOn,
+    sideRightOn: live.sideRightOn === true || !!base.sideRightOn,
+    sideLeftOn: live.sideLeftOn === true || !!base.sideLeftOn,
+    sideFrontOrient:
+      live.sideFrontOrient === "vertical" || live.sideFrontOrient === "horizontal"
+        ? live.sideFrontOrient
+        : base.sideFrontOrient,
+    sideRightOrient:
+      live.sideRightOrient === "vertical" || live.sideRightOrient === "horizontal"
+        ? live.sideRightOrient
+        : base.sideRightOrient,
+    sideLeftOrient:
+      live.sideLeftOrient === "vertical" || live.sideLeftOrient === "horizontal"
+        ? live.sideLeftOrient
+        : base.sideLeftOrient,
+    sideFrontType: (live.sideFrontType && String(live.sideFrontType)) || base.sideFrontType,
+    sideRightType: (live.sideRightType && String(live.sideRightType)) || base.sideRightType,
+    sideLeftType: (live.sideLeftType && String(live.sideLeftType)) || base.sideLeftType,
+    slatsFront: Math.max(
+      0,
+      Math.min(20, Number(live.slatsFront) || base.slatsFront || 12)
+    ),
+    slatsRight: Math.max(
+      0,
+      Math.min(20, Number(live.slatsRight) || base.slatsRight || 12)
+    ),
+    slatsLeft: Math.max(
+      0,
+      Math.min(20, Number(live.slatsLeft) || base.slatsLeft || 12)
+    ),
   };
 }
 

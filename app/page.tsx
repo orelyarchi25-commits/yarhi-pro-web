@@ -100,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "pergola-u-trap-v17";
+const SIM_VERSION = "pergola-u-trap-v18";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {

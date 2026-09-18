@@ -1036,6 +1036,18 @@
             if (p.has('sr')) cfg.scrRight = Number(p.get('sr'));
             if (p.has('sl')) cfg.scrLeft = Number(p.get('sl'));
             if (p.get('env')) cfg.env = p.get('env');
+            if (p.has('sideFront')) cfg.sideFrontOn = p.get('sideFront') === '1' || p.get('sideFront') === 'true';
+            if (p.has('sideRight')) cfg.sideRightOn = p.get('sideRight') === '1' || p.get('sideRight') === 'true';
+            if (p.has('sideLeft')) cfg.sideLeftOn = p.get('sideLeft') === '1' || p.get('sideLeft') === 'true';
+            if (p.get('sideFrontOrient')) cfg.sideFrontOrient = p.get('sideFrontOrient');
+            if (p.get('sideRightOrient')) cfg.sideRightOrient = p.get('sideRightOrient');
+            if (p.get('sideLeftOrient')) cfg.sideLeftOrient = p.get('sideLeftOrient');
+            if (p.get('sideFrontType')) cfg.sideFrontType = p.get('sideFrontType');
+            if (p.get('sideRightType')) cfg.sideRightType = p.get('sideRightType');
+            if (p.get('sideLeftType')) cfg.sideLeftType = p.get('sideLeftType');
+            if (p.has('slatsFront')) cfg.slatsFront = Number(p.get('slatsFront'));
+            if (p.has('slatsRight')) cfg.slatsRight = Number(p.get('slatsRight'));
+            if (p.has('slatsLeft')) cfg.slatsLeft = Number(p.get('slatsLeft'));
             applyExternalConfig(cfg);
         } catch (e) {}
     }
@@ -3599,6 +3611,12 @@
             sideFrontOn: !!(document.getElementById('side-front-toggle') && document.getElementById('side-front-toggle').checked),
             sideRightOn: !!(document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked),
             sideLeftOn: !!(document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked),
+            sideFrontOrient: (document.getElementById('side-front-orient') || {}).value || 'horizontal',
+            sideRightOrient: (document.getElementById('side-right-orient') || {}).value || 'horizontal',
+            sideLeftOrient: (document.getElementById('side-left-orient') || {}).value || 'horizontal',
+            sideFrontType: (document.getElementById('side-front-type') || {}).value || '20',
+            sideRightType: (document.getElementById('side-right-type') || {}).value || '20',
+            sideLeftType: (document.getElementById('side-left-type') || {}).value || '20',
             slatsFront: counters.slatsFront || 0,
             slatsRight: counters.slatsRight || 0,
             slatsLeft: counters.slatsLeft || 0,
