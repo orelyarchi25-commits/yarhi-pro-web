@@ -486,6 +486,19 @@ function mixShadeRowUnits(nRows: number): { qty70: number; qty40: number } {
   return { qty70: rows, qty40: rows * 2 };
 }
 
+/** תווית כמות למשולב: הפרדה ל-20/70 ול-20/40 (בלי «סטים») */
+function mixShadeQtyPlain(nRows: number): string {
+  const { qty70, qty40 } = mixShadeRowUnits(nRows);
+  if (nRows <= 0) return "—";
+  return `${qty70} יח' 20/70 · ${qty40} יח' 20/40`;
+}
+
+function mixShadeQtyHtml(nRows: number): string {
+  const { qty70, qty40 } = mixShadeRowUnits(nRows);
+  if (nRows <= 0) return '<span class="text-slate-400">—</span>';
+  return `<span class="text-blue-800 font-bold">${qty70} יח' 20/70</span><span class="text-slate-400 mx-1">·</span><span class="text-blue-800 font-bold">${qty40} יח' 20/40</span>`;
+}
+
 function mixShadeQtyTableCells(nRows: number): string {
   const { qty70, qty40 } = mixShadeRowUnits(nRows);
   if (nRows <= 0) {
@@ -585,11 +598,32 @@ function sketchTrapezoidFieldCards(
   const between = Math.max(8, cardFs * 0.55);
   const blocks: { lines: { text: string; fill: string }[]; linesCount: number }[] = [];
   if (fd.fullSlatCount > 0 && profile && cutLen > 0) {
-    blocks.push({ lines: sketchShadeSpecLines(profile, cutLen), linesCount: 2 });
-    blocks.push({ lines: [{ text: `${fd.fullSlatCount} יח'`, fill: "#1d4ed8" }], linesCount: 1 });
+    if (shadingP === "mix") {
+      blocks.push({ lines: sketchShadeSpecLines("משולב", cutLen), linesCount: 2 });
+      blocks.push({
+        lines: [
+          { text: `${fd.fullSlatCount} יח' 20/70`, fill: "#1d4ed8" },
+          { text: `${fd.fullSlatCount * 2} יח' 20/40`, fill: "#1d4ed8" },
+        ],
+        linesCount: 2,
+      });
+    } else {
+      blocks.push({ lines: sketchShadeSpecLines(profile, cutLen), linesCount: 2 });
+      blocks.push({ lines: [{ text: `${fd.fullSlatCount} יח'`, fill: "#1d4ed8" }], linesCount: 1 });
+    }
   }
   if (shortTotal > 0) {
-    blocks.push({ lines: [{ text: `${shortTotal} מקוצרים`, fill: "#dc2626" }], linesCount: 1 });
+    if (shadingP === "mix") {
+      blocks.push({
+        lines: [
+          { text: `${shortTotal} מקוצרים 20/70`, fill: "#dc2626" },
+          { text: `${shortTotal * 2} מקוצרים 20/40`, fill: "#dc2626" },
+        ],
+        linesCount: 2,
+      });
+    } else {
+      blocks.push({ lines: [{ text: `${shortTotal} מקוצרים`, fill: "#dc2626" }], linesCount: 1 });
+    }
   }
   if (blocks.length === 0) return "";
   const heights = blocks.map((b) => sketchFieldCardHeight(b.linesCount, cardFs));
@@ -1697,8 +1731,16 @@ type TrapezoidFieldDetail = {
   totalSlats: number;
 };
 
-function trapezoidShadeQtyText(fd: TrapezoidFieldDetail): string | undefined {
+function trapezoidShadeQtyText(fd: TrapezoidFieldDetail, shadingP?: string): string | undefined {
   const shortTotal = fd.shortSlats.reduce((s, x) => s + x.count, 0);
+  if (shadingP === "mix") {
+    const parts: string[] = [];
+    if (fd.fullSlatCount > 0) parts.push(`רגילים: ${mixShadeQtyPlain(fd.fullSlatCount)}`);
+    if (shortTotal > 0) parts.push(`מקוצרים: ${mixShadeQtyPlain(shortTotal)}`);
+    if (parts.length) return parts.join(" · ");
+    if (fd.totalSlats > 0) return mixShadeQtyPlain(fd.totalSlats);
+    return undefined;
+  }
   if (fd.fullSlatCount > 0 && shortTotal > 0) return `${fd.fullSlatCount} רגילים · ${shortTotal} מקוצרים`;
   if (fd.fullSlatCount > 0) return `${fd.fullSlatCount} רגילים`;
   if (shortTotal > 0) return `${shortTotal} מקוצרים`;
@@ -1860,6 +1902,10 @@ function trapezoidFieldDetailsTableHtml(
   shadingP: string,
   shortSideGlobal: string
 ): string {
+  if (fieldDetails.length === 0) return "";
+  const isMix = shadingP === "mix";
+  const singleProfile =
+    shadingP === "20x70" ? "20/70" : shadingP === "20x40" ? "20/40" : shadingP === "none" ? "" : "";
   const angleLens = fieldDetails.flatMap((f) => [f.angleLenLeft, f.angleLenRight]);
   const maxAngle = Math.max(...angleLens);
   const minAngle = Math.min(...angleLens);
@@ -1877,62 +1923,162 @@ function trapezoidFieldDetailsTableHtml(
     }
     return `שמ' ${fd.angleLenLeft.toFixed(1)}${angleNote(fd.angleLenLeft)} · ימ' ${fd.angleLenRight.toFixed(1)}${angleNote(fd.angleLenRight)}`;
   };
-  const unitLabel = shadingP === "mix" ? "סט" : "יח'";
-  const mixNote =
-    shadingP === "mix"
-      ? '<p class="text-xs text-slate-500 mt-1 mb-2">לכל שורה: 1 יח\' 20/70 + 2 יח\' 20/40</p>'
-      : "";
-  const rows = [...fieldDetails]
-    .sort((a, b) => a.index - b.index)
+
+  const sorted = [...fieldDetails].sort((a, b) => a.index - b.index);
+
+  // —— טבלה 1: שדות (מבנה + הצללה רגילה) ——
+  const fieldHead = isMix
+    ? `<th class="py-2 px-2 font-bold text-blue-800">מידה רגילה</th>
+       <th class="py-2 px-2 font-bold text-blue-800">כמות 20/70</th>
+       <th class="py-2 px-2 font-bold text-blue-800">כמות 20/40</th>`
+    : shadingP === "none"
+      ? ""
+      : `<th class="py-2 px-2 font-bold text-blue-800">מידה רגילה</th>
+         <th class="py-2 px-2 font-bold text-blue-800">כמות ${singleProfile}</th>`;
+
+  const fieldRows = sorted
     .map((fd) => {
-      const shortTotal = fd.shortSlats.reduce((s, x) => s + x.count, 0);
-      const regularCell =
-        fd.fullSlatCount > 0
-          ? `<span class="text-blue-700 font-bold">${fd.fullSlatCount} ${unitLabel}</span><div class="text-xs text-slate-500">אורך ${fd.fullSlatLen.toFixed(1)}</div>`
+      const shortN = fd.shortSlats.reduce((s, x) => s + x.count, 0);
+      const shortBadge =
+        shortN > 0
+          ? `<span class="text-red-700 font-bold">${shortN} מקוצרים ↓</span>`
           : '<span class="text-slate-400">—</span>';
-      const shortCell =
-        shortTotal > 0
-          ? fd.shortSlats
-              .map(
-                (s) =>
-                  `<span class="text-red-700 font-bold">${s.count}×${s.len.toFixed(1)}</span>`
-              )
-              .join(" · ") +
-            `<div class="text-xs text-red-600 mt-0.5">קיצור מצד ${fd.shortSide}</div>`
-          : '<span class="text-slate-400">—</span>';
-      return `<tr class="border-b border-slate-200 hover:bg-white/80">
-<td class="py-2 px-2 text-center font-bold text-slate-800">${fd.index}</td>
+      let shadeCells = "";
+      if (shadingP !== "none") {
+        if (fd.fullSlatCount > 0) {
+          if (isMix) {
+            const { qty70, qty40 } = mixShadeRowUnits(fd.fullSlatCount);
+            shadeCells = `<td class="py-2 px-2 text-center font-black">${fd.fullSlatLen.toFixed(1)}</td>
+<td class="py-2 px-2 text-center font-black text-blue-800">${qty70}</td>
+<td class="py-2 px-2 text-center font-black text-blue-800">${qty40}</td>`;
+          } else {
+            shadeCells = `<td class="py-2 px-2 text-center font-black">${fd.fullSlatLen.toFixed(1)}</td>
+<td class="py-2 px-2 text-center font-black text-blue-800">${fd.fullSlatCount}</td>`;
+          }
+        } else {
+          shadeCells = isMix
+            ? `<td class="py-2 px-2 text-center text-slate-400">—</td><td class="py-2 px-2 text-center text-slate-400">—</td><td class="py-2 px-2 text-center text-slate-400">—</td>`
+            : `<td class="py-2 px-2 text-center text-slate-400">—</td><td class="py-2 px-2 text-center text-slate-400">—</td>`;
+        }
+      }
+      return `<tr class="border-b border-slate-200">
+<td class="py-2 px-2 text-center font-black text-slate-900">${fd.index}</td>
 <td class="py-2 px-2 text-center">${fd.fieldNet.toFixed(1)}</td>
-<td class="py-2 px-2 text-center whitespace-nowrap text-sm">${formatAngles(fd)}</td>
+<td class="py-2 px-2 text-center text-sm whitespace-nowrap">${formatAngles(fd)}</td>
 <td class="py-2 px-2 text-center">${fd.divLenLeft.toFixed(1)}</td>
 <td class="py-2 px-2 text-center">${fd.divLenRight.toFixed(1)}</td>
-<td class="py-2 px-2 text-center text-sm">${regularCell}</td>
-<td class="py-2 px-2 text-center text-sm">${shortCell}</td>
+${shadeCells}
+<td class="py-2 px-2 text-center text-sm">${shortBadge}</td>
 </tr>`;
     })
     .join("");
-  const totalsFull = fieldDetails.reduce((s, f) => s + f.fullSlatCount, 0);
-  const totalsShort = fieldDetails.reduce((s, f) => s + f.shortSlats.reduce((a, x) => a + x.count, 0), 0);
-  const globalBuckets = new Map<number, number>();
-  fieldDetails.forEach((fd) => {
-    fd.allCutBuckets.forEach((b) => {
-      const len = isTrapezoidFullSlat(b.len, fd.fullSlatLen) ? fd.fullSlatLen : b.len;
-      globalBuckets.set(len, (globalBuckets.get(len) || 0) + b.count);
+
+  // —— טבלה 2: הצללות מקוצרות — מה לחתוך ——
+  type ShortCutRow = { field: number; profile: string; len: number; qty: number; side: string };
+  const shortCutRows: ShortCutRow[] = [];
+  sorted.forEach((fd) => {
+    fd.shortSlats.forEach((s) => {
+      if (isMix) {
+        shortCutRows.push({ field: fd.index, profile: "20/70", len: s.len, qty: s.count, side: fd.shortSide });
+        shortCutRows.push({ field: fd.index, profile: "20/40", len: s.len, qty: s.count * 2, side: fd.shortSide });
+      } else if (singleProfile) {
+        shortCutRows.push({ field: fd.index, profile: singleProfile, len: s.len, qty: s.count, side: fd.shortSide });
+      }
     });
   });
-  const inventoryRows = Array.from(globalBuckets.entries())
-    .sort((a, b) => b[0] - a[0])
-    .map(([len, qty]) => {
-      const isFull = fieldDetails.some((fd) => isTrapezoidFullSlat(len, fd.fullSlatLen));
-      const note = isFull ? ' <span class="text-xs text-blue-600">(רגיל)</span>' : ' <span class="text-xs text-red-600">(מקוצר)</span>';
-      return `<tr class="border-b border-indigo-100"><td class="py-1.5 px-2 text-center font-black">${len.toFixed(1)}${note}</td><td class="py-1.5 px-2 text-center font-bold text-indigo-700">X ${qty}</td></tr>`;
-    })
-    .join("");
-  return `<div class="w-full max-w-2xl mt-3" dir="rtl">
-<h4 class="text-sm font-bold text-slate-700 mb-2 text-center">פירוט לפי שדה — טרפז</h4>
-<p class="text-xs text-slate-500 mb-2 text-center">רגילה = אורך שבלונה מלא · מקוצרת = רק שלבים שקוצרים בגלל שיפוע החזית (לא סטייה של מילימטרים)</p>
+  const shortTable =
+    shadingP === "none"
+      ? ""
+      : shortCutRows.length === 0
+        ? `<div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center text-sm text-slate-500 mb-3">אין הצללות מקוצרות בפרויקט זה</div>`
+        : `<div class="overflow-x-auto rounded-lg border-2 border-red-200 bg-white shadow-sm mb-3">
+<h5 class="text-sm font-black text-red-800 text-center py-2 bg-red-50 border-b border-red-200">✂️ הצללות מקוצרות — מה לחתוך</h5>
+<p class="text-xs text-red-700/80 text-center px-2 py-1">קיצור לקראת חזית (${shortSideGlobal}) · לכל שורה: פרופיל + מידה + כמות</p>
+<table class="w-full text-sm border-collapse">
+<thead><tr class="bg-red-50 text-red-900 text-xs">
+<th class="py-2 px-2 font-bold">שדה</th>
+<th class="py-2 px-2 font-bold">פרופיל</th>
+<th class="py-2 px-2 font-bold">מידה לחיתוך (ס״מ)</th>
+<th class="py-2 px-2 font-bold">כמות</th>
+<th class="py-2 px-2 font-bold">צד קיצור</th>
+</tr></thead>
+<tbody>${shortCutRows
+            .map(
+              (r) => `<tr class="border-b border-red-100">
+<td class="py-2 px-2 text-center font-bold">${r.field}</td>
+<td class="py-2 px-2 text-center font-black text-slate-800">${r.profile}</td>
+<td class="py-2 px-2 text-center font-black text-red-800 text-base">${r.len.toFixed(1)}</td>
+<td class="py-2 px-2 text-center font-black text-emerald-700 text-lg">${r.qty}</td>
+<td class="py-2 px-2 text-center text-sm">${r.side}</td>
+</tr>`
+            )
+            .join("")}</tbody>
+</table>
+</div>`;
+
+  // —— טבלה 3: סיכום כל החיתוכים (רגיל + מקוצר) ——
+  type CutSum = { profile: string; len: number; qty: number; kind: "רגיל" | "מקוצר" };
+  const cutSum: CutSum[] = [];
+  sorted.forEach((fd) => {
+    if (fd.fullSlatCount > 0 && shadingP !== "none") {
+      if (isMix) {
+        cutSum.push({ profile: "20/70", len: fd.fullSlatLen, qty: fd.fullSlatCount, kind: "רגיל" });
+        cutSum.push({ profile: "20/40", len: fd.fullSlatLen, qty: fd.fullSlatCount * 2, kind: "רגיל" });
+      } else if (singleProfile) {
+        cutSum.push({ profile: singleProfile, len: fd.fullSlatLen, qty: fd.fullSlatCount, kind: "רגיל" });
+      }
+    }
+  });
+  shortCutRows.forEach((r) => {
+    cutSum.push({ profile: r.profile, len: r.len, qty: r.qty, kind: "מקוצר" });
+  });
+  // איחוד שורות זהות (אותו פרופיל+מידה+סוג)
+  const merged = new Map<string, CutSum>();
+  cutSum.forEach((c) => {
+    const key = `${c.profile}|${c.len.toFixed(1)}|${c.kind}`;
+    const prev = merged.get(key);
+    if (prev) prev.qty += c.qty;
+    else merged.set(key, { ...c });
+  });
+  const cutSumRows = Array.from(merged.values()).sort((a, b) => {
+    if (a.profile !== b.profile) return a.profile.localeCompare(b.profile);
+    if (a.kind !== b.kind) return a.kind === "רגיל" ? -1 : 1;
+    return b.len - a.len;
+  });
+  const cutSummaryTable =
+    shadingP === "none" || cutSumRows.length === 0
+      ? ""
+      : `<div class="overflow-x-auto rounded-lg border-2 border-indigo-300 bg-white shadow-sm mb-1">
+<h5 class="text-sm font-black text-indigo-900 text-center py-2 bg-indigo-50 border-b border-indigo-200">📋 סיכום לחיתוך — פרופיל · מידה · כמות</h5>
+<table class="w-full text-sm border-collapse">
+<thead><tr class="bg-indigo-100 text-indigo-900 text-xs">
+<th class="py-2 px-2 font-bold">פרופיל</th>
+<th class="py-2 px-2 font-bold">מידה (ס״מ)</th>
+<th class="py-2 px-2 font-bold">כמות</th>
+<th class="py-2 px-2 font-bold">סוג</th>
+</tr></thead>
+<tbody>${cutSumRows
+          .map(
+            (c) => `<tr class="border-b border-indigo-100 ${c.kind === "מקוצר" ? "bg-red-50/40" : ""}">
+<td class="py-2 px-2 text-center font-black">${c.profile}</td>
+<td class="py-2 px-2 text-center font-black text-base">${c.len.toFixed(1)}</td>
+<td class="py-2 px-2 text-center font-black text-emerald-700 text-xl">${c.qty}</td>
+<td class="py-2 px-2 text-center text-sm font-bold ${c.kind === "מקוצר" ? "text-red-700" : "text-blue-700"}">${c.kind}</td>
+</tr>`
+          )
+          .join("")}</tbody>
+</table>
+</div>`;
+
+  const mixNote = isMix
+    ? `<p class="text-xs text-slate-600 mb-2 text-center">משולב: בכל שורת הצללה = <strong>1× 20/70 + 2× 20/40</strong> · הכמויות בטבלאות כבר מופרדות לפי פרופיל</p>`
+    : "";
+
+  return `<div class="w-full max-w-3xl mt-3 space-y-1" dir="rtl">
+<h4 class="text-base font-black text-slate-800 mb-1 text-center">הצללה בטרפז — סדר עבודה</h4>
 ${mixNote}
 <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm mb-3">
+<h5 class="text-sm font-bold text-slate-700 text-center py-2 bg-slate-50 border-b">1) טבלת שדות</h5>
 <table class="w-full text-sm border-collapse">
 <thead><tr class="bg-slate-100 text-slate-600 text-xs">
 <th class="py-2 px-2 font-bold">שדה</th>
@@ -1940,27 +2086,14 @@ ${mixNote}
 <th class="py-2 px-2 font-bold">זווית 30/30</th>
 <th class="py-2 px-2 font-bold">חציץ שמ'</th>
 <th class="py-2 px-2 font-bold">חציץ ימ'</th>
-<th class="py-2 px-2 font-bold text-blue-700">רגילה</th>
-<th class="py-2 px-2 font-bold text-red-700">מקוצרת</th>
+${fieldHead}
+<th class="py-2 px-2 font-bold text-red-700">מקוצרים</th>
 </tr></thead>
-<tbody>${rows}</tbody>
-<tfoot><tr class="bg-slate-50 font-bold text-slate-700 text-xs">
-<td colspan="5" class="py-2 px-2 text-left">סה"כ · קיצור מצד ${shortSideGlobal} · ${fieldDetails.reduce((s, f) => s + f.totalSlats, 0)} שלבים</td>
-<td class="py-2 px-2 text-center text-blue-700">${totalsFull} ${unitLabel}</td>
-<td class="py-2 px-2 text-center text-red-700">${totalsShort} ${unitLabel}</td>
-</tr></tfoot>
+<tbody>${fieldRows}</tbody>
 </table>
 </div>
-<div class="overflow-x-auto rounded-lg border border-indigo-200 bg-indigo-50/50 shadow-sm">
-<h5 class="text-xs font-bold text-indigo-900 text-center py-2">הזמנה למחסן — סיכום כל המידות</h5>
-<table class="w-full text-sm border-collapse">
-<thead><tr class="bg-indigo-100 text-indigo-800 text-xs">
-<th class="py-2 px-2 font-bold">מידה (ס״מ)</th>
-<th class="py-2 px-2 font-bold">כמות</th>
-</tr></thead>
-<tbody>${inventoryRows || '<tr><td colspan="2" class="py-2 text-center text-slate-400">—</td></tr>'}</tbody>
-</table>
-</div>
+${shortTable}
+${cutSummaryTable}
 </div>`;
 }
 
@@ -2449,23 +2582,38 @@ function calcPergola(pergola: PergolaInput, settings?: PergolaSettings | null, v
         }
         rowLens.forEach((len) => cutBuckets.set(len, (cutBuckets.get(len) || 0) + 1));
         if (rowLens.length > 0) {
-          const { shortSlats } = summarizeTrapezoidFieldShades(rowLens, fieldNet);
+          const { fullSlatCount, fullSlatLen, shortSlats } = summarizeTrapezoidFieldShades(rowLens, fieldNet);
           const shortTotal = shortSlats.reduce((s, x) => s + x.count, 0);
-          const shortSideField = Math.abs(d1 - d0) < 1e-6 ? (yL >= yR ? "ימין" : "שמאל") : d0 > d1 ? "ימין" : "שמאל";
           const angleLeft = Math.round((d0 - 1.5) * 10) / 10;
           const angleRight = Math.round((d1 - 1.5) * 10) / 10;
           const angleTxt =
             Math.abs(angleLeft - angleRight) < 0.05
               ? `2× ${angleLeft.toFixed(1)} ס"מ`
               : `שמ' ${angleLeft.toFixed(1)} · ימ' ${angleRight.toFixed(1)} ס"מ`;
-          const shortDetail =
-            shortSlats.length > 0
-              ? shortSlats.map((s) => `${s.count}×${s.len.toFixed(1)}`).join(" · ")
-              : "";
-          const allBuckets = bucketTrapezoidRowLens(rowLens);
-          const allDetail = allBuckets.map((b) => `${b.count}×${b.len.toFixed(1)}`).join(" · ");
           const fieldNumRtl = allEdges.length - 1 - fi;
-          instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 mt-1 mb-1 w-full"><strong>שדה ${fieldNumRtl}</strong>: שבלונה ${fieldNet.toFixed(1)} ס"מ | ${rowLens.length} שלבים<br><span class="text-amber-800 font-bold">זווית 30/30: ${angleTxt}</span> · חציץ שמ' ${d0.toFixed(1)} / ימ' ${d1.toFixed(1)}<br><span class="text-slate-800 font-bold bg-white px-2 py-0.5 rounded mt-1 inline-block border border-slate-200">חיתוכים: ${allDetail}</span>${shortTotal > 0 ? `<br><span class="text-red-700 text-sm">מקוצרים לקראת חזית (${shortSideField}): ${shortDetail}</span>` : ""}</div>`;
+          const qtyLine =
+            shadingP === "mix"
+              ? mixShadeQtyPlain(rowLens.length)
+              : shadingP === "20x70"
+                ? `${rowLens.length} יח' 20/70`
+                : `${rowLens.length} יח' 20/40`;
+          const regularLine =
+            fullSlatCount > 0
+              ? shadingP === "mix"
+                ? `רגיל ${fullSlatLen.toFixed(1)}: ${mixShadeQtyPlain(fullSlatCount)}`
+                : `רגיל ${fullSlatLen.toFixed(1)}: ${fullSlatCount} יח'`
+              : "";
+          const shortLine =
+            shortTotal > 0
+              ? shortSlats
+                  .map((s) =>
+                    shadingP === "mix"
+                      ? `${s.len.toFixed(1)} ← ${mixShadeQtyPlain(s.count)}`
+                      : `${s.count}×${s.len.toFixed(1)}`
+                  )
+                  .join(" · ")
+              : "";
+          instructionsShades += `<div class="instruction-item text-indigo-800 font-bold bg-indigo-50 p-2 rounded border border-indigo-200 mt-1 mb-1 w-full"><strong>שדה ${fieldNumRtl}</strong>: שבלונה ${fieldNet.toFixed(1)} · ${qtyLine}<br><span class="text-amber-800 font-bold">זווית 30/30: ${angleTxt}</span>${regularLine ? `<br><span class="text-blue-800 text-sm">${regularLine}</span>` : ""}${shortLine ? `<br><span class="text-red-700 text-sm">מקוצרים: ${shortLine}</span>` : ""}</div>`;
         }
       }
       const pushBucketCuts = (profileLabel: string, purpose: string, qtyMul: number) => {

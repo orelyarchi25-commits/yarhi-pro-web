@@ -100,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "pergola-u-trap-v16";
+const SIM_VERSION = "pergola-u-trap-v17";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {
@@ -3483,27 +3483,127 @@ ${logoBlock}
   ]);
 
   const printFactoryReport = useCallback(() => {
-    const L = pergolaResult.L; const W = pergolaResult.W;
-    if (!L || !W) return showAlert("אנא הזן מידות לפני הדפסת דוח ייצור");
+    const L = pergolaResult.L;
+    const W = pergolaResult.W;
+    if (!L || !W) return showAlert("אנא הזן מידות לפני פתיחת סיכום ייצור");
     const w = window.open("", "_blank");
     if (!w) return showAlert("הדפדפן חסם את פתיחת החלון. אנא אשר חלונות קופצים.");
-    w.document.write(`
-      <html dir="rtl" lang="he"><head><title>דוח ייצור - ${custName || "לקוח"}</title>
-      <style>body{font-family:Assistant,sans-serif;padding:30px;direction:rtl;} table{width:100%;border-collapse:collapse;} th,td{border:1px solid #cbd5e1;padding:8px;text-align:center;} th{background:#f1f5f9;} td svg,th svg{width:22px!important;height:22px!important;max-width:22px!important;max-height:22px!important;vertical-align:middle;} @media print{td svg,th svg{width:18px!important;height:18px!important;max-width:18px!important;max-height:18px!important;}}</style></head><body>
-      ${getLogoHtml()}
-      <div style="border-bottom:3px solid #0f172a;padding-bottom:15px;margin-bottom:20px;">
-        <h1 style="margin:0;font-size:24px;font-weight:800;">דוח ייצור למפעל</h1>
-        <p style="margin:5px 0 0 0;color:#475569;">${sysContractorName}</p>
-      </div>
-      <div style="background:#f8fafc;padding:15px;border-radius:8px;margin-bottom:20px;"><strong>מידות ברוטו לייצור:</strong> חזית ${L} ס"מ על ${W} ס"מ</div>
-      <h2>רשימת חיתוכים</h2><table><thead><tr><th>פרופיל</th><th>ייעוד</th><th>כמות</th><th>מידה לחיתוך (ס"מ)</th><th>מוט</th></tr></thead><tbody>${pergolaResult.cuttingHtml}</tbody></table>
-      ${pergolaResult.shadeSlatPlanHtml ? `<h2 style="margin-top:24px;color:#1e40af;">שלבי הצללה — תוכנית חיתוך (מוט 6 מ׳)</h2>${pergolaResult.shadeSlatPlanHtml}` : ""}
-      <h2 style="margin-top:30px;">משיכת חומר מהמחסן</h2><table><thead><tr><th>סוג פרופיל</th><th>כמות מוטות</th><th>אורך מוט</th></tr></thead><tbody>${pergolaResult.bomHtml}</tbody></table>
-      <h2 style="margin-top:30px;">פירזול</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">${pergolaResult.hardwareHtml}</div>
-      <div style="page-break-before:always;margin-top:40px;"></div><h2 style="color:#ea580c;">סקיצה והוראות הרכבה</h2><div>${pergolaResult.instructionsHtml}</div>
-      <script>setTimeout(function(){window.print();},500);<\/script></body></html>`);
+    const dims = pergolaResult.viewDimensions || `חזית ${L} ס"מ על ${W} ס"מ`;
+    const color = pergolaResult.viewColorDisplay || "-";
+    const dateStr = new Date().toLocaleDateString("he-IL");
+    const shadeBlock = pergolaResult.shadeSlatPlanHtml
+      ? `<section class="sec" id="shade">
+          <h2><span class="num">2</span> שלבי הצללה — תוכנית חיתוך (מוט 6 מ׳)</h2>
+          <div>${pergolaResult.shadeSlatPlanHtml}</div>
+        </section>`
+      : "";
+    const bomNum = pergolaResult.shadeSlatPlanHtml ? "3" : "2";
+    const hwNum = pergolaResult.shadeSlatPlanHtml ? "4" : "3";
+    const instNum = pergolaResult.shadeSlatPlanHtml ? "5" : "4";
+    const wasteNum = pergolaResult.shadeSlatPlanHtml ? "6" : "5";
+    const wasteBlock = pergolaResult.wasteHtml
+      ? `<section class="sec" id="waste">
+          <h2><span class="num">${wasteNum}</span> נפל ושאריות ${pergolaResult.wasteBadgeText ? `<small>(${pergolaResult.wasteBadgeText})</small>` : ""}</h2>
+          <table><thead><tr><th>פרופיל</th><th>אורך מקורי</th><th>נפל (מטרים)</th></tr></thead>
+          <tbody>${pergolaResult.wasteHtml}</tbody></table>
+        </section>`
+      : "";
+    w.document.write(`<!DOCTYPE html>
+<html dir="rtl" lang="he"><head>
+<meta charset="utf-8"/>
+<title>סיכום ייצור - ${custName || "לקוח"}</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:Assistant,Arial,sans-serif;margin:0;padding:24px;padding-bottom:88px;direction:rtl;background:#f8fafc;color:#0f172a}
+  .wrap{max-width:960px;margin:0 auto}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px;margin-bottom:16px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  h1{margin:0;font-size:26px;font-weight:900}
+  .sub{margin:6px 0 0;color:#64748b;font-size:14px}
+  .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:14px}
+  .meta div{background:#f1f5f9;border-radius:10px;padding:10px 12px}
+  .meta strong{display:block;font-size:11px;color:#64748b;margin-bottom:2px}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+  .toc a{text-decoration:none;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700}
+  .sec{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:18px 20px;margin-bottom:16px}
+  .sec h2{margin:0 0 14px;font-size:18px;font-weight:900;display:flex;align-items:center;gap:10px;border-bottom:1px solid #e2e8f0;padding-bottom:10px}
+  .sec h2 small{font-weight:600;color:#64748b;font-size:13px}
+  .num{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;border-radius:8px;background:#0f172a;color:#fff;font-size:13px;font-weight:800}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #cbd5e1;padding:8px;text-align:center}
+  th{background:#f1f5f9}
+  td svg,th svg{width:22px!important;height:22px!important;max-width:22px!important;max-height:22px!important;vertical-align:middle}
+  .hw{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e2e8f0;padding:12px 16px;display:flex;justify-content:center;gap:10px;z-index:20}
+  .bar button{border:none;border-radius:12px;padding:12px 22px;font-weight:800;cursor:pointer;font-size:15px}
+  .btn-print{background:#0f172a;color:#fff}
+  .btn-close{background:#e2e8f0;color:#0f172a}
+  @media print{
+    body{background:#fff;padding:12px;padding-bottom:12px}
+    .bar,.no-print{display:none!important}
+    .sec,.card{box-shadow:none;break-inside:avoid}
+    td svg,th svg{width:18px!important;height:18px!important}
+  }
+</style>
+</head><body><div class="wrap">
+  ${getLogoHtml()}
+  <div class="card">
+    <h1>סיכום ייצור למפעל</h1>
+    <p class="sub">${sysContractorName || "Yarhi Pro"} · אותם נתוני חישוב כמו במסך — רק מסודרים להדפסה</p>
+    <div class="meta">
+      <div><strong>לקוח</strong>${custName || "-"}</div>
+      <div><strong>טלפון</strong>${custPhone || "-"}</div>
+      <div><strong>כתובת</strong>${custAddress || "-"}</div>
+      <div><strong>תאריך</strong>${dateStr}</div>
+      <div><strong>מידות</strong>${dims}</div>
+      <div><strong>גוון</strong>${color}</div>
+    </div>
+  </div>
+  <div class="card no-print">
+    <div class="toc">
+      <a href="#cut">1 חיתוכים</a>
+      ${pergolaResult.shadeSlatPlanHtml ? `<a href="#shade">2 הצללה</a>` : ""}
+      <a href="#bom">${bomNum} מחסן</a>
+      <a href="#hw">${hwNum} פירזול</a>
+      <a href="#inst">${instNum} סקיצה והוראות</a>
+      ${pergolaResult.wasteHtml ? `<a href="#waste">${wasteNum} נפל</a>` : ""}
+    </div>
+  </div>
+  <section class="sec" id="cut">
+    <h2><span class="num">1</span> רשימת חיתוכים</h2>
+    <table><thead><tr><th>פרופיל</th><th>ייעוד</th><th>כמות</th><th>מידה לחיתוך (ס"מ)</th><th>מוט</th></tr></thead>
+    <tbody>${pergolaResult.cuttingHtml || ""}</tbody></table>
+  </section>
+  ${shadeBlock}
+  <section class="sec" id="bom">
+    <h2><span class="num">${bomNum}</span> משיכת חומר מהמחסן (מוטות שלמים)</h2>
+    <table><thead><tr><th>סוג פרופיל</th><th>כמות מוטות</th><th>אורך מוט</th></tr></thead>
+    <tbody>${pergolaResult.bomHtml || ""}</tbody></table>
+  </section>
+  <section class="sec" id="hw">
+    <h2><span class="num">${hwNum}</span> פירזול ותוספות</h2>
+    <div class="hw">${pergolaResult.hardwareHtml || ""}</div>
+  </section>
+  <section class="sec" id="inst">
+    <h2><span class="num">${instNum}</span> סקיצה והוראות הרכבה</h2>
+    <div>${pergolaResult.instructionsHtml || ""}</div>
+  </section>
+  ${wasteBlock}
+</div>
+<div class="bar no-print">
+  <button type="button" class="btn-print" onclick="window.print()">🖨️ הדפס / שמור PDF</button>
+  <button type="button" class="btn-close" onclick="window.close()">סגור</button>
+</div>
+</body></html>`);
     w.document.close();
-  }, [pergolaResult, custName, sysContractorName, getLogoHtml, showAlert]);
+  }, [
+    pergolaResult,
+    custName,
+    custPhone,
+    custAddress,
+    sysContractorName,
+    getLogoHtml,
+    showAlert,
+  ]);
 
   const printCustomerQuote = useCallback(async () => {
     if (!pergolaResult.sqm) return showAlert("אנא הזן מידות לפני הדפסת סיכום");
@@ -6270,7 +6370,7 @@ ${logoBlock}
               <h2 className="text-3xl font-black text-slate-800">הזנת נתונים והפקת דו&quot;חות</h2>
               <div className="flex gap-2 flex-wrap">
                 <button type="button" onClick={printFactoryReport} className="bg-slate-800 text-white px-5 py-2 rounded-xl font-bold hover:bg-slate-900 transition flex items-center gap-2 shadow-md">
-                  🖨️ דוח ייצור
+                  🖨️ סיכום ייצור
                 </button>
                 <button type="button" onClick={printCustomerQuote} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-blue-700 transition shadow-md flex items-center gap-2">📄 סיכום ללקוח (עם 3D)</button>
                 <button type="button" onClick={sendPergolaSimToWhatsApp} className="bg-teal-600 text-white px-5 py-2 rounded-xl font-bold hover:bg-teal-700 transition shadow-md flex items-center gap-2">🎥 שלח הדמיה בוואטסאפ</button>

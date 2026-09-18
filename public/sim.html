@@ -2347,6 +2347,42 @@
         }
     }
 
+    /** הצללת חזית בטרפז — לאורך הקורה הקדמית האלכסונית (לא מלבן W) */
+    function drawTrapFrontSideWall(L, yL, yR, orientation, count, slatType, frameH) {
+        const H = 2.7;
+        const slatThickness = 0.02;
+        const slatWidth = parseInt(slatType) / 1000;
+        const gap = 0.05;
+        const totalStep = slatWidth + gap;
+        const wallTopLimit = H - (frameH / 2);
+        const zBack = trapWallZ(yL, yR);
+        const zFL = zBack + yL;
+        const zFR = zBack + yR;
+        const frontLen = Math.max(0.15, Math.hypot(L, yR - yL));
+        const ang = Math.atan2(yR - yL, L);
+        const g = new THREE.Group();
+        g.position.set(0, 0, (zFL + zFR) / 2);
+        g.rotation.y = -ang;
+        if (orientation === 'horizontal') {
+            for (let i = 0; i < count; i++) {
+                const y = wallTopLimit - (slatWidth / 2) - (i * totalStep);
+                if (y < 0.1) break;
+                const s = createBox(frontLen, slatWidth, slatThickness, slatColor);
+                s.position.set(0, y, 0);
+                g.add(s);
+            }
+        } else {
+            const n = Math.floor(frontLen / totalStep);
+            for (let i = 0; i < n; i++) {
+                const offset = -frontLen / 2 + (slatWidth / 2) + (i * totalStep);
+                const s = createBox(slatWidth, wallTopLimit, slatThickness, slatColor);
+                s.position.set(offset, wallTopLimit / 2, 0);
+                g.add(s);
+            }
+        }
+        pergolaGroup.add(g);
+    }
+
     function createVitrineSystem(length, height, vitrineModel, glassTypeStr) {
         const group = new THREE.Group();
         const trackHeight = 0.06; const trackDepth = 0.1;
@@ -3417,18 +3453,73 @@
 
         if (showFurniture) { const furn = createFurniture(L, W); pergolaGroup.add(furn); }
 
-        if (vitrineFront !== 'none') { const vFront = createVitrineSystem(L, H, vitrineFront, glassType); vFront.position.set(0, 0, W/2); pergolaGroup.add(vFront); }
-        if (vitrineRight !== 'none') { const vRight = createVitrineSystem(W, H, vitrineRight, glassType); vRight.rotation.y = Math.PI / 2; vRight.position.set(L/2, 0, 0); pergolaGroup.add(vRight); }
-        if (vitrineLeft !== 'none') { const vLeft = createVitrineSystem(W, H, vitrineLeft, glassType); vLeft.rotation.y = Math.PI / 2; vLeft.position.set(-L/2, 0, 0); pergolaGroup.add(vLeft); }
+        if (hasTrap) {
+            const zBack = trapWallZ(yL, yR);
+            const zFL = zBack + yL;
+            const zFR = zBack + yR;
+            const frontLen = Math.max(0.15, Math.hypot(L, yR - yL));
+            const ang = Math.atan2(yR - yL, L);
+            const frontMidZ = (zFL + zFR) / 2;
+            if (vitrineFront !== 'none') {
+                const vFront = createVitrineSystem(frontLen, H, vitrineFront, glassType);
+                vFront.position.set(0, 0, frontMidZ);
+                vFront.rotation.y = -ang;
+                pergolaGroup.add(vFront);
+            }
+            if (vitrineRight !== 'none') {
+                const vRight = createVitrineSystem(yR, H, vitrineRight, glassType);
+                vRight.rotation.y = Math.PI / 2;
+                vRight.position.set(L / 2, 0, zBack + yR / 2);
+                pergolaGroup.add(vRight);
+            }
+            if (vitrineLeft !== 'none') {
+                const vLeft = createVitrineSystem(yL, H, vitrineLeft, glassType);
+                vLeft.rotation.y = Math.PI / 2;
+                vLeft.position.set(-L / 2, 0, zBack + yL / 2);
+                pergolaGroup.add(vLeft);
+            }
+            const maxDrop = H - frameHeight;
+            if (scrFront > 0) {
+                const blind = createRollerBlind(frontLen, maxDrop, scrFront, scrColorHex);
+                blind.position.set(0, H - frameHeight / 2, frontMidZ - 0.06);
+                blind.rotation.y = -ang;
+                pergolaGroup.add(blind);
+            }
+            if (scrRight > 0) {
+                const blind = createRollerBlind(yR, maxDrop, scrRight, scrColorHex);
+                blind.rotation.y = Math.PI / 2;
+                blind.position.set(L / 2 - frameWidth / 2 - 0.06, H - frameHeight / 2, zBack + yR / 2);
+                pergolaGroup.add(blind);
+            }
+            if (scrLeft > 0) {
+                const blind = createRollerBlind(yL, maxDrop, scrLeft, scrColorHex);
+                blind.rotation.y = Math.PI / 2;
+                blind.position.set(-L / 2 + frameWidth / 2 + 0.06, H - frameHeight / 2, zBack + yL / 2);
+                pergolaGroup.add(blind);
+            }
+            if (document.getElementById('side-front-toggle') && document.getElementById('side-front-toggle').checked) {
+                drawTrapFrontSideWall(L, yL, yR, document.getElementById('side-front-orient').value, counters.slatsFront, document.getElementById('side-front-type').value, frameHeight);
+            }
+            if (document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked) {
+                drawSideWall(L / 2, zBack + yR / 2, yR, document.getElementById('side-right-orient').value, counters.slatsRight, document.getElementById('side-right-type').value, true, frameHeight);
+            }
+            if (document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked) {
+                drawSideWall(-L / 2, zBack + yL / 2, yL, document.getElementById('side-left-orient').value, counters.slatsLeft, document.getElementById('side-left-type').value, true, frameHeight);
+            }
+        } else {
+            if (vitrineFront !== 'none') { const vFront = createVitrineSystem(L, H, vitrineFront, glassType); vFront.position.set(0, 0, W/2); pergolaGroup.add(vFront); }
+            if (vitrineRight !== 'none') { const vRight = createVitrineSystem(W, H, vitrineRight, glassType); vRight.rotation.y = Math.PI / 2; vRight.position.set(L/2, 0, 0); pergolaGroup.add(vRight); }
+            if (vitrineLeft !== 'none') { const vLeft = createVitrineSystem(W, H, vitrineLeft, glassType); vLeft.rotation.y = Math.PI / 2; vLeft.position.set(-L/2, 0, 0); pergolaGroup.add(vLeft); }
 
-        const maxDrop = H - frameHeight;
-        if (scrFront > 0) { const blind = createRollerBlind(L, maxDrop, scrFront, scrColorHex); blind.position.set(0, H - frameHeight/2, W/2 - frameWidth/2 - 0.06); pergolaGroup.add(blind); }
-        if (scrRight > 0) { const blind = createRollerBlind(W, maxDrop, scrRight, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(L/2 - frameWidth/2 - 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
-        if (scrLeft > 0) { const blind = createRollerBlind(W, maxDrop, scrLeft, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(-L/2 + frameWidth/2 + 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
+            const maxDrop = H - frameHeight;
+            if (scrFront > 0) { const blind = createRollerBlind(L, maxDrop, scrFront, scrColorHex); blind.position.set(0, H - frameHeight/2, W/2 - frameWidth/2 - 0.06); pergolaGroup.add(blind); }
+            if (scrRight > 0) { const blind = createRollerBlind(W, maxDrop, scrRight, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(L/2 - frameWidth/2 - 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
+            if (scrLeft > 0) { const blind = createRollerBlind(W, maxDrop, scrLeft, scrColorHex); blind.rotation.y = Math.PI / 2; blind.position.set(-L/2 + frameWidth/2 + 0.06, H - frameHeight/2, 0); pergolaGroup.add(blind); }
 
-        if(document.getElementById('side-front-toggle') && document.getElementById('side-front-toggle').checked) drawSideWall(0, W/2, L, document.getElementById('side-front-orient').value, counters.slatsFront, document.getElementById('side-front-type').value, false, frameHeight);
-        if(document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked) drawSideWall(L/2, 0, W, document.getElementById('side-right-orient').value, counters.slatsRight, document.getElementById('side-right-type').value, true, frameHeight);
-        if(document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked) drawSideWall(-L/2, 0, W, document.getElementById('side-left-orient').value, counters.slatsLeft, document.getElementById('side-left-type').value, true, frameHeight);
+            if(document.getElementById('side-front-toggle') && document.getElementById('side-front-toggle').checked) drawSideWall(0, W/2, L, document.getElementById('side-front-orient').value, counters.slatsFront, document.getElementById('side-front-type').value, false, frameHeight);
+            if(document.getElementById('side-right-toggle') && document.getElementById('side-right-toggle').checked) drawSideWall(L/2, 0, W, document.getElementById('side-right-orient').value, counters.slatsRight, document.getElementById('side-right-type').value, true, frameHeight);
+            if(document.getElementById('side-left-toggle') && document.getElementById('side-left-toggle').checked) drawSideWall(-L/2, 0, W, document.getElementById('side-left-orient').value, counters.slatsLeft, document.getElementById('side-left-type').value, true, frameHeight);
+        }
 
         // מקור אור יחיד למצב לילה שמאיר את כל הסביבה (יעיל יותר)
         if (isNightMode) {
