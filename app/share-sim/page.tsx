@@ -9,7 +9,7 @@ import {
   type ShareSimPayload,
 } from "@/lib/share-sim";
 
-const SIM_REV = "pergola-u-trap-v14";
+const SIM_REV = "pergola-u-trap-v15";
 
 function pergolaIframeSrc(p: SharePergolaConfig): string {
   const params = new URLSearchParams();

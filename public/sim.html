@@ -810,29 +810,44 @@
         if (cfg.ledTone && document.getElementById('input-led-tone')) {
             document.getElementById('input-led-tone').value = String(cfg.ledTone) === 'warm' ? 'warm' : 'white';
         }
-        // מותחני קיר — רק כשמסומן במפורש (לא לפי מונה כשהטוגל כבוי)
-        if (cfg.hasTensioners === true) {
+        // מותחני קיר — הפעלה לפי hasTensioners או כמות; כיבוי רק כשמפורש false/0
+        var tensionCountNum =
+          typeof cfg.tensionerCount === "number"
+            ? cfg.tensionerCount
+            : cfg.tensionerCount != null && cfg.tensionerCount !== ""
+              ? Number(cfg.tensionerCount)
+              : NaN;
+        var wantTensions =
+          cfg.hasTensioners === true ||
+          cfg.hasTensioners === 1 ||
+          cfg.hasTensioners === "1" ||
+          cfg.hasTensioners === "true" ||
+          (Number.isFinite(tensionCountNum) && tensionCountNum > 0 && cfg.hasTensioners !== false && cfg.hasTensioners !== 0 && cfg.hasTensioners !== "0");
+        var noTensions =
+          cfg.hasTensioners === false ||
+          cfg.hasTensioners === 0 ||
+          cfg.hasTensioners === "0" ||
+          cfg.hasTensioners === "false";
+        if (wantTensions) {
             var tToggle = document.getElementById('input-tensions-toggle');
             if (tToggle) tToggle.checked = true;
-            counters.tension = Math.max(1, Math.min(12, Number(cfg.tensionerCount) || 2));
+            counters.tension = Math.max(1, Math.min(12, Number.isFinite(tensionCountNum) && tensionCountNum > 0 ? tensionCountNum : 2));
             var tEl = document.getElementById('cnt-tension');
             if (tEl) tEl.innerText = counters.tension;
-        } else if (cfg.hasTensioners === false || cfg.tensionerCount === 0) {
+        } else if (noTensions) {
             var tOff = document.getElementById('input-tensions-toggle');
             if (tOff) tOff.checked = false;
-            if (typeof cfg.tensionerCount === 'number' && cfg.tensionerCount >= 0) {
-                counters.tension = Math.max(0, Math.min(12, cfg.tensionerCount));
+            if (Number.isFinite(tensionCountNum) && tensionCountNum >= 0) {
+                counters.tension = Math.max(0, Math.min(12, tensionCountNum));
                 var tElOff = document.getElementById('cnt-tension');
-                if (tElOff) tElOff.innerText = counters.tension || 0;
+                if (tElOff) tElOff.innerText = String(counters.tension);
+            } else {
+                counters.tension = 0;
+                var tElZero = document.getElementById('cnt-tension');
+                if (tElZero) tElZero.innerText = '0';
             }
-        } else if (typeof cfg.tensionerCount === 'number' && cfg.tensionerCount > 0) {
-            var tLegacy = document.getElementById('input-tensions-toggle');
-            if (tLegacy) tLegacy.checked = true;
-            counters.tension = Math.max(1, Math.min(12, cfg.tensionerCount));
-            var tElLeg = document.getElementById('cnt-tension');
-            if (tElLeg) tElLeg.innerText = counters.tension;
         }
-        // Posts by side — רק אם באמת יש עמודים בקונפיג (לא מאפסים ברירת מחדל של ההדמיה)
+        // Posts by side
         const sidePostCfg = {
             postsFront: typeof cfg.postsFront === 'number' ? cfg.postsFront : (typeof cfg.posts === 'number' ? cfg.posts : undefined),
             postsRight: typeof cfg.postsRight === 'number' ? cfg.postsRight : undefined,
@@ -846,17 +861,29 @@
             if (v > 0) anyPostsApplied = true;
         });
         var postsToggle = document.getElementById('input-posts-toggle');
-        if (cfg.hasPosts === true || anyPostsApplied) {
-            Object.keys(sidePostCfg).forEach(function (k) {
+        var wantPosts =
+          cfg.hasPosts === true ||
+          cfg.hasPosts === 1 ||
+          cfg.hasPosts === '1' ||
+          cfg.hasPosts === 'true' ||
+          anyPostsApplied;
+        var noPosts =
+          (cfg.hasPosts === false ||
+            cfg.hasPosts === 0 ||
+            cfg.hasPosts === '0' ||
+            cfg.hasPosts === 'false') &&
+          !anyPostsApplied;
+        if (wantPosts) {
+            ['postsFront', 'postsRight', 'postsLeft', 'postsBack'].forEach(function (k) {
                 var v = sidePostCfg[k];
-                if (typeof v !== 'number') return;
-                counters[k] = Math.max(0, Math.min(12, v));
+                if (typeof v === 'number') {
+                    counters[k] = Math.max(0, Math.min(12, v));
+                }
                 var el = document.getElementById('cnt-' + k);
                 if (el) el.innerText = counters[k];
             });
             if (postsToggle) postsToggle.checked = true;
-        } else if (cfg.hasPosts === false) {
-            // כיבוי מפורש מהמחשבון / שיתוף — מאפסים מונים (לא משאירים ברירת מחדל 2 בחזית)
+        } else if (noPosts) {
             ['postsFront', 'postsRight', 'postsLeft', 'postsBack'].forEach(function (k) {
                 var v = sidePostCfg[k];
                 counters[k] = typeof v === 'number' ? Math.max(0, Math.min(12, v)) : 0;

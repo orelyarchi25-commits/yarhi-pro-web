@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
@@ -100,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "pergola-u-trap-v14";
+const SIM_VERSION = "pergola-u-trap-v15";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {
@@ -5375,6 +5375,18 @@ ${logoBlock}
   }, []);
 
   useEffect(() => {
+    // קונפיג חי ישן (טוגל כבוי) לא יבטל בחירת עמודים/מותחנים מהמחשבון בשיתוף
+    lastLiveSimConfigRef.current = null;
+  }, [
+    postCount,
+    postCountFront,
+    postCountRight,
+    postCountLeft,
+    postCountBack,
+    tensionerCount,
+  ]);
+
+  useEffect(() => {
     if (currentView !== "3d" || !pergolaSimLoaded) return;
     const iframe = pergolaSimIframeRef.current;
     const win = iframe?.contentWindow;
@@ -5648,6 +5660,11 @@ ${logoBlock}
     simCaption || "",
     frameType || "",
   ].join("|");
+
+  useLayoutEffect(() => {
+    setPergolaSimLoaded(false);
+  }, [pergolaSyncToken]);
+
   const pergolaSimSrc = (() => {
     const shareCfg = buildPergolaShareConfig();
     const params = new URLSearchParams();
