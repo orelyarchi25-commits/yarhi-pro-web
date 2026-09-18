@@ -810,8 +810,8 @@
         if (cfg.ledTone && document.getElementById('input-led-tone')) {
             document.getElementById('input-led-tone').value = String(cfg.ledTone) === 'warm' ? 'warm' : 'white';
         }
-        // מותחני קיר
-        if (cfg.hasTensioners || (typeof cfg.tensionerCount === 'number' && cfg.tensionerCount > 0)) {
+        // מותחני קיר — רק כשמסומן במפורש (לא לפי מונה כשהטוגל כבוי)
+        if (cfg.hasTensioners === true) {
             var tToggle = document.getElementById('input-tensions-toggle');
             if (tToggle) tToggle.checked = true;
             counters.tension = Math.max(1, Math.min(12, Number(cfg.tensionerCount) || 2));
@@ -820,6 +820,17 @@
         } else if (cfg.hasTensioners === false || cfg.tensionerCount === 0) {
             var tOff = document.getElementById('input-tensions-toggle');
             if (tOff) tOff.checked = false;
+            if (typeof cfg.tensionerCount === 'number' && cfg.tensionerCount >= 0) {
+                counters.tension = Math.max(0, Math.min(12, cfg.tensionerCount));
+                var tElOff = document.getElementById('cnt-tension');
+                if (tElOff) tElOff.innerText = counters.tension || 0;
+            }
+        } else if (typeof cfg.tensionerCount === 'number' && cfg.tensionerCount > 0) {
+            var tLegacy = document.getElementById('input-tensions-toggle');
+            if (tLegacy) tLegacy.checked = true;
+            counters.tension = Math.max(1, Math.min(12, cfg.tensionerCount));
+            var tElLeg = document.getElementById('cnt-tension');
+            if (tElLeg) tElLeg.innerText = counters.tension;
         }
         // Posts by side — רק אם באמת יש עמודים בקונפיג (לא מאפסים ברירת מחדל של ההדמיה)
         const sidePostCfg = {
@@ -845,6 +856,13 @@
             });
             if (postsToggle) postsToggle.checked = true;
         } else if (cfg.hasPosts === false) {
+            // כיבוי מפורש מהמחשבון / שיתוף — מאפסים מונים (לא משאירים ברירת מחדל 2 בחזית)
+            ['postsFront', 'postsRight', 'postsLeft', 'postsBack'].forEach(function (k) {
+                var v = sidePostCfg[k];
+                counters[k] = typeof v === 'number' ? Math.max(0, Math.min(12, v)) : 0;
+                var el0 = document.getElementById('cnt-' + k);
+                if (el0) el0.innerText = counters[k];
+            });
             if (postsToggle) postsToggle.checked = false;
         }
 
@@ -2950,11 +2968,23 @@
         }
 
         if (showTensions) {
-            const nTen = counters.tension; const dH = 1.0; const rodLen = Math.sqrt(W * W + dH * dH); const angle = Math.atan2(dH, W);
-            for(let i=0; i<nTen; i++) {
-                const xPos = (nTen > 1) ? -L/2 + (i * (L / (nTen-1))) : 0;
+            const nTen = counters.tension;
+            const dH = 1.0;
+            for (let i = 0; i < nTen; i++) {
+                const xPos = (nTen > 1) ? -L / 2 + (i * (L / (nTen - 1))) : 0;
+                // בטרפז: עומק מקומי בכל X — המותחן נשען על החזית האמיתית, לא על W המלבני
+                const depth = hasTrap
+                    ? Math.max(0.15, trapDepthAt(xPos, L, yL, yR))
+                    : Math.max(0.15, W);
+                const rodLen = Math.sqrt(depth * depth + dH * dH);
+                const angle = Math.atan2(dH, depth);
+                const zMid = hasTrap
+                    ? (trapWallZ(yL, yR) + depth / 2)
+                    : 0;
                 const rod = createBox(0.04, 0.04, rodLen, frameColor);
-                rod.position.set(xPos, H + frameHeight / 2 + dH / 2, 0); rod.rotation.x = angle; pergolaGroup.add(rod);
+                rod.position.set(xPos, H + frameHeight / 2 + dH / 2, zMid);
+                rod.rotation.x = angle;
+                pergolaGroup.add(rod);
             }
         }
 
@@ -3382,12 +3412,12 @@
         var scrColorEl = document.getElementById('input-screen-color');
         var ledToneEl = document.getElementById('input-led-tone');
         return {
-            postsFront: counters.postsFront || 0,
-            postsRight: counters.postsRight || 0,
-            postsLeft: counters.postsLeft || 0,
-            postsBack: counters.postsBack || 0,
-            hasPosts: postsOn ? !!postsOn.checked : true,
-            tensionerCount: counters.tension || 0,
+            postsFront: postsOn && postsOn.checked ? (counters.postsFront || 0) : 0,
+            postsRight: postsOn && postsOn.checked ? (counters.postsRight || 0) : 0,
+            postsLeft: postsOn && postsOn.checked ? (counters.postsLeft || 0) : 0,
+            postsBack: postsOn && postsOn.checked ? (counters.postsBack || 0) : 0,
+            hasPosts: postsOn ? !!postsOn.checked : false,
+            tensionerCount: tensOn && tensOn.checked ? (counters.tension || 0) : 0,
             hasTensioners: tensOn ? !!tensOn.checked : false,
             dividers: counters.divider || 0,
             dividerStates: (dividerStates || []).map(function (s) {

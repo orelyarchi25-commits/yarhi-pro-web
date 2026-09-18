@@ -9,7 +9,7 @@ import {
   type ShareSimPayload,
 } from "@/lib/share-sim";
 
-const SIM_REV = "pergola-u-trap-v13";
+const SIM_REV = "pergola-u-trap-v14";
 
 function pergolaIframeSrc(p: SharePergolaConfig): string {
   const params = new URLSearchParams();
@@ -48,6 +48,9 @@ function pergolaIframeSrc(p: SharePergolaConfig): string {
   if (p.hasTensioners) {
     params.set("hasTensioners", "1");
     params.set("tensionerCount", String(p.tensionerCount || 2));
+  } else {
+    params.set("hasTensioners", "0");
+    params.set("tensionerCount", "0");
   }
   const ds = encodeDividerStatesParam(p.dividerStates);
   if (ds) params.set("ds", ds);

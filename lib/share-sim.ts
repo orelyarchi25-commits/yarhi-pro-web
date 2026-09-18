@@ -229,11 +229,18 @@ export function mergePergolaShareWithLive(base: SharePergolaConfig, live: LiveSi
   const sl = Math.max(base.scrLeft || 0, Number(live.scrLeft) || 0);
   const liveFrame = typeof live.frameHex === "string" && live.frameHex.trim() ? live.frameHex.trim() : "";
   const liveSlat = typeof live.slatHex === "string" && live.slatHex.trim() ? live.slatHex.trim() : "";
+  // עמודים/מותחנים: רק אם בהדמיה באמת מסומנים — לא לפי מונה ברירת־מחדל כשהטוגל כבוי
+  const livePostsOn = live.hasPosts === true && total > 0;
+  const livePostsOff = live.hasPosts === false;
+  const liveTensionOn = live.hasTensioners === true;
+  const liveTensionOff = live.hasTensioners === false;
   return {
     ...base,
-    ...(total > 0 || live.hasPosts
+    ...(livePostsOn
       ? { postsFront: pf, postsRight: pr, postsLeft: pl, postsBack: pb, hasPosts: true as const }
-      : {}),
+      : livePostsOff
+        ? { postsFront: 0, postsRight: 0, postsLeft: 0, postsBack: 0, hasPosts: false as const }
+        : {}),
     hasSantaf,
     santafHex: (live.santafHex && String(live.santafHex).trim()) || base.santafHex || (hasSantaf ? "#7ec8e3" : base.santafHex),
     hasFan,
@@ -250,9 +257,14 @@ export function mergePergolaShareWithLive(base: SharePergolaConfig, live: LiveSi
           ledCount: finalLed,
           fanCount: finalFan,
         }),
-    ...(!base.hasTensioners && (live.hasTensioners || (Number(live.tensionerCount) || 0) > 0)
-      ? { hasTensioners: true, tensionerCount: Math.max(1, Number(live.tensionerCount) || 2) }
-      : {}),
+    ...(liveTensionOn
+      ? {
+          hasTensioners: true as const,
+          tensionerCount: Math.max(1, Number(live.tensionerCount) || base.tensionerCount || 2),
+        }
+      : liveTensionOff
+        ? { hasTensioners: false as const, tensionerCount: 0 }
+        : {}),
     vitrineFront: vf,
     vitrineRight: vr,
     vitrineLeft: vl,

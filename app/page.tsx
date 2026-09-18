@@ -100,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "pergola-u-trap-v13";
+const SIM_VERSION = "pergola-u-trap-v14";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {
@@ -2474,15 +2474,11 @@ function AuthenticatedPageContent() {
     const pBack = parseInt(postCountBack, 10) || 0;
     const sidePostsTotal = pFront + pRight + pLeft + pBack;
     const legacyPosts = parseInt(postCount, 10) || 0;
-    // אם מילאו רק «כמות עמודים» הכללית — שמים בחזית
-    let postsFront = sidePostsTotal > 0 ? pFront : legacyPosts;
-    let postsRight = sidePostsTotal > 0 ? pRight : 0;
-    let postsLeft = sidePostsTotal > 0 ? pLeft : 0;
-    let postsBack = sidePostsTotal > 0 ? pBack : 0;
-    // אם יש גובה עמודים אבל בלי כמות — מניחים לפחות 2 בחזית (סטנדרט בהדמיה)
-    if (postsFront + postsRight + postsLeft + postsBack <= 0 && String(postHeight || "").trim()) {
-      postsFront = 2;
-    }
+    // אם מילאו רק «כמות עמודים» הכללית — שמים בחזית; בלי כמות = בלי עמודים (לא ממציאים)
+    const postsFront = sidePostsTotal > 0 ? pFront : legacyPosts;
+    const postsRight = sidePostsTotal > 0 ? pRight : 0;
+    const postsLeft = sidePostsTotal > 0 ? pLeft : 0;
+    const postsBack = sidePostsTotal > 0 ? pBack : 0;
     const hasPosts = postsFront + postsRight + postsLeft + postsBack > 0;
     const inputL = parseFloat(lengthWall) || L;
     const notchW = isUShape ? parseFloat(lWallWidth) || 0 : 0;
@@ -2507,9 +2503,11 @@ function AuthenticatedPageContent() {
       W,
       gap: parseFloat(spacing) || 0,
       dividers: Math.max(dividers, dividerStates.length > 1 || want > 0 ? dividerStates.length : dividers),
-      ...(hasPosts
-        ? { postsFront, postsRight, postsLeft, postsBack, hasPosts: true as const }
-        : {}),
+      postsFront,
+      postsRight,
+      postsLeft,
+      postsBack,
+      hasPosts,
       isLShape: isLShape && !isUShape,
       isUShape,
       lWallWidth: isLShape || isUShape ? parseFloat(lWallWidth) || 0 : 0,
@@ -2554,7 +2552,6 @@ function AuthenticatedPageContent() {
     postCountLeft,
     postCountBack,
     postCount,
-    postHeight,
     isLShape,
     isUShape,
     trapezoidMode,
@@ -2613,26 +2610,17 @@ function AuthenticatedPageContent() {
       return;
     }
 
-    const withDefaultPosts = (c: SharePergolaConfig): SharePergolaConfig =>
-      c.hasPosts
-        ? c
-        : { ...c, postsFront: 2, postsRight: 0, postsLeft: 0, postsBack: 0, hasPosts: true };
-
-    const finish = (finalConfig: SharePergolaConfig) => {
-      void openSimWhatsApp(custPhone, sysContractorName, {
-        k: "p",
-        n: sysContractorName.trim() || "הקבלן שלך",
-        p: withDefaultPosts(finalConfig),
-      });
-    };
-
     void (async () => {
       const liveFromIframe = await requestLiveSimConfig(pergolaSimIframeRef.current?.contentWindow ?? null);
       const live = liveFromIframe ?? lastLiveSimConfigRef.current;
       const merged = mergePergolaShareWithLive(config, live);
-      finish({
-        ...merged,
-        env: normPergolaShareEnv(liveFromIframe?.env) || pergolaSimEnv,
+      void openSimWhatsApp(custPhone, sysContractorName, {
+        k: "p",
+        n: sysContractorName.trim() || "הקבלן שלך",
+        p: {
+          ...merged,
+          env: normPergolaShareEnv(liveFromIframe?.env) || pergolaSimEnv,
+        },
       });
     })();
   }, [buildPergolaShareConfig, custPhone, sysContractorName, showAlert, pergolaSimEnv]);
@@ -5703,6 +5691,9 @@ ${logoBlock}
     if (shareCfg.hasTensioners) {
       params.set("hasTensioners", "1");
       params.set("tensionerCount", String(shareCfg.tensionerCount || 2));
+    } else {
+      params.set("hasTensioners", "0");
+      params.set("tensionerCount", "0");
     }
     const ds = encodeDividerStatesParam(shareCfg.dividerStates);
     if (ds) params.set("ds", ds);
