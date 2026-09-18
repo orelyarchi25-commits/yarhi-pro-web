@@ -246,10 +246,10 @@
                     <div class="section-title">🏗️ תמיכה ועמודים</div>
                     <div class="grid grid-cols-2 gap-3 mb-2">
                         <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
-                            <input type="checkbox" id="input-posts-toggle" checked onchange="updateModel()"> עמודי תמיכה
+                            <input type="checkbox" id="input-posts-toggle" checked onchange="onPostsToggleChange()"> עמודי תמיכה
                         </label>
                         <label class="pointer-events-auto flex items-center gap-2 text-[11px] font-bold cursor-pointer">
-                            <input type="checkbox" id="input-tensions-toggle" onchange="updateModel()"> מותחני קיר
+                            <input type="checkbox" id="input-tensions-toggle" onchange="onTensionsToggleChange()"> מותחני קיר
                         </label>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
@@ -837,15 +837,12 @@
         } else if (noTensions) {
             var tOff = document.getElementById('input-tensions-toggle');
             if (tOff) tOff.checked = false;
-            if (Number.isFinite(tensionCountNum) && tensionCountNum >= 0) {
-                counters.tension = Math.max(0, Math.min(12, tensionCountNum));
-                var tElOff = document.getElementById('cnt-tension');
-                if (tElOff) tElOff.innerText = String(counters.tension);
-            } else {
-                counters.tension = 0;
-                var tElZero = document.getElementById('cnt-tension');
-                if (tElZero) tElZero.innerText = '0';
+            // משאירים כמות מוכנה לטוגל — איפוס ל-0 גורם שסימון הטוגל לא מציג כלום
+            if (!(counters.tension > 0)) {
+                counters.tension = 2;
             }
+            var tElOff = document.getElementById('cnt-tension');
+            if (tElOff) tElOff.innerText = String(counters.tension);
         }
         // Posts by side
         const sidePostCfg = {
@@ -882,15 +879,12 @@
                 var el = document.getElementById('cnt-' + k);
                 if (el) el.innerText = counters[k];
             });
+            ensurePostsStandbyCount();
             if (postsToggle) postsToggle.checked = true;
         } else if (noPosts) {
-            ['postsFront', 'postsRight', 'postsLeft', 'postsBack'].forEach(function (k) {
-                var v = sidePostCfg[k];
-                counters[k] = typeof v === 'number' ? Math.max(0, Math.min(12, v)) : 0;
-                var el0 = document.getElementById('cnt-' + k);
-                if (el0) el0.innerText = counters[k];
-            });
+            // כיבוי ציור בלבד — לא מאפסים מונים ל-0 (אחרת טוגל בהדמיה לא מציג)
             if (postsToggle) postsToggle.checked = false;
+            ensurePostsStandbyCount();
         }
 
         // Gap (spacing between slats) – mapped to UI gap slider
@@ -1462,6 +1456,37 @@
         renderDividerControls(); updateModel();
     }
 
+    function ensurePostsStandbyCount() {
+        var total =
+          (counters.postsFront || 0) +
+          (counters.postsRight || 0) +
+          (counters.postsLeft || 0) +
+          (counters.postsBack || 0);
+        if (total <= 0) {
+            counters.postsFront = 2;
+        }
+        ['postsFront', 'postsRight', 'postsLeft', 'postsBack'].forEach(function (k) {
+            var el = document.getElementById('cnt-' + k);
+            if (el) el.innerText = String(counters[k] || 0);
+        });
+    }
+
+    function onPostsToggleChange() {
+        var t = document.getElementById('input-posts-toggle');
+        if (t && t.checked) ensurePostsStandbyCount();
+        updateModel();
+    }
+
+    function onTensionsToggleChange() {
+        var t = document.getElementById('input-tensions-toggle');
+        if (t && t.checked) {
+            if (!(counters.tension > 0)) counters.tension = 2;
+            var el = document.getElementById('cnt-tension');
+            if (el) el.innerText = String(counters.tension);
+        }
+        updateModel();
+    }
+
     function updateCounter(key, delta) {
         let maxVal = (key === 'postsFront' || key === 'postsRight' || key === 'postsLeft' || key === 'postsBack')
             ? 12
@@ -1473,6 +1498,16 @@
             if (delta > 0) dividerStates.push({ led: false, fan: false });
             else if (dividerStates.length > 1) dividerStates.pop();
             renderDividerControls();
+        }
+        if (delta > 0) {
+            if (key === 'postsFront' || key === 'postsRight' || key === 'postsLeft' || key === 'postsBack') {
+                var pTog = document.getElementById('input-posts-toggle');
+                if (pTog) pTog.checked = true;
+            }
+            if (key === 'tension') {
+                var tTog = document.getElementById('input-tensions-toggle');
+                if (tTog) tTog.checked = true;
+            }
         }
         updateModel();
     }

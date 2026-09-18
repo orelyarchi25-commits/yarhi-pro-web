@@ -100,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "pergola-u-trap-v15";
+const SIM_VERSION = "pergola-u-trap-v16";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {
@@ -5408,7 +5408,21 @@ ${logoBlock}
             slatHex: _sh,
             ...structural
           } = full;
-          return structural;
+          const payload: Record<string, unknown> = { ...structural };
+          // בלי עמודים/מותחנים במחשבון — לא שולחים כיבוי מפורש,
+          // כדי לא לדרוס טוגל שהמשתמש הדליק בתוך ההדמיה
+          if (!full.hasPosts) {
+            delete payload.hasPosts;
+            delete payload.postsFront;
+            delete payload.postsRight;
+            delete payload.postsLeft;
+            delete payload.postsBack;
+          }
+          if (!full.hasTensioners) {
+            delete payload.hasTensioners;
+            delete payload.tensionerCount;
+          }
+          return payload;
         })(),
       },
       "*"
