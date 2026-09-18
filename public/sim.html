@@ -611,11 +611,19 @@
         balcony: { bg: 0x7eb6e6, floorGrass: 0x4d7c0f, floorHard: 0xe4d7c5, grass: false, wall: true,  furniture: true },
         garden:  { bg: 0xf3ebe0, floorGrass: 0x5c7a32, floorHard: 0xb8a88a, grass: true,  wall: true,  furniture: true }
     };
-    // External config for L-shape pergola sync
+    // External config for L / U / trapezoid pergola sync
     window._extIsLShape = false;
+    window._extIsUShape = false;
+    window._extTrapezoidMode = false;
     window._extLWallWidth = 0;
     window._extLWallDepth = 0;
     window._extLShapeSide = 'right';
+    window._extUWingLeft = 0;
+    window._extUWingRight = 0;
+    window._extUNotchDL = 0;
+    window._extUNotchDR = 0;
+    window._extExitLeft = 0;
+    window._extExitRight = 0;
     /** מסונכרן מ־Yarhi Pro: smooth | doubleT | doubleTHiTech140 | doubleTHiTech120 */
     window._extFrameType = null;
 
@@ -726,8 +734,28 @@
         if (cfg.L) _setRangeAndNumber('input-L', 'input-num-L', cfg.L);
         if (cfg.W) _setRangeAndNumber('input-W', 'input-num-W', cfg.W);
         if (cfg.isLShape !== undefined) window._extIsLShape = !!cfg.isLShape;
+        if (cfg.isUShape !== undefined) {
+            window._extIsUShape = !!cfg.isUShape;
+            if (window._extIsUShape) {
+                window._extIsLShape = false;
+                window._extTrapezoidMode = false;
+            }
+        }
+        if (cfg.trapezoidMode !== undefined) {
+            window._extTrapezoidMode = !!cfg.trapezoidMode;
+            if (window._extTrapezoidMode) {
+                window._extIsLShape = false;
+                window._extIsUShape = false;
+            }
+        }
         if (cfg.lWallWidth !== undefined) window._extLWallWidth = Math.max(0, Number(cfg.lWallWidth) || 0);
         if (cfg.lWallDepth !== undefined) window._extLWallDepth = Math.max(0, Number(cfg.lWallDepth) || 0);
+        if (cfg.uWingWallLeft !== undefined) window._extUWingLeft = Math.max(0, Number(cfg.uWingWallLeft) || 0);
+        if (cfg.uWingWallRight !== undefined) window._extUWingRight = Math.max(0, Number(cfg.uWingWallRight) || 0);
+        if (cfg.uNotchDepthLeft !== undefined) window._extUNotchDL = Math.max(0, Number(cfg.uNotchDepthLeft) || 0);
+        if (cfg.uNotchDepthRight !== undefined) window._extUNotchDR = Math.max(0, Number(cfg.uNotchDepthRight) || 0);
+        if (cfg.exitLeft !== undefined) window._extExitLeft = Math.max(0, Number(cfg.exitLeft) || 0);
+        if (cfg.exitRight !== undefined) window._extExitRight = Math.max(0, Number(cfg.exitRight) || 0);
         if (cfg.lShapeSide) window._extLShapeSide = String(cfg.lShapeSide) === 'left' ? 'left' : 'right';
         if (cfg.frameType !== undefined && cfg.frameType !== null && String(cfg.frameType).trim() !== '') {
             window._extFrameType = String(cfg.frameType);
@@ -928,8 +956,16 @@
                 postsLeft: p.get('postsLeft') != null && p.get('postsLeft') !== '' ? Number(p.get('postsLeft')) : undefined,
                 postsBack: p.get('postsBack') != null && p.get('postsBack') !== '' ? Number(p.get('postsBack')) : undefined,
                 isLShape: p.get('isLShape') === '1' || p.get('isLShape') === 'true',
+                isUShape: p.get('isUShape') === '1' || p.get('isUShape') === 'true',
+                trapezoidMode: p.get('trapezoidMode') === '1' || p.get('trapezoidMode') === 'true',
                 lWallWidth: p.get('lWallWidth') ? Number(p.get('lWallWidth')) : undefined,
                 lWallDepth: p.get('lWallDepth') ? Number(p.get('lWallDepth')) : undefined,
+                uWingWallLeft: p.get('uWingWallLeft') ? Number(p.get('uWingWallLeft')) : undefined,
+                uWingWallRight: p.get('uWingWallRight') ? Number(p.get('uWingWallRight')) : undefined,
+                uNotchDepthLeft: p.get('uNotchDepthLeft') ? Number(p.get('uNotchDepthLeft')) : undefined,
+                uNotchDepthRight: p.get('uNotchDepthRight') ? Number(p.get('uNotchDepthRight')) : undefined,
+                exitLeft: p.get('exitLeft') ? Number(p.get('exitLeft')) : undefined,
+                exitRight: p.get('exitRight') ? Number(p.get('exitRight')) : undefined,
                 lShapeSide: p.get('lShapeSide') || undefined,
                 frameHex: p.get('frameHex') || undefined,
                 slatHex: p.get('slatHex') || undefined,
@@ -1439,8 +1475,13 @@
             mat = createAluminumMaterial(color, opacity);
         }
         const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, l), mat);
-        if(!isLed) mesh.castShadow = true;
-        mesh.receiveShadow = true;
+        if (!isLed) {
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+        } else {
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
+        }
         return mesh;
     }
 
@@ -1909,14 +1950,37 @@
         group.add(wallProt);
     }
 
-    function rebuildEnvScenery(L, W, hasLNotch, notchW, notchD, isLLeft, pergolaH) {
+    /** קיר לצורת U: חזית כנפיים בעומק מלא + בליטה במרכז שמגיעה לפרופיל המגרעת */
+    function addUShapeBuildingWalls(group, L, Wc, wingL, wingR, notchW, uDL, uDR, height, color) {
+        var zWall = uWallZ(Wc, uDL, uDR);
+        var zNotch = -Wc / 2;
+        var protD = Math.max(0.08, zNotch - zWall);
+        var wallT = 0.4;
+        var x0 = -L / 2;
+        var j1 = x0 + wingL;
+        var j2 = j1 + notchW;
+
+        var facade = createHouseBox(Math.max(0.4, L + 0.5), height, wallT, color);
+        facade.position.set(0, height / 2, zWall - wallT / 2);
+        group.add(facade);
+
+        if (notchW > 0.05 && protD > 0.05) {
+            var protDepth = protD + wallT * 0.35;
+            var prot = createHouseBox(Math.max(0.15, notchW), height, protDepth, color);
+            prot.position.set((j1 + j2) / 2, height / 2, zNotch - protDepth / 2);
+            group.add(prot);
+        }
+    }
+
+    function rebuildEnvScenery(L, W, hasLNotch, notchW, notchD, isLLeft, pergolaH, uOpts) {
         if (!envSceneryGroup) return;
         clearGroup(envSceneryGroup);
         if (hasCustomBg) return;
         var Hwall = pergolaH != null && isFinite(pergolaH) ? pergolaH : 2.7;
+        var hasUWall = !!(uOpts && uOpts.notchW > 0.05 && uOpts.wingL > 0.05 && uOpts.wingR > 0.05);
         // רצועת קיר ברורה מעל הפתח — הקורה יושבת על הקיר, לא על החלון
         var openMaxTop = Math.max(1.7, Hwall - 0.65);
-        var wallOpenZ = -W / 2 - 0.22;
+        var wallOpenZ = hasUWall ? (-W / 2 - 0.05) : (-W / 2 - 0.22);
         var wallOpenOpts = { maxTop: openMaxTop, drop: 0.45 };
 
         if (currentEnv === 'balcony') {
@@ -1946,7 +2010,11 @@
             if (!showWallEl || showWallEl.checked) {
                 var doorX = 0;
                 var doorMax = L;
-                if (hasLNotch) {
+                if (hasUWall) {
+                    addUShapeBuildingWalls(envSceneryGroup, L, W, uOpts.wingL, uOpts.wingR, uOpts.notchW, uOpts.uDL, uOpts.uDR, 5.6, 0xfaf9f7);
+                    doorX = -L / 2 + uOpts.wingL + uOpts.notchW / 2;
+                    doorMax = Math.max(0.2, uOpts.notchW);
+                } else if (hasLNotch) {
                     addLShapeBuildingWalls(envSceneryGroup, L, W, notchW, notchD, isLLeft, 5.6, 0xfaf9f7);
                     doorX = isLLeft ? notchW / 2 : -notchW / 2;
                     doorMax = Math.max(0.2, L - notchW);
@@ -1999,7 +2067,16 @@
                 var homeH = 16.5;
                 var homeD = 8.2;
                 var homeW = Math.max(L + 3.6, 9);
-                if (hasLNotch) {
+                if (hasUWall) {
+                    addUShapeBuildingWalls(envSceneryGroup, L, W, uOpts.wingL, uOpts.wingR, uOpts.notchW, uOpts.uDL, uOpts.uDR, homeH, 0xfaf9f7);
+                    var zWallU = uWallZ(W, uOpts.uDL, uOpts.uDR);
+                    var homeZU = zWallU - 0.55 - homeD / 2;
+                    var homeU = createHouseBox(homeW, homeH, homeD, 0xfaf9f7);
+                    homeU.position.set(0, homeH / 2, homeZU);
+                    envSceneryGroup.add(homeU);
+                    addBuildingWindows(envSceneryGroup, homeW - 0.8, homeH - 3.8, homeD, 0, homeH / 2 + 1.6, homeZU, nightG, 1, 0x8ecae6);
+                    addWallShutterWindow(envSceneryGroup, -L / 2 + uOpts.wingL + uOpts.notchW / 2, wallOpenZ, Math.max(0.2, uOpts.notchW), wallOpenOpts);
+                } else if (hasLNotch) {
                     addLShapeBuildingWalls(envSceneryGroup, L, W, notchW, notchD, isLLeft, homeH, 0xfaf9f7);
                     var homeZ = -W / 2 - 0.55 - homeD / 2;
                     var home = createHouseBox(Math.max(0.2, L - notchW + 2.4), homeH, homeD, 0xfaf9f7);
@@ -2056,7 +2133,25 @@
                 var vW = Math.max(L + 5.5, 11);
                 var vH = 6.4;
                 var vD = 7.4;
-                if (hasLNotch) {
+                if (hasUWall) {
+                    addUShapeBuildingWalls(envSceneryGroup, L, W, uOpts.wingL, uOpts.wingR, uOpts.notchW, uOpts.uDL, uOpts.uDR, vH, 0xf4f2ee);
+                    var zWallV = uWallZ(W, uOpts.uDL, uOpts.uDR);
+                    var vZU = zWallV - 0.55 - vD / 2;
+                    var houseU = createHouseBox(vW, vH, vD, 0xf4f2ee);
+                    houseU.position.set(0, vH / 2, vZU);
+                    envSceneryGroup.add(houseU);
+                    var roofColU = 0xc45c3e;
+                    var roofAU = createRoofBox(vW + 0.7, 0.16, vD * 0.78, roofColU);
+                    roofAU.rotation.x = 0.42;
+                    roofAU.position.set(0, vH + 0.85, vZU - vD * 0.16);
+                    envSceneryGroup.add(roofAU);
+                    var roofBU = createRoofBox(vW + 0.7, 0.16, vD * 0.78, roofColU);
+                    roofBU.rotation.x = -0.42;
+                    roofBU.position.set(0, vH + 0.85, vZU + vD * 0.16);
+                    envSceneryGroup.add(roofBU);
+                    addBuildingWindows(envSceneryGroup, vW - 1.2, 2.4, vD, 0, 4.55, vZU, nightV, 1, 0x9ad4ea);
+                    addWallShutterWindow(envSceneryGroup, -L / 2 + uOpts.wingL + uOpts.notchW / 2, wallOpenZ, Math.max(0.2, uOpts.notchW), wallOpenOpts);
+                } else if (hasLNotch) {
                     addLShapeBuildingWalls(envSceneryGroup, L, W, notchW, notchD, isLLeft, vH, 0xf4f2ee);
                     var vZ = -W / 2 - 0.55 - vD / 2;
                     var houseX = isLLeft ? notchW / 2 : -notchW / 2;
@@ -2276,6 +2371,218 @@
      * קורות חלוקה בפרגולת ר': קורה אחת בדיוק על קו הבליטה (כמו בסקיצת הייצור),
      * השאר מחולקים יחסית לאורך כל מקטע (מגרעת / ראשי), לא על כל האורך L.
      */
+    function trapDepthAt(x, L, yL, yR) {
+        const t = (x + L / 2) / Math.max(L, 0.01);
+        return yL + t * (yR - yL);
+    }
+
+    function trapWallZ(yL, yR) {
+        return -Math.max(yL, yR) / 2;
+    }
+
+    function trapZFrontAt(x, L, yL, yR) {
+        return trapWallZ(yL, yR) + trapDepthAt(x, L, yL, yR);
+    }
+
+    /** רוחב שלב אופקי (ציר X) בנקודת עומק z — בתוך גבולות הטרפז (גב ישר על הקיר) */
+    function trapSlatSpanX(zC, L, yL, yR, trim) {
+        trim = trim || 0.04;
+        const zBack = trapWallZ(yL, yR);
+        const needDepth = zC - zBack;
+        if (needDepth < trim) return null;
+        const halfL = L / 2;
+        const dL = yL;
+        const dR = yR;
+        if (needDepth > Math.max(dL, dR) + 1e-6) return null;
+        if (Math.abs(dR - dL) < 1e-6) {
+            const w = L - 2 * trim;
+            if (w < 0.02) return null;
+            return { xMin: -halfL + trim, xMax: halfL - trim, width: w, cx: 0 };
+        }
+        const tNeed = (needDepth - dL) / (dR - dL);
+        const xAt = -halfL + tNeed * L;
+        let xMin, xMax;
+        if (dR >= dL) {
+            xMin = Math.max(-halfL + trim, xAt);
+            xMax = halfL - trim;
+        } else {
+            xMin = -halfL + trim;
+            xMax = Math.min(halfL - trim, xAt);
+        }
+        if (xMax - xMin < 0.02) return null;
+        return { xMin: xMin, xMax: xMax, width: xMax - xMin, cx: (xMin + xMax) / 2 };
+    }
+
+    function uWallZ(Wc, uDL, uDR) {
+        return -Math.max(Wc + uDL, Wc + uDR) / 2;
+    }
+
+    function uSlatSpansAtZ(zC, L, wingL, wingR, notchW, Wc, uDL, uDR, trim) {
+        trim = trim || 0.04;
+        const x0 = -L / 2 + trim;
+        const x1 = L / 2 - trim;
+        const j1 = -L / 2 + wingL;
+        const j2 = j1 + notchW;
+        const zF = Wc / 2 - trim;
+        const zWall = uWallZ(Wc, uDL, uDR);
+        const zBL = zWall;
+        const zBR = zWall;
+        const zBC = -Wc / 2 + trim;
+        const zMin = Math.min(zBL, zBR);
+        if (zC > zF + 1e-6 || zC < zMin - 1e-6) return [];
+        const spans = [];
+        const addSpan = (a, b) => {
+            if (b - a < 0.02) return;
+            spans.push({ xMin: a, xMax: b, width: b - a, cx: (a + b) / 2 });
+        };
+        if (zC >= zBC) {
+            // עד קו המגרעת — שלב רציף מהחזית, לא מאחורי הקיר
+            addSpan(x0, x1);
+            return spans;
+        }
+        // מאחורי קו המגרעת — רק כנפיים (חיתוך כלפי חוץ)
+        if (zC >= zBL) addSpan(x0, j1 - trim);
+        if (zC >= zBR) addSpan(j2 + trim, x1);
+        return spans;
+    }
+
+    function uSlatProfileAtX(x, j1, j2, Wc, uDL, uDR, trim) {
+        trim = trim || 0.04;
+        const zF = Wc / 2 - trim;
+        const zWall = uWallZ(Wc, uDL, uDR);
+        const inNotch = x > j1 + 0.002 && x < j2 - 0.002;
+        const atJ = Math.abs(x - j1) < 0.003 || Math.abs(x - j2) < 0.003;
+        if (inNotch || atJ) {
+            const zB = -Wc / 2 + trim;
+            return { depth: Math.max(0.2, Wc - 0.08), zC: (zB + zF) / 2 };
+        }
+        const zB = zWall;
+        return { depth: Math.max(0.2, zF - zB - 0.08), zC: (zB + zF) / 2 };
+    }
+
+    function uDividerProfile(x, j1, j2, Wc, uDL, uDR) {
+        const prof = uSlatProfileAtX(x, j1, j2, Wc, uDL, uDR, 0.04);
+        return { depth: prof.depth, zOff: prof.zC };
+    }
+
+    function lSlatSpansAtZ(zC, L, W, notchW, notchD, isLLeft, trim) {
+        trim = trim || 0.04;
+        const x0 = -L / 2 + trim;
+        const x1 = L / 2 - trim;
+        const xNotch = isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW);
+        const zBack = -W / 2 + trim;
+        const zFront = W / 2 - trim;
+        const zStep = -W / 2 + notchD + trim;
+        if (zC < zBack || zC > zFront) return [];
+        const spans = [];
+        const add = (a, b) => {
+            if (b - a < 0.02) return;
+            spans.push({ xMin: a, xMax: b, width: b - a, cx: (a + b) / 2 });
+        };
+        if (isLLeft) {
+            if (zC >= zStep) add(x0, xNotch);
+            add(xNotch, x1);
+        } else {
+            add(x0, xNotch);
+            if (zC >= zStep) add(xNotch, x1);
+        }
+        return spans;
+    }
+
+    function drawSegmentBeamX(group, x1, x2, z, H, fh, fw, color) {
+        const len = Math.max(0.15, Math.abs(x2 - x1) - 2 * fw);
+        if (len < 0.01) return;
+        const b = createBox(len, fh, fw, color);
+        b.position.set((x1 + x2) / 2, H, z);
+        group.add(b);
+    }
+
+    function drawUShapeFrame(group, L, Wc, wingL, wingR, notchW, uDL, uDR, H, fh, fw, color) {
+        const x0 = -L / 2;
+        const x1 = L / 2;
+        const j1 = x0 + wingL;
+        const j2 = j1 + notchW;
+        const zWall = uWallZ(Wc, uDL, uDR);
+        const zFront = Wc / 2 - fw;
+        const zBackL = zWall;
+        const zBackR = zWall;
+        const zCenterBack = -Wc / 2 + fw;
+
+        drawSegmentBeamX(group, x0 + fw, j1 - fw, zBackL, H, fh, fw, color);
+        drawSegmentBeamX(group, j2 + fw, x1 - fw, zBackR, H, fh, fw, color);
+        // חזית שלמה לכל האורך — המגרעות רק מצד הקיר (כמו בסקיצה)
+        drawSegmentBeamX(group, x0, x1, zFront, H, fh, fw, color);
+        drawSegmentBeamX(group, j1 + fw, j2 - fw, zCenterBack, H, fh, fw, color);
+
+        const sideLenL = Math.max(0.15, zFront - zBackL);
+        const bSideL = createBox(fw, fh, sideLenL, color);
+        bSideL.position.set(x0, H, (zBackL + zFront) / 2);
+        group.add(bSideL);
+
+        const sideLenR = Math.max(0.15, zFront - zBackR);
+        const bSideR = createBox(fw, fh, sideLenR, color);
+        bSideR.position.set(x1, H, (zBackR + zFront) / 2);
+        group.add(bSideR);
+
+        const innerLen = Math.max(0.15, Wc - 2 * fw);
+        [j1, j2].forEach((jx) => {
+            const b = createBox(fw, fh, innerLen, color);
+            b.position.set(jx, H, zCenterBack + innerLen / 2);
+            group.add(b);
+        });
+
+        // פינות L — מדרגה מכנף (עומק מלא) לקו המגרעת (עומק מרכז) — סוגר את המסגרת לקיר
+        const stepLenL = Math.max(0.15, zCenterBack - zBackL);
+        if (stepLenL > 0.02) {
+            const bStepL = createBox(fw, fh, stepLenL, color);
+            bStepL.position.set(j1, H, (zBackL + zCenterBack) / 2);
+            group.add(bStepL);
+        }
+        const stepLenR = Math.max(0.15, zCenterBack - zBackR);
+        if (stepLenR > 0.02) {
+            const bStepR = createBox(fw, fh, stepLenR, color);
+            bStepR.position.set(j2, H, (zBackR + zCenterBack) / 2);
+            group.add(bStepR);
+        }
+
+        // קורת חיבור אחורית חיצונית שמאל — סוגר פינה
+        if (Math.abs(zBackL - zCenterBack) > 0.02) {
+            const connLen = Math.max(0.15, j1 - x0 - 2 * fw);
+            const bConnL = createBox(connLen, fh, fw, color);
+            bConnL.position.set((x0 + j1) / 2, H, zBackL);
+            group.add(bConnL);
+        }
+        if (Math.abs(zBackR - zCenterBack) > 0.02) {
+            const connLenR = Math.max(0.15, x1 - j2 - 2 * fw);
+            const bConnR = createBox(connLenR, fh, fw, color);
+            bConnR.position.set((j2 + x1) / 2, H, zBackR);
+            group.add(bConnR);
+        }
+    }
+
+    function drawTrapezoidFrame(group, L, yL, yR, H, fh, fw, color) {
+        const x0 = -L / 2;
+        const x1 = L / 2;
+        const zBack = trapWallZ(yL, yR);
+        const zFL = zBack + yL;
+        const zFR = zBack + yR;
+        drawSegmentBeamX(group, x0 + fw, x1 - fw, zBack, H, fh, fw, color);
+        const frontLen = Math.max(0.15, Math.hypot(L, yR - yL) - 2 * fw);
+        const ang = Math.atan2(yR - yL, L);
+        const bFront = createBox(frontLen, fh, fw, color);
+        bFront.position.set(0, H, (zFL + zFR) / 2);
+        bFront.rotation.y = -ang;
+        group.add(bFront);
+        const sideLenL = Math.max(0.15, yL - 2 * fw);
+        const bLeft = createBox(fw, fh, sideLenL, color);
+        bLeft.position.set(x0, H, zBack + yL / 2);
+        group.add(bLeft);
+        const sideLenR = Math.max(0.15, yR - 2 * fw);
+        const bRight = createBox(fw, fh, sideLenR, color);
+        bRight.position.set(x1, H, zBack + yR / 2);
+        group.add(bRight);
+    }
+
     function dividerPositionsForPergola(L, nDiv, hasLNotch, isLLeft, notchW) {
         if (nDiv <= 0) return [];
         if (!hasLNotch || notchW <= 0.001) {
@@ -2305,6 +2612,60 @@
         return xs;
     }
 
+    /** כמו בסקיצה: חלוקת שדות לפי רוחב כנף/מגרעת (לא פיזור אחיד על כל L) */
+    function fieldsPerZoneWidthM(widthM) {
+        return Math.max(1, Math.ceil((widthM * 100) / 120));
+    }
+
+    function resolveUShapeZoneCounts(wingL, notchW, wingR, nFieldsTotal) {
+        const idealLeft = fieldsPerZoneWidthM(wingL);
+        const idealCenter = fieldsPerZoneWidthM(notchW);
+        const idealRight = fieldsPerZoneWidthM(wingR);
+        let nLeft = idealLeft;
+        let nCenter = idealCenter;
+        let nRight = idealRight;
+        while (nLeft + nCenter + nRight > nFieldsTotal) {
+            if (nLeft >= nCenter && nLeft >= nRight && nLeft > 1) nLeft--;
+            else if (nRight >= nCenter && nRight >= nLeft && nRight > 1) nRight--;
+            else if (nCenter > 1) nCenter--;
+            else break;
+        }
+        while (nLeft + nCenter + nRight < nFieldsTotal) {
+            if (idealCenter >= idealLeft && idealCenter >= idealRight) nCenter++;
+            else if (idealLeft >= idealRight) nLeft++;
+            else nRight++;
+        }
+        return { nLeft: nLeft, nCenter: nCenter, nRight: nRight };
+    }
+
+    function dividerPositionsForUShape(L, nDiv, wingL, notchW, wingR, uDL, uDR) {
+        if (nDiv <= 0 || wingL <= 0.01 || wingR <= 0.01 || notchW <= 0.01) return [];
+        const nFieldsTotal = nDiv + 1;
+        let zones = resolveUShapeZoneCounts(wingL, notchW, wingR, nFieldsTotal);
+        let nLeft = zones.nLeft;
+        let nCenter = zones.nCenter;
+        let nRight = zones.nRight;
+        const asymmetricNotch = Math.abs((uDL || 0) - (uDR || 0)) > 0.005;
+        if (asymmetricNotch && nCenter < 2 && nFieldsTotal >= 3) {
+            nCenter = 2;
+            if (nLeft + nCenter + nRight > nFieldsTotal) {
+                if (nRight > nLeft && nRight > 1) nRight--;
+                else if (nLeft > 1) nLeft--;
+                else if (nRight > 1) nRight--;
+            }
+        }
+        const x0 = -L / 2;
+        const j1 = x0 + wingL;
+        const j2 = j1 + notchW;
+        const xs = [];
+        for (let i = 1; i < nLeft; i++) xs.push(x0 + i * (wingL / nLeft));
+        xs.push(j1);
+        for (let i = 1; i < nCenter; i++) xs.push(j1 + i * (notchW / nCenter));
+        xs.push(j2);
+        for (let i = 1; i < nRight; i++) xs.push(j2 + i * (wingR / nRight));
+        return xs;
+    }
+
     function updateModel() {
         const numLEl = document.getElementById('input-num-L');
         const numWEl = document.getElementById('input-num-W');
@@ -2315,9 +2676,20 @@
         
         let W_val = numWEl ? parseFloat(numWEl.value) : 300;
         let W = (isNaN(W_val) || W_val === 0) ? 3 : W_val / 100;
-        const isLShapeExt = !!window._extIsLShape;
+        const isUShapeExt = !!window._extIsUShape;
+        const isTrapezoidExt = !!window._extTrapezoidMode && !isUShapeExt;
+        const isLShapeExt = !!window._extIsLShape && !isUShapeExt && !isTrapezoidExt;
         const lW = isLShapeExt ? Math.max(0, (Number(window._extLWallWidth) || 0) / 100) : 0;
         const lD = isLShapeExt ? Math.max(0, (Number(window._extLWallDepth) || 0) / 100) : 0;
+        const wingL = isUShapeExt ? Math.max(0, (Number(window._extUWingLeft) || 0) / 100) : 0;
+        const wingR = isUShapeExt ? Math.max(0, (Number(window._extUWingRight) || 0) / 100) : 0;
+        const notchW = isUShapeExt ? Math.max(0, (Number(window._extLWallWidth) || 0) / 100) : 0;
+        const uDL = isUShapeExt ? Math.max(0, (Number(window._extUNotchDL) || 0) / 100) : 0;
+        const uDR = isUShapeExt ? Math.max(0, (Number(window._extUNotchDR) || 0) / 100) : 0;
+        let yL = isTrapezoidExt ? Math.max(0, (Number(window._extExitLeft) || W_val) / 100) : W;
+        let yR = isTrapezoidExt ? Math.max(0, (Number(window._extExitRight) || W_val) / 100) : W;
+        if (isTrapezoidExt && yL <= 0) yL = W;
+        if (isTrapezoidExt && yR <= 0) yR = W;
         const isLLeft = String(window._extLShapeSide || 'right') === 'left';
 
         const roofType = document.getElementById('input-roof-type').value;
@@ -2367,7 +2739,7 @@
         fans = []; labelPoints = [];
         applyEnvironmentLook();
 
-        const notchW = isLShapeExt ? Math.min(Math.max(0, lW), Math.max(0, L - 0.2)) : 0;
+        const notchW_L = isLShapeExt ? Math.min(Math.max(0, lW), Math.max(0, L - 0.2)) : 0;
         const notchD = isLShapeExt ? Math.min(Math.max(0, lD), Math.max(0, W - 0.2)) : 0;
         const fpVis = resolveFrameProfileVisual();
         const frameHeight = fpVis.heightM;
@@ -2375,21 +2747,36 @@
         const H = 2.7;
         const frameWidth = 0.04;
 
-        const hasLNotch = isLShapeExt && notchW > 0.05 && notchD > 0.05;
+        const hasUNotch = isUShapeExt && wingL > 0.05 && wingR > 0.05 && notchW > 0.05;
+        const hasTrap = isTrapezoidExt && yL > 0.05 && yR > 0.05 && Math.abs(yL - yR) > 0.01;
+        const hasLNotch = isLShapeExt && notchW_L > 0.05 && notchD > 0.05;
         let cxMain = 0;
         let cxProt = 0;
         if (hasLNotch) {
             if (isLLeft) {
-                cxProt = -L / 2 + notchW / 2;
-                cxMain = notchW / 2;
+                cxProt = -L / 2 + notchW_L / 2;
+                cxMain = notchW_L / 2;
             } else {
-                cxMain = -notchW / 2;
-                cxProt = L / 2 - notchW / 2;
+                cxMain = -notchW_L / 2;
+                cxProt = L / 2 - notchW_L / 2;
             }
         }
-        rebuildEnvScenery(L, W, hasLNotch, notchW, notchD, isLLeft, H);
+        rebuildEnvScenery(
+            L,
+            hasTrap ? Math.max(yL, yR) : W,
+            hasLNotch,
+            notchW_L,
+            notchD,
+            isLLeft,
+            H,
+            hasUNotch ? { wingL: wingL, wingR: wingR, notchW: notchW, uDL: uDL, uDR: uDR } : null
+        );
 
-        if (!hasLNotch) {
+        if (hasUNotch) {
+            drawUShapeFrame(pergolaGroup, L, W, wingL, wingR, notchW, uDL, uDR, H, frameHeight, frameWidth, frameColor);
+        } else if (hasTrap) {
+            drawTrapezoidFrame(pergolaGroup, L, yL, yR, H, frameHeight, frameWidth, frameColor);
+        } else if (!hasLNotch) {
             if (showWall && currentEnv !== 'balcony' && currentEnv !== 'garden' && currentEnv !== 'villa') {
                 const wall = createBox(L + 6, 6, 0.4, 0xffffff);
                 wall.position.set(0, 3, -W / 2 - 0.21);
@@ -2422,30 +2809,30 @@
         } else {
             if (showWall && currentEnv !== 'balcony' && currentEnv !== 'garden' && currentEnv !== 'villa') {
                 // בלי הרחבות ±6 / ±0.4 בציר X — כך קו פינת הבליטה בקיר תואם ל־depthX ולקורת החלוקה על קו המגרעת
-                const wallMain = createBox(Math.max(0.2, L - notchW), 6, 0.4, 0xffffff);
+                const wallMain = createBox(Math.max(0.2, L - notchW_L), 6, 0.4, 0xffffff);
                 wallMain.position.set(cxMain, 3, -W / 2 - 0.21);
                 pergolaGroup.add(wallMain);
 
-                const wallProt = createBox(notchW, 6, notchD + 0.4, 0xffffff);
+                const wallProt = createBox(notchW_L, 6, notchD + 0.4, 0xffffff);
                 wallProt.position.set(cxProt, 3, -W / 2 + notchD / 2 - 0.21);
                 pergolaGroup.add(wallProt);
             }
 
             const mT = frameWidth;
-            const backSpan = L - notchW;
+            const backSpan = L - notchW_L;
             const bBackLen = Math.max(0.15, backSpan - 2 * mT);
             const bBackMain = createBox(bBackLen, frameHeight, frameWidth, frameColor);
             bBackMain.position.set(cxMain, H, -W / 2);
             pergolaGroup.add(bBackMain);
 
-            const depthX = isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW);
+            const depthX = isLLeft ? (-L / 2 + notchW_L) : (L / 2 - notchW_L);
             const depthLenZ = Math.max(0.15, notchD + frameWidth - 2 * mT);
             const depthZCenter = -W / 2 + notchD / 2;
             const bDepth = createBox(frameWidth, frameHeight, depthLenZ, frameColor);
             bDepth.position.set(depthX, H, depthZCenter);
             pergolaGroup.add(bDepth);
 
-            const innerLenX = Math.max(0.15, notchW - 2 * mT);
+            const innerLenX = Math.max(0.15, notchW_L - 2 * mT);
             const bInnerWidth = createBox(innerLenX, frameHeight, frameWidth, frameColor);
             bInnerWidth.position.set(cxProt, H, -W / 2 + notchD);
             pergolaGroup.add(bInnerWidth);
@@ -2487,8 +2874,8 @@
                 const zDepthMin = depthZCenter - (notchD + frameWidth) / 2 + mT;
                 const zDepthMax = depthZCenter + (notchD + frameWidth) / 2 - mT;
                 addFrameProfileRibsAlongZ(pergolaGroup, frameColor, zDepthMin, zDepthMax, depthX, H, frameHeight, frameWidth, frameVisualMode);
-                const xInnerMin = cxProt - notchW / 2 + mT;
-                const xInnerMax = cxProt + notchW / 2 - mT;
+                const xInnerMin = cxProt - notchW_L / 2 + mT;
+                const xInnerMax = cxProt + notchW_L / 2 - mT;
                 addFrameProfileRibsAlongX(pergolaGroup, frameColor, xInnerMin, xInnerMax, -W / 2 + notchD, H, frameHeight, frameWidth, +1, frameVisualMode);
             }
         }
@@ -2499,7 +2886,14 @@
                 for (let i = 0; i < count; i++) {
                     const xPos = (count > 1) ? -L / 2 + postSize / 2 + (i * (L - postSize) / (count - 1)) : 0;
                     const p = createBox(postSize, H, postSize, frameColor);
-                    p.position.set(xPos, H / 2, W / 2 - postSize / 2);
+                    let zPos;
+                    if (hasTrap) {
+                        // יושב מתחת לחזית האלכסונית — לא על W/2 המלבני
+                        zPos = trapZFrontAt(xPos, L, yL, yR) - postSize / 2;
+                    } else {
+                        zPos = W / 2 - postSize / 2;
+                    }
+                    p.position.set(xPos, H / 2, zPos);
                     pergolaGroup.add(p);
                 }
             };
@@ -2507,13 +2901,26 @@
                 for (let i = 0; i < count; i++) {
                     const xPos = (count > 1) ? -L / 2 + postSize / 2 + (i * (L - postSize) / (count - 1)) : 0;
                     const p = createBox(postSize, H, postSize, frameColor);
-                    p.position.set(xPos, H / 2, -W / 2 + postSize / 2);
+                    const zPos = hasTrap
+                        ? (trapWallZ(yL, yR) + postSize / 2)
+                        : (-W / 2 + postSize / 2);
+                    p.position.set(xPos, H / 2, zPos);
                     pergolaGroup.add(p);
                 }
             };
             const drawPostsOnRight = (count) => {
                 for (let i = 0; i < count; i++) {
-                    const zPos = (count > 1) ? -W / 2 + postSize / 2 + (i * (W - postSize) / (count - 1)) : 0;
+                    let zPos;
+                    if (hasTrap) {
+                        const zBack = trapWallZ(yL, yR);
+                        const zFront = zBack + yR;
+                        const span = Math.max(0.05, yR - postSize);
+                        zPos = (count > 1)
+                            ? zBack + postSize / 2 + (i * span / (count - 1))
+                            : zBack + yR / 2;
+                    } else {
+                        zPos = (count > 1) ? -W / 2 + postSize / 2 + (i * (W - postSize) / (count - 1)) : 0;
+                    }
                     const p = createBox(postSize, H, postSize, frameColor);
                     p.position.set(L / 2 - postSize / 2, H / 2, zPos);
                     pergolaGroup.add(p);
@@ -2521,7 +2928,16 @@
             };
             const drawPostsOnLeft = (count) => {
                 for (let i = 0; i < count; i++) {
-                    const zPos = (count > 1) ? -W / 2 + postSize / 2 + (i * (W - postSize) / (count - 1)) : 0;
+                    let zPos;
+                    if (hasTrap) {
+                        const zBack = trapWallZ(yL, yR);
+                        const span = Math.max(0.05, yL - postSize);
+                        zPos = (count > 1)
+                            ? zBack + postSize / 2 + (i * span / (count - 1))
+                            : zBack + yL / 2;
+                    } else {
+                        zPos = (count > 1) ? -W / 2 + postSize / 2 + (i * (W - postSize) / (count - 1)) : 0;
+                    }
                     const p = createBox(postSize, H, postSize, frameColor);
                     p.position.set(-L / 2 + postSize / 2, H / 2, zPos);
                     pergolaGroup.add(p);
@@ -2543,6 +2959,9 @@
         }
 
         if (roofType === 'slats' || roofType === 'santafBH') {
+            const x0u = -L / 2;
+            const j1u = x0u + wingL;
+            const j2u = j1u + notchW;
             let pattern = [];
             if (slatTypeTop === '40') pattern = [0.04];
             else if (slatTypeTop === '70') pattern = [0.07];
@@ -2550,32 +2969,112 @@
             else if (slatTypeTop === 'combo2') pattern = [0.02, 0.02, 0.07, 0.04, 0.04]; 
 
             if (orientationTop === 'vertical') {
-                const xNotchSl = hasLNotch ? (isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW)) : 0;
+                const xNotchSl = hasLNotch ? (isLLeft ? (-L / 2 + notchW_L) : (L / 2 - notchW_L)) : 0;
                 let currentPos = -L/2 + 0.02; let pIndex = 0;
                 const emitVertSlat = (l, r) => {
                     const segW = r - l;
                     if (segW < 0.0005) return;
                     const cx = (l + r) / 2;
-                    const notchZ = hasLNotch && (isLLeft ? (cx < xNotchSl) : (cx > xNotchSl));
-                    const slatDepth = notchZ ? Math.max(0.2, (W - notchD) - 0.08) : (W - 0.08);
-                    const zOff = notchZ ? (notchD / 2) : 0;
+                    let slatDepth;
+                    let zOff = 0;
+                    if (hasTrap) {
+                        const zBack = trapWallZ(yL, yR);
+                        const depth = trapDepthAt(cx, L, yL, yR);
+                        slatDepth = Math.max(0.2, depth - 0.08);
+                        zOff = zBack + depth / 2;
+                    } else if (hasUNotch) {
+                        const prof = uSlatProfileAtX(cx, j1u, j2u, W, uDL, uDR, 0.04);
+                        slatDepth = prof.depth;
+                        zOff = prof.zC;
+                    } else {
+                        const notchZ = hasLNotch && (isLLeft ? (cx < xNotchSl) : (cx > xNotchSl));
+                        slatDepth = notchZ ? Math.max(0.2, (W - notchD) - 0.08) : (W - 0.08);
+                        zOff = notchZ ? (notchD / 2) : 0;
+                    }
                     const s = createBox(segW, 0.02, slatDepth, slatColor);
                     s.position.set(cx, H, zOff);
                     s.rotation.z = slatAngle;
                     pergolaGroup.add(s);
+                };
+                const splitAtJunctions = (left, right) => {
+                    if (!hasUNotch || notchW <= 0.01) return [left, right];
+                    const pts = [left, right];
+                    [j1u, j2u].forEach((jx) => {
+                        if (jx > left + 0.001 && jx < right - 0.001) pts.push(jx);
+                    });
+                    pts.sort((a, b) => a - b);
+                    const segs = [];
+                    for (let si = 0; si < pts.length - 1; si++) segs.push([pts[si], pts[si + 1]]);
+                    return segs;
                 };
                 while(currentPos < L/2 - 0.02) {
                     let sw = pattern[pIndex % pattern.length];
                     if (currentPos + sw > L/2) break;
                     const left = currentPos;
                     const right = currentPos + sw;
-                    if (!hasLNotch || !(left < xNotchSl && right > xNotchSl)) {
-                        emitVertSlat(left, right);
-                    } else {
-                        emitVertSlat(left, xNotchSl);
-                        emitVertSlat(xNotchSl, right);
-                    }
+                    const segments = !hasLNotch || !(left < xNotchSl && right > xNotchSl)
+                        ? hasUNotch
+                            ? splitAtJunctions(left, right)
+                            : [[left, right]]
+                        : [[left, xNotchSl], [xNotchSl, right]];
+                    segments.forEach((seg) => emitVertSlat(seg[0], seg[1]));
                     currentPos += sw + gapVal; pIndex++;
+                }
+            } else if (hasUNotch) {
+                const zF = W / 2;
+                const zMin = uWallZ(W, uDL, uDR);
+                let currentPos = zMin + 0.02;
+                let pIndex = 0;
+                while (currentPos < zF - 0.02) {
+                    let sw = pattern[pIndex % pattern.length];
+                    if (currentPos + sw > zF) break;
+                    const zC = currentPos + sw / 2;
+                    const spans = uSlatSpansAtZ(zC, L, wingL, wingR, notchW, W, uDL, uDR, 0.04);
+                    spans.forEach((span) => {
+                        const s = createBox(span.width, 0.02, sw, slatColor);
+                        s.position.set(span.cx, H, zC);
+                        s.rotation.x = -slatAngle;
+                        pergolaGroup.add(s);
+                    });
+                    currentPos += sw + gapVal;
+                    pIndex++;
+                }
+            } else if (hasLNotch) {
+                let currentPos = -W / 2 + 0.02;
+                let pIndex = 0;
+                while (currentPos < W / 2 - 0.02) {
+                    let sw = pattern[pIndex % pattern.length];
+                    if (currentPos + sw > W / 2) break;
+                    const zC = currentPos + sw / 2;
+                    const spans = lSlatSpansAtZ(zC, L, W, notchW_L, notchD, isLLeft, 0.04);
+                    spans.forEach((span) => {
+                        const s = createBox(span.width, 0.02, sw, slatColor);
+                        s.position.set(span.cx, H, zC);
+                        s.rotation.x = -slatAngle;
+                        pergolaGroup.add(s);
+                    });
+                    currentPos += sw + gapVal;
+                    pIndex++;
+                }
+            } else if (hasTrap) {
+                // רציף על כל האורך — קיצור הדרגתי לפי גבול הטרפז (trapSlatSpanX)
+                const zBack = trapWallZ(yL, yR);
+                const zFrontMax = zBack + Math.max(yL, yR);
+                let currentPos = zBack + 0.02;
+                let pIndex = 0;
+                while (currentPos < zFrontMax - 0.02) {
+                    let sw = pattern[pIndex % pattern.length];
+                    if (currentPos + sw > zFrontMax) break;
+                    const zC = currentPos + sw / 2;
+                    const span = trapSlatSpanX(zC, L, yL, yR, 0.04);
+                    if (span) {
+                        const s = createBox(span.width, 0.02, sw, slatColor);
+                        s.position.set(span.cx, H, zC);
+                        s.rotation.x = -slatAngle;
+                        pergolaGroup.add(s);
+                    }
+                    currentPos += sw + gapVal;
+                    pIndex++;
                 }
             } else {
                 let currentPos = -W/2 + 0.02; let pIndex = 0;
@@ -2591,20 +3090,41 @@
             }
             
             const nDiv = counters.divider;
-            const divXs = dividerPositionsForPergola(L, nDiv, hasLNotch, isLLeft, notchW);
-            const xNotchDiv = hasLNotch ? (isLLeft ? (-L / 2 + notchW) : (L / 2 - notchW)) : 0;
-            for(let i=0; i<nDiv; i++) {
+            const divXs = hasUNotch
+                ? dividerPositionsForUShape(L, nDiv, wingL, notchW, wingR, uDL, uDR)
+                : dividerPositionsForPergola(L, nDiv, hasLNotch, isLLeft, notchW_L);
+            const xNotchDiv = hasLNotch ? (isLLeft ? (-L / 2 + notchW_L) : (L / 2 - notchW_L)) : 0;
+            for(let i=0; i<divXs.length; i++) {
                 const xPos = divXs[i];
+                let divDepth = W - 0.08;
+                let divZ = 0;
+                if (hasUNotch) {
+                    const prof = uDividerProfile(xPos, j1u, j2u, W, uDL, uDR);
+                    divDepth = prof.depth;
+                    divZ = prof.zOff;
+                } else if (hasTrap) {
+                    const zBack = trapWallZ(yL, yR);
+                    const depth = trapDepthAt(xPos, L, yL, yR);
+                    divDepth = Math.max(0.2, depth - 0.08);
+                    divZ = zBack + depth / 2;
+                } else {
                 const atJunction = hasLNotch && Math.abs(xPos - xNotchDiv) < 1e-4;
                 const notchZone = hasLNotch && !atJunction && (isLLeft ? (xPos < xNotchDiv) : (xPos > xNotchDiv));
-                const divDepth = notchZone ? Math.max(0.2, (W - notchD) - 0.08) : (W - 0.08);
-                const divZ = notchZone ? (notchD / 2) : 0;
+                    divDepth = notchZone ? Math.max(0.2, (W - notchD) - 0.08) : (W - 0.08);
+                    divZ = notchZone ? (notchD / 2) : 0;
+                }
 
-                const div = createBox(0.06, frameHeight - 0.02, divDepth, frameColor);
-                div.position.set(xPos, H, divZ); pergolaGroup.add(div);
+                // בפינות מגרעת U כבר יש קורת מסגרת — חציץ כפול גורם להבהוב (z-fighting) בלדים
+                const atUJunction = hasUNotch && (Math.abs(xPos - j1u) < 0.025 || Math.abs(xPos - j2u) < 0.025);
+                if (!atUJunction) {
+                    const div = createBox(0.06, frameHeight - 0.02, divDepth, frameColor);
+                    div.position.set(xPos, H, divZ); pergolaGroup.add(div);
+                }
                 if (dividerStates[i]?.led) {
                     const led = createBox(0.02, 0.02, Math.max(0.2, divDepth - 0.02), ledColor, true);
-                    led.position.set(xPos, H - 0.06, divZ); pergolaGroup.add(led);
+                    // הזזה קלה הצידה כדי לא לשבת בדיוק על פני הקורה
+                    led.position.set(xPos + (atUJunction ? 0.012 : 0), H - 0.06, divZ);
+                    pergolaGroup.add(led);
                 }
                 if (dividerStates[i]?.fan) {
                     const f = createFan(); f.group.position.set(xPos, H - 0.08, divZ);
@@ -2657,38 +3177,124 @@
 
         const shouldDrawSantafBH = (roofType === 'santafBH') || !!window._extHasSantaf;
         if (shouldDrawSantafBH) {
-            // סנטף מונח מעל קו המסגרת; רוחב/עומך לפי מפתח פנימי מלא (+ אוברהנג קדמי) — מכסה את כל הפרגולה
             const topY = H + frameHeight / 2;
-            const roofW = Math.max(0.2, L - 2 * frameWidth);
-            const frontOverhang = 0.15;
-            const roofD = Math.max(0.2, W - 2 * frameWidth + frontOverhang);
-            const roofZ = -W / 2 + frameWidth / 2 + roofD / 2;
+            const frontOverhang = hasTrap ? 0 : 0.15;
             const maxRipple = bhWave * 1.28;
             const airAboveFrame = 0.01;
             const santafPlaneY = topY + airAboveFrame + maxRipple;
+            const roofMat = createSantafMaterial(bhColor);
+
+            if (hasUNotch) {
+                // סנטף לפי צורת U: כנפיים עמוקות + מגרעת מרכזית קצרה + כיסוי צדדים באורך הקורה בפועל
+                const zWallU = uWallZ(W, uDL, uDR);
+                const zFrontU = W / 2;
+                const j1uS = -L / 2 + wingL;
+                const j2uS = j1uS + notchW;
+                const sideSpanU = Math.max(0.25, zFrontU - zWallU);
+                const uFrontOh = 0.08;
+                const roofDU = Math.max(0.25, sideSpanU + uFrontOh);
+                const roofZU = zWallU + frameWidth + roofDU / 2;
+                const roofWU = Math.max(0.2, L - 2 * frameWidth);
+                const geomU = new THREE.PlaneGeometry(roofWU, roofDU, 140, 56);
+                const posU = geomU.attributes.position;
+                const wavesU = Math.max(6, Math.round(roofWU / 0.16));
+                const halfWU = roofWU / 2;
+                for (let i = 0; i < posU.count; i++) {
+                    let x0 = posU.getX(i);
+                    let lz = posU.getY(i);
+                    x0 = Math.max(-halfWU, Math.min(halfWU, x0));
+                    const inNotch = x0 > j1uS + 0.01 && x0 < j2uS - 0.01;
+                    const zBack = inNotch ? (-W / 2 + frameWidth) : (zWallU + frameWidth);
+                    const zFrontLocal = zFrontU - frameWidth + uFrontOh;
+                    const usableD = Math.max(0.05, zFrontLocal - zBack);
+                    const tFront = (roofDU / 2 - lz) / Math.max(roofDU, 0.01);
+                    const worldZ = zBack + Math.min(1, Math.max(0, tFront)) * usableD;
+                    lz = roofZU - worldZ;
+                    posU.setX(i, x0);
+                    posU.setY(i, lz);
+                    const yNorm = halfWU > 1e-6 ? (x0 / halfWU) : 0;
+                    const ripple = Math.sin(yNorm * Math.PI * wavesU) * bhWave;
+                    const micro = Math.sin(yNorm * Math.PI * wavesU * 2) * (bhWave * 0.22);
+                    posU.setZ(i, ripple + micro);
+                }
+                posU.needsUpdate = true;
+                geomU.computeVertexNormals();
+                const roofU = new THREE.Mesh(geomU, roofMat);
+                roofU.rotation.x = -Math.PI / 2;
+                roofU.position.set(0, santafPlaneY, roofZU);
+                roofU.castShadow = false;
+                roofU.receiveShadow = !isClearSantafColor(bhColor);
+                pergolaGroup.add(roofU);
+
+                const addUSideStrip = (centerX) => {
+                    // אותו מפתח כמו קורת הצד של המסגרת — בלי הארכה מלאכותית
+                    const d = Math.max(0.15, sideSpanU - 2 * frameWidth + uFrontOh);
+                    const zB = zWallU + frameWidth;
+                    const zC = zB + d / 2;
+                    const sg = new THREE.PlaneGeometry(frameWidth, d, 4, 28);
+                    const sp = sg.attributes.position;
+                    const wavesSide = Math.max(6, Math.round(d / 0.16));
+                    for (let i = 0; i < sp.count; i++) {
+                        const y0 = sp.getY(i);
+                        const yNorm = y0 / Math.max(d / 2, 0.01);
+                        const ripple = Math.sin(yNorm * Math.PI * wavesSide) * bhWave;
+                        const micro = Math.sin(yNorm * Math.PI * wavesSide * 2) * (bhWave * 0.22);
+                        sp.setZ(i, ripple + micro);
+                    }
+                    sp.needsUpdate = true;
+                    sg.computeVertexNormals();
+                    const sideRoof = new THREE.Mesh(sg, roofMat);
+                    sideRoof.rotation.x = -Math.PI / 2;
+                    sideRoof.position.set(centerX, santafPlaneY, zC);
+                    sideRoof.castShadow = false;
+                    sideRoof.receiveShadow = !isClearSantafColor(bhColor);
+                    pergolaGroup.add(sideRoof);
+                };
+                addUSideStrip(-L / 2 + frameWidth / 2);
+                addUSideStrip(L / 2 - frameWidth / 2);
+            } else {
+            const roofW = Math.max(0.2, L - 2 * frameWidth);
+            const trapZBack = hasTrap ? trapWallZ(yL, yR) : 0;
+            const roofD = hasTrap
+                ? Math.max(0.2, Math.max(yL, yR) - 2 * frameWidth)
+                : Math.max(0.2, W - 2 * frameWidth + frontOverhang);
+            // מרכז המישור ב-Z; אחרי rotation.x=-PI/2: worldZ = roofZ - localY
+            const roofZ = hasTrap ? (trapZBack + frameWidth + roofD / 2) : (-W / 2 + frameWidth / 2 + roofD / 2);
             const segX = 120;
-            const segZ = 28;
+            const segZ = hasTrap ? 48 : 28;
             const geom = new THREE.PlaneGeometry(roofW, roofD, segX, segZ);
             const pos = geom.attributes.position;
-            const waves = Math.max(6, Math.round(roofW / 0.16)); // corrugation along width (horizontal)
+            const waves = Math.max(6, Math.round(roofW / 0.16));
+            const halfRoofW = roofW / 2;
             for (let i = 0; i < pos.count; i++) {
-                const x0 = pos.getX(i);
-                const yNorm = (x0 / (roofW / 2)); // -1..1 along width
+                let x0 = pos.getX(i);
+                let lz = pos.getY(i);
+                if (hasTrap) {
+                    // מיפוי המלבן לטרפז: בכל X העומק המקומי נמתח רק עד היציאה באותו צד
+                    x0 = Math.max(-halfRoofW, Math.min(halfRoofW, x0));
+                    const depthAtX = trapDepthAt(x0, L, yL, yR);
+                    const usableD = Math.max(0.05, depthAtX - 2 * frameWidth);
+                    // lz=+roofD/2 → גב הקיר, lz=-roofD/2 → חזית (עומק מלא של ה-bbox)
+                    const tFront = (roofD / 2 - lz) / Math.max(roofD, 0.01);
+                    const worldZ = trapZBack + frameWidth + tFront * usableD;
+                    lz = roofZ - worldZ;
+                    pos.setX(i, x0);
+                    pos.setY(i, lz);
+                }
+                const yNorm = halfRoofW > 1e-6 ? (x0 / halfRoofW) : 0;
                 const ripple = Math.sin(yNorm * Math.PI * waves) * bhWave;
                 const micro = Math.sin(yNorm * Math.PI * waves * 2) * (bhWave * 0.22);
                 pos.setZ(i, ripple + micro);
             }
             pos.needsUpdate = true;
             geom.computeVertexNormals();
-            const roofMat = createSantafMaterial(bhColor);
             const roof = new THREE.Mesh(geom, roofMat);
             roof.rotation.x = -Math.PI / 2;
             roof.position.set(0, santafPlaneY, roofZ);
             roof.castShadow = false;
             roof.receiveShadow = !isClearSantafColor(bhColor);
             pergolaGroup.add(roof);
-            // פסי סנטף מעל קורות הצד (ימין/שמאל) — יושבים על הפרופיל מהצד; המישור המרכזי (חזית/אחור) לא משתנה
-            if (!hasLNotch) {
+            if (!hasLNotch && !hasTrap) {
                 const sideSegW = 6;
                 const sideSegD = 28;
                 const wavesSide = Math.max(6, Math.round(roofD / 0.16));
@@ -2713,6 +3319,7 @@
                 };
                 addSideStrip(L / 2 - frameWidth / 2);
                 addSideStrip(-L / 2 + frameWidth / 2);
+            }
             }
         }
 

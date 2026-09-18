@@ -12,6 +12,8 @@ export type FenceCalcResult = {
   bomHtml: string;
   hardwareHtml: string;
   instructionsHtml: string;
+  wasteHtml: string;
+  wasteBadgeText: string;
   frameHex: string;
   slatHex: string;
   spacerHex: string;
@@ -36,6 +38,8 @@ export const EMPTY_FENCE_RESULT: FenceCalcResult = {
   bomHtml: "",
   hardwareHtml: "",
   instructionsHtml: "",
+  wasteHtml: "",
+  wasteBadgeText: "",
   frameHex: "#888888",
   slatHex: "#888888",
   spacerHex: "#888888",

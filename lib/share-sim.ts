@@ -17,8 +17,16 @@ export type SharePergolaConfig = {
   postsBack?: number;
   hasPosts?: boolean;
   isLShape: boolean;
+  isUShape?: boolean;
   lWallWidth: number;
   lWallDepth: number;
+  uWingWallLeft?: number;
+  uWingWallRight?: number;
+  uNotchDepthLeft?: string | number;
+  uNotchDepthRight?: string | number;
+  trapezoidMode?: boolean;
+  exitLeft?: number;
+  exitRight?: number;
   lShapeSide: string;
   frameHex: string;
   slatHex: string;
@@ -127,6 +135,13 @@ export function appendPergolaShareUrlParams(params: URLSearchParams, p: SharePer
   if (p.screenColor && p.screenColor !== "black") params.set("sc", p.screenColor);
   if (p.env === "villa" || p.env === "balcony" || p.env === "garden") params.set("env", p.env);
   else params.set("env", "villa");
+  if (p.trapezoidMode) params.set("trapezoidMode", "1");
+  if (typeof p.exitLeft === "number" && p.exitLeft > 0) params.set("exitLeft", String(p.exitLeft));
+  if (typeof p.exitRight === "number" && p.exitRight > 0) params.set("exitRight", String(p.exitRight));
+  if (typeof p.uWingWallLeft === "number" && p.uWingWallLeft > 0) params.set("uWingWallLeft", String(p.uWingWallLeft));
+  if (typeof p.uWingWallRight === "number" && p.uWingWallRight > 0) params.set("uWingWallRight", String(p.uWingWallRight));
+  if (p.uNotchDepthLeft !== undefined && p.uNotchDepthLeft !== "") params.set("uNotchDepthLeft", String(p.uNotchDepthLeft));
+  if (p.uNotchDepthRight !== undefined && p.uNotchDepthRight !== "") params.set("uNotchDepthRight", String(p.uNotchDepthRight));
 }
 
 export type LiveSimConfig = Partial<

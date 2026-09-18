@@ -929,7 +929,7 @@ export default function AluminumSimulator() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="flex justify-between text-xs font-bold mb-1">
-                    אורך (ס&quot;מ):{" "}
+                    אורך (ס״מ):{" "}
                     <input
                       type="number"
                       value={dimL}
@@ -948,7 +948,7 @@ export default function AluminumSimulator() {
                 </div>
                 <div>
                   <label className="flex justify-between text-xs font-bold mb-1">
-                    יציאה (ס&quot;מ):{" "}
+                    יציאה (ס״מ):{" "}
                     <input
                       type="number"
                       value={dimW}
@@ -1118,7 +1118,7 @@ export default function AluminumSimulator() {
                     </div>
                     <div>
                       <label className="text-xs font-bold block mb-1">
-                        מרווח: {gapVal} ס&quot;מ
+                        מרווח: {gapVal} ס״מ
                       </label>
                       <input
                         type="range"

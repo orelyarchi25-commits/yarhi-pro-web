@@ -213,7 +213,7 @@ export function profileNameWithIconHtml(
     return `<span class="${extraClass}">${escapeHtml(profileName)}</span>`;
   }
   const icon = getProfileIconSvgMarkup(key);
-  return `<span class="inline-flex items-center gap-2 ${extraClass}" style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">${icon}<span>${escapeHtml(profileName)}</span></span>`;
+  return `<span class="inline-flex items-center gap-2 ${extraClass}" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;max-width:100%;white-space:normal">${icon}<span style="white-space:normal;word-break:break-word;overflow-wrap:anywhere">${escapeHtml(profileName)}</span></span>`;
 }
 
 function escapeHtml(s: string): string {

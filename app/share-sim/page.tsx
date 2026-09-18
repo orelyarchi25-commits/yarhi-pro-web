@@ -9,7 +9,7 @@ import {
   type ShareSimPayload,
 } from "@/lib/share-sim";
 
-const SIM_REV = "fence-zigzag-v12";
+const SIM_REV = "pergola-u-trap-v13";
 
 function pergolaIframeSrc(p: SharePergolaConfig): string {
   const params = new URLSearchParams();
@@ -30,6 +30,7 @@ function pergolaIframeSrc(p: SharePergolaConfig): string {
       : "0"
   );
   params.set("isLShape", p.isLShape ? "1" : "0");
+  params.set("isUShape", p.isUShape ? "1" : "0");
   params.set("lWallWidth", String(p.lWallWidth || 0));
   params.set("lWallDepth", String(p.lWallDepth || 0));
   params.set("lShapeSide", p.lShapeSide || "right");

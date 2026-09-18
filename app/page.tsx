@@ -100,7 +100,7 @@ function parseView(v: string | null): ViewId {
   return (VIEW_IDS.includes(v as ViewId) ? v : "dashboard") as ViewId;
 }
 /** שינוי הערך אחרי עדכון public/sim.html — שובר מטמון דפדפן/CDN */
-const SIM_VERSION = "fence-zigzag-v12";
+const SIM_VERSION = "pergola-u-trap-v13";
 
 type FenceSide = "left" | "right";
 type FenceSegRow = {
@@ -487,11 +487,58 @@ function escapeHtmlAttrForQuote(s: string): string {
 }
 
 const PERGOLA_IDS = [
-  "custName", "custPhone", "custAddress", "custInternalNotes", "lengthWall", "exitWidth", "isLShape", "lWallWidth", "lWallDepth", "lShapeSide",
+  "custName", "custPhone", "custAddress", "custInternalNotes", "lengthWall", "exitWidth", "exitLeft", "exitRight", "trapezoidMode", "isLShape", "isUShape", "lWallWidth", "lWallDepth", "uWingWallLeft", "uWingWallRight", "uNotchDepthLeft", "uNotchDepthRight", "lShapeSide",
   "colorSelect", "shadeColorSelect", "frameType", "dividerSize", "dividerSmoothCount", "dividerLedCount", "shadingProfile",
   "spacing", "pricePerKg", "hasLed", "ledCount", "ledColor", "hasFan", "fanCount", "hasSantaf", "santafColor", "dripEdgeType",
   "sellPricePerSqm", "postCount", "postCountFront", "postCountRight", "postCountLeft", "postCountBack", "postHeight", "postType", "tensionerCount", "tensionerColor",
 ];
+
+function syncExitWidthFromSplit(left: string, right: string): string {
+  const l = parseFloat(left);
+  const r = parseFloat(right);
+  if (!Number.isNaN(l) && !Number.isNaN(r)) return String((l + r) / 2);
+  if (!Number.isNaN(l)) return left;
+  if (!Number.isNaN(r)) return right;
+  return "";
+}
+
+function parseDimCm(v: string): number {
+  const n = parseFloat(String(v).replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** כנף חסרה מחושבת מקיר כולל − מגרעת − כנף ידועה */
+function syncUWingWalls(
+  totalWall: string,
+  notchW: string,
+  left: string,
+  right: string,
+  changed: "left" | "right" | "wall" | "notch"
+): { left?: string; right?: string } {
+  const t = parseDimCm(totalWall);
+  const n = parseDimCm(notchW);
+  if (t <= 0 || n <= 0 || n >= t) return {};
+  const spare = t - n;
+  const l = parseDimCm(left);
+  const r = parseDimCm(right);
+  if (changed === "left" && l > 0) return { right: String(Math.max(0, spare - l)) };
+  if (changed === "right" && r > 0) return { left: String(Math.max(0, spare - r)) };
+  if ((changed === "wall" || changed === "notch") && l > 0 && r <= 0) return { right: String(Math.max(0, spare - l)) };
+  if ((changed === "wall" || changed === "notch") && r > 0 && l <= 0) return { left: String(Math.max(0, spare - r)) };
+  if ((changed === "wall" || changed === "notch") && l <= 0 && r <= 0) {
+    const half = spare / 2;
+    return { left: String(half), right: String(half) };
+  }
+  return {};
+}
+
+function syncUNotchDepth(left: string, right: string, changed: "left" | "right"): { left?: string; right?: string } {
+  const l = parseDimCm(left);
+  const r = parseDimCm(right);
+  if (changed === "left" && l > 0 && r <= 0) return { right: left };
+  if (changed === "right" && r > 0 && l <= 0) return { left: right };
+  return {};
+}
 
 /** שער ללא useSearchParams – מונע תקיעת Suspense לפני אתחול Auth (Next.js) */
 function HomeGate() {
@@ -674,9 +721,17 @@ function AuthenticatedPageContent() {
   const [custInternalNotes, setCustInternalNotes] = useState("");
   const [lengthWall, setLengthWall] = useState("");
   const [exitWidth, setExitWidth] = useState("");
+  const [exitLeft, setExitLeft] = useState("");
+  const [exitRight, setExitRight] = useState("");
+  const [trapezoidMode, setTrapezoidMode] = useState(false);
   const [isLShape, setIsLShape] = useState(false);
+  const [isUShape, setIsUShape] = useState(false);
   const [lWallWidth, setLWallWidth] = useState("");
   const [lWallDepth, setLWallDepth] = useState("");
+  const [uWingWallLeft, setUWingWallLeft] = useState("");
+  const [uWingWallRight, setUWingWallRight] = useState("");
+  const [uNotchDepthLeft, setUNotchDepthLeft] = useState("");
+  const [uNotchDepthRight, setUNotchDepthRight] = useState("");
   const [lShapeSide, setLShapeSide] = useState<"right" | "left">("right");
   const [colorSelect, setColorSelect] = useState("RAL 9016");
   const [shadeColorSelect, setShadeColorSelect] = useState("RAL 9016");
@@ -686,6 +741,17 @@ function AuthenticatedPageContent() {
   const [dividerLedCount, setDividerLedCount] = useState("");
   const [shadingProfile, setShadingProfile] = useState("20x40");
   const [spacing, setSpacing] = useState("2");
+  const [spacingIsCustom, setSpacingIsCustom] = useState(false);
+  const applyLoadedSpacing = useCallback((raw: unknown) => {
+    const v = String(raw ?? "2");
+    if (v === "0" || v === "2" || v === "4") {
+      setSpacingIsCustom(false);
+      setSpacing(v);
+    } else {
+      setSpacingIsCustom(true);
+      setSpacing(v);
+    }
+  }, []);
   const [hasSantaf, setHasSantaf] = useState(false);
   const [santafColor, setSantafColor] = useState("שקוף");
   const [dripEdgeType, setDripEdgeType] = useState("wave2.5");
@@ -753,6 +819,17 @@ function AuthenticatedPageContent() {
   const [fenceInGround, setFenceInGround] = useState(false);
   const [fenceSlat, setFenceSlat] = useState("100");
   const [fenceGap, setFenceGap] = useState("2");
+  const [fenceGapIsCustom, setFenceGapIsCustom] = useState(false);
+  const applyLoadedFenceGap = useCallback((raw: unknown) => {
+    const v = String(raw ?? "2");
+    if (v === "0" || v === "1" || v === "1.5" || v === "2" || v === "3") {
+      setFenceGapIsCustom(false);
+      setFenceGap(v);
+    } else {
+      setFenceGapIsCustom(true);
+      setFenceGap(v);
+    }
+  }, []);
   const [fenceColor, setFenceColor] = useState("RAL 9016");
   const [fenceSlatColor, setFenceSlatColor] = useState("RAL 9016");
 
@@ -1494,10 +1571,22 @@ function AuthenticatedPageContent() {
       if (s.custAddress !== undefined) setCustAddress(String(s.custAddress));
       if (s.custInternalNotes !== undefined) setCustInternalNotes(String(s.custInternalNotes));
       if (s.lengthWall !== undefined) setLengthWall(String(s.lengthWall));
+      if (s.exitLeft !== undefined) setExitLeft(String(s.exitLeft));
+      else if (s.exitWidth !== undefined) setExitLeft(String(s.exitWidth));
+      if (s.exitRight !== undefined) setExitRight(String(s.exitRight));
+      else if (s.exitWidth !== undefined) setExitRight(String(s.exitWidth));
       if (s.exitWidth !== undefined) setExitWidth(String(s.exitWidth));
+      if (s.trapezoidMode !== undefined) setTrapezoidMode(Boolean(s.trapezoidMode));
       if (s.isLShape !== undefined) setIsLShape(Boolean(s.isLShape));
+      if (s.isUShape !== undefined) setIsUShape(Boolean(s.isUShape));
       if (s.lWallWidth !== undefined) setLWallWidth(String(s.lWallWidth));
       if (s.lWallDepth !== undefined) setLWallDepth(String(s.lWallDepth));
+      if (s.uWingWallLeft !== undefined) setUWingWallLeft(String(s.uWingWallLeft));
+      if (s.uWingWallRight !== undefined) setUWingWallRight(String(s.uWingWallRight));
+      if (s.uNotchDepthLeft !== undefined) setUNotchDepthLeft(String(s.uNotchDepthLeft));
+      else if (s.isUShape && s.lWallDepth !== undefined) setUNotchDepthLeft(String(s.lWallDepth));
+      if (s.uNotchDepthRight !== undefined) setUNotchDepthRight(String(s.uNotchDepthRight));
+      else if (s.isUShape && s.lWallDepth !== undefined) setUNotchDepthRight(String(s.lWallDepth));
       if (s.lShapeSide !== undefined) setLShapeSide((s.lShapeSide as "left" | "right") || "right");
       if (s.colorSelect !== undefined) setColorSelect(String(s.colorSelect));
       if (s.shadeColorSelect !== undefined) setShadeColorSelect(String(s.shadeColorSelect));
@@ -1506,7 +1595,7 @@ function AuthenticatedPageContent() {
       if (s.dividerSmoothCount !== undefined) setDividerSmoothCount(String(s.dividerSmoothCount));
       if (s.dividerLedCount !== undefined) setDividerLedCount(String(s.dividerLedCount));
       if (s.shadingProfile !== undefined) setShadingProfile(String(s.shadingProfile));
-      if (s.spacing !== undefined) setSpacing(String(s.spacing));
+      if (s.spacing !== undefined) applyLoadedSpacing(s.spacing);
       if (s.pricePerKg !== undefined) setPricePerKg(String(s.pricePerKg));
       if (s.hasLed !== undefined) setHasLed(Boolean(s.hasLed));
       if (s.ledCount !== undefined) setLedCount(String(s.ledCount));
@@ -1736,10 +1825,22 @@ function AuthenticatedPageContent() {
           if (s.custAddress !== undefined) setCustAddress(String(s.custAddress));
           if (s.custInternalNotes !== undefined) setCustInternalNotes(String(s.custInternalNotes));
           if (s.lengthWall !== undefined) setLengthWall(String(s.lengthWall));
+          if (s.exitLeft !== undefined) setExitLeft(String(s.exitLeft));
+          else if (s.exitWidth !== undefined) setExitLeft(String(s.exitWidth));
+          if (s.exitRight !== undefined) setExitRight(String(s.exitRight));
+          else if (s.exitWidth !== undefined) setExitRight(String(s.exitWidth));
           if (s.exitWidth !== undefined) setExitWidth(String(s.exitWidth));
+          if (s.trapezoidMode !== undefined) setTrapezoidMode(Boolean(s.trapezoidMode));
           if (s.isLShape !== undefined) setIsLShape(Boolean(s.isLShape));
+      if (s.isUShape !== undefined) setIsUShape(Boolean(s.isUShape));
           if (s.lWallWidth !== undefined) setLWallWidth(String(s.lWallWidth));
           if (s.lWallDepth !== undefined) setLWallDepth(String(s.lWallDepth));
+          if (s.uWingWallLeft !== undefined) setUWingWallLeft(String(s.uWingWallLeft));
+          if (s.uWingWallRight !== undefined) setUWingWallRight(String(s.uWingWallRight));
+          if (s.uNotchDepthLeft !== undefined) setUNotchDepthLeft(String(s.uNotchDepthLeft));
+          else if (s.isUShape && s.lWallDepth !== undefined) setUNotchDepthLeft(String(s.lWallDepth));
+          if (s.uNotchDepthRight !== undefined) setUNotchDepthRight(String(s.uNotchDepthRight));
+          else if (s.isUShape && s.lWallDepth !== undefined) setUNotchDepthRight(String(s.lWallDepth));
           if (s.lShapeSide !== undefined) setLShapeSide((s.lShapeSide as "left" | "right") || "right");
           if (s.colorSelect !== undefined) setColorSelect(String(s.colorSelect));
           if (s.shadeColorSelect !== undefined) setShadeColorSelect(String(s.shadeColorSelect));
@@ -1748,7 +1849,7 @@ function AuthenticatedPageContent() {
           if (s.dividerSmoothCount !== undefined) setDividerSmoothCount(String(s.dividerSmoothCount));
           if (s.dividerLedCount !== undefined) setDividerLedCount(String(s.dividerLedCount));
           if (s.shadingProfile !== undefined) setShadingProfile(String(s.shadingProfile));
-          if (s.spacing !== undefined) setSpacing(String(s.spacing));
+          if (s.spacing !== undefined) applyLoadedSpacing(s.spacing);
           if (s.pricePerKg !== undefined) setPricePerKg(String(s.pricePerKg));
           if (s.hasLed !== undefined) setHasLed(Boolean(s.hasLed));
           if (s.ledCount !== undefined) setLedCount(String(s.ledCount));
@@ -1798,7 +1899,7 @@ function AuthenticatedPageContent() {
           if (f.fenceCustInternalNotes !== undefined) setFenceCustInternalNotes(String(f.fenceCustInternalNotes));
           setFenceInGround(false);
           if (f.fenceSlat !== undefined) setFenceSlat(String(f.fenceSlat));
-          if (f.fenceGap !== undefined) setFenceGap(String(f.fenceGap));
+          if (f.fenceGap !== undefined) applyLoadedFenceGap(f.fenceGap);
           if (f.fenceColor !== undefined) setFenceColor(String(f.fenceColor));
           if (f.fenceSlatColor !== undefined) setFenceSlatColor(String(f.fenceSlatColor));
           if (Array.isArray(f.fenceSegments) && f.fenceSegments.length > 0) {
@@ -1964,9 +2065,17 @@ function AuthenticatedPageContent() {
               pergola: {
                 lengthWall,
                 exitWidth,
+                exitLeft,
+                exitRight,
+                trapezoidMode,
                 isLShape,
+                isUShape,
                 lWallWidth,
                 lWallDepth,
+                uWingWallLeft,
+                uWingWallRight,
+                uNotchDepthLeft,
+                uNotchDepthRight,
                 lShapeSide,
                 colorSelect,
                 shadeColorSelect,
@@ -2025,9 +2134,17 @@ function AuthenticatedPageContent() {
   }, [
     lengthWall,
     exitWidth,
+    exitLeft,
+    exitRight,
+    trapezoidMode,
     isLShape,
+    isUShape,
     lWallWidth,
     lWallDepth,
+    uWingWallLeft,
+    uWingWallRight,
+    uNotchDepthLeft,
+    uNotchDepthRight,
     lShapeSide,
     colorSelect,
     shadeColorSelect,
@@ -2367,6 +2484,24 @@ function AuthenticatedPageContent() {
       postsFront = 2;
     }
     const hasPosts = postsFront + postsRight + postsLeft + postsBack > 0;
+    const inputL = parseFloat(lengthWall) || L;
+    const notchW = isUShape ? parseFloat(lWallWidth) || 0 : 0;
+    const uWings =
+      isUShape && inputL > 0 && notchW > 0
+        ? (() => {
+            const leftIn = parseFloat(uWingWallLeft);
+            const rightIn = parseFloat(uWingWallRight);
+            const hasLeft = Number.isFinite(leftIn) && leftIn > 0;
+            const hasRight = Number.isFinite(rightIn) && rightIn > 0;
+            if (hasLeft && hasRight) return { left: leftIn, right: rightIn };
+            if (hasLeft) return { left: leftIn, right: Math.max(0, inputL - notchW - leftIn) };
+            if (hasRight) return { right: rightIn, left: Math.max(0, inputL - notchW - rightIn) };
+            const half = Math.max(0, (inputL - notchW) / 2);
+            return { left: half, right: half };
+          })()
+        : { left: 0, right: 0 };
+    const yL = parseFloat(exitLeft) || parseFloat(exitWidth) || W;
+    const yR = parseFloat(exitRight) || parseFloat(exitWidth) || W;
     return {
       L,
       W,
@@ -2375,9 +2510,17 @@ function AuthenticatedPageContent() {
       ...(hasPosts
         ? { postsFront, postsRight, postsLeft, postsBack, hasPosts: true as const }
         : {}),
-      isLShape,
-      lWallWidth: isLShape ? parseFloat(lWallWidth) || 0 : 0,
-      lWallDepth: isLShape ? parseFloat(lWallDepth) || 0 : 0,
+      isLShape: isLShape && !isUShape,
+      isUShape,
+      lWallWidth: isLShape || isUShape ? parseFloat(lWallWidth) || 0 : 0,
+      lWallDepth: isLShape && !isUShape ? parseFloat(lWallDepth) || 0 : 0,
+      uWingWallLeft: isUShape ? uWings.left : 0,
+      uWingWallRight: isUShape ? uWings.right : 0,
+      uNotchDepthLeft: isUShape ? uNotchDepthLeft : "",
+      uNotchDepthRight: isUShape ? uNotchDepthRight : "",
+      trapezoidMode: trapezoidMode && !isLShape && !isUShape,
+      exitLeft: trapezoidMode ? yL : undefined,
+      exitRight: trapezoidMode ? yR : undefined,
       lShapeSide,
       frameHex: pergolaResult.frameHex,
       slatHex: pergolaResult.shadeHex,
@@ -2413,8 +2556,16 @@ function AuthenticatedPageContent() {
     postCount,
     postHeight,
     isLShape,
+    isUShape,
+    trapezoidMode,
+    exitLeft,
+    exitRight,
     lWallWidth,
     lWallDepth,
+    uWingWallLeft,
+    uWingWallRight,
+    uNotchDepthLeft,
+    uNotchDepthRight,
     lShapeSide,
     hasSantaf,
     frameType,
@@ -3067,7 +3218,7 @@ ${logoBlock}
     if (typeof window === "undefined") return;
     const totalPostsBySide = (parseInt(postCountFront) || 0) + (parseInt(postCountRight) || 0) + (parseInt(postCountLeft) || 0) + (parseInt(postCountBack) || 0);
     const state: Record<string, unknown> = {
-      custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, isLShape, lWallWidth, lWallDepth, lShapeSide,
+      custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, exitLeft, exitRight, trapezoidMode, isLShape, isUShape, lWallWidth, lWallDepth, uWingWallLeft, uWingWallRight, uNotchDepthLeft, uNotchDepthRight, lShapeSide,
       colorSelect, shadeColorSelect, frameType, dividerSize, dividerSmoothCount, dividerLedCount, shadingProfile,
       spacing, pricePerKg, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, dripEdgeType,
       sellPricePerSqm, postCount: totalPostsBySide > 0 ? totalPostsBySide : postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postHeight, postType, tensionerCount, tensionerColor,
@@ -3081,7 +3232,7 @@ ${logoBlock}
       })),
     };
     try { localStorage.setItem("yarhi_current_calc", JSON.stringify(state)); } catch {}
-  }, [custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, isLShape, lWallWidth, lWallDepth, lShapeSide, colorSelect, shadeColorSelect, frameType, dividerSize, dividerSmoothCount, dividerLedCount, shadingProfile, spacing, pricePerKg, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, dripEdgeType, sellPricePerSqm, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postHeight, postType, tensionerCount, tensionerColor, hasVitrines, vitrineOpenings]);
+  }, [custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, exitLeft, exitRight, trapezoidMode, isLShape, isUShape, lWallWidth, lWallDepth, uWingWallLeft, uWingWallRight, uNotchDepthLeft, uNotchDepthRight, lShapeSide, colorSelect, shadeColorSelect, frameType, dividerSize, dividerSmoothCount, dividerLedCount, shadingProfile, spacing, pricePerKg, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, dripEdgeType, sellPricePerSqm, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postHeight, postType, tensionerCount, tensionerColor, hasVitrines, vitrineOpenings]);
 
   const addVitrineOpening = useCallback(() => {
     setVitrineOpenings((prev) => [...prev, createVitrineOpening(Date.now())]);
@@ -3109,11 +3260,11 @@ ${logoBlock}
     setPergolaCrmEditId(null);
     setFenceCrmEditId(null);
     setCustName(""); setCustPhone(""); setCustAddress(""); setCustInternalNotes(""); setLengthWall(""); setExitWidth("");
-    setLWallWidth(""); setLWallDepth(""); setLShapeSide("right"); setDividerSmoothCount(""); setDividerLedCount("");
+    setLWallWidth(""); setLWallDepth(""); setUWingWallLeft(""); setUWingWallRight(""); setLShapeSide("right"); setDividerSmoothCount(""); setDividerLedCount("");
     setPostCount(""); setPostCountFront(""); setPostCountRight(""); setPostCountLeft(""); setPostCountBack(""); setPostHeight(""); setTensionerCount(""); setTensionerColor(""); setLedCount(""); setFanCount("");
     setColorSelect("RAL 9016"); setShadeColorSelect("RAL 9016"); setFrameType("doubleT"); setDividerSize("120");
-    setShadingProfile("20x40"); setSpacing("2"); setPostType("100"); setLedColor("לבן חם"); setSantafColor("שקוף"); setDripEdgeType("wave2.5");
-    setIsLShape(false); setHasSantaf(false); setHasLed(false); setHasFan(false);
+    setShadingProfile("20x40"); setSpacing("2"); setSpacingIsCustom(false); setPostType("100"); setLedColor("לבן חם"); setSantafColor("שקוף"); setDripEdgeType("wave2.5");
+    setIsLShape(false); setIsUShape(false); setHasSantaf(false); setHasLed(false); setHasFan(false);
     setHasVitrines(false); setVitrineOpenings([createVitrineOpening(1)]);
     try { localStorage.removeItem("yarhi_current_calc"); } catch {}
     showAlert("הטופס אופס בהצלחה");
@@ -3144,7 +3295,7 @@ ${logoBlock}
     const instCost = pergolaResult.installCost;
     const totalPostsBySide = (parseInt(postCountFront) || 0) + (parseInt(postCountRight) || 0) + (parseInt(postCountLeft) || 0) + (parseInt(postCountBack) || 0);
     const currentState: Record<string, unknown> = {
-      custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, isLShape, lWallWidth, lWallDepth, lShapeSide,
+      custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, exitLeft, exitRight, trapezoidMode, isLShape, isUShape, lWallWidth, lWallDepth, uWingWallLeft, uWingWallRight, uNotchDepthLeft, uNotchDepthRight, lShapeSide,
       colorSelect, shadeColorSelect, frameType, dividerSize, dividerSmoothCount, dividerLedCount, shadingProfile,
       spacing, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, dripEdgeType,
       postCount: totalPostsBySide > 0 ? totalPostsBySide : postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postHeight, postType, tensionerCount, tensionerColor,
@@ -3207,9 +3358,15 @@ ${logoBlock}
     setCustInternalNotes("");
     setLengthWall("");
     setExitWidth("");
+    setExitLeft("");
+    setExitRight("");
+    setTrapezoidMode(false);
     setIsLShape(false);
+    setIsUShape(false);
     setLWallWidth("");
     setLWallDepth("");
+    setUWingWallLeft("");
+    setUWingWallRight("");
     setLShapeSide("right");
     setDividerSmoothCount("");
     setDividerLedCount("");
@@ -3233,9 +3390,17 @@ ${logoBlock}
         custInternalNotes: "",
         lengthWall: "",
         exitWidth: "",
+        exitLeft: "",
+        exitRight: "",
+        trapezoidMode: false,
         isLShape: false,
+        isUShape: false,
         lWallWidth: "",
         lWallDepth: "",
+        uNotchDepthLeft: "",
+        uNotchDepthRight: "",
+        uWingWallLeft: "",
+        uWingWallRight: "",
         lShapeSide: "right",
         colorSelect,
         shadeColorSelect,
@@ -3278,9 +3443,17 @@ ${logoBlock}
     custInternalNotes,
     lengthWall,
     exitWidth,
+    exitLeft,
+    exitRight,
+    trapezoidMode,
     isLShape,
+    isUShape,
     lWallWidth,
     lWallDepth,
+    uWingWallLeft,
+    uWingWallRight,
+    uNotchDepthLeft,
+    uNotchDepthRight,
     lShapeSide,
     pergolaCrmEditId,
     crmData,
@@ -3353,7 +3526,7 @@ ${logoBlock}
     const L = pergolaResult.L;
     const W = pergolaResult.W;
     const inputL = parseFloat(lengthWall) || 0;
-    const lW = isLShape ? parseFloat(lWallWidth) || 0 : 0;
+    const lW = isLShape || isUShape ? parseFloat(lWallWidth) || 0 : 0;
     const nDividersTotal = pergolaResult.nDividersTotal;
     const divSizeStr = dividerSize === "100" ? "100/40" : "120/40";
     const frameTypeLabels: Record<string, string> = { doubleT: "דאבל טי 140/40", doubleTHiTech140: "דאבל טי הייטק 140/40", doubleTHiTech120: "דאבל טי הייטק 120/40", smooth: "פרופיל חלק 120/40" };
@@ -3443,7 +3616,11 @@ ${logoBlock}
             })
             .join("")
         : "";
-    const dimensionsText = isLShape ? `חזית: ${inputL + lW} ס"מ | יציאה: ${W} ס"מ` : `חזית: ${L} ס"מ | יציאה: ${W} ס"מ`;
+    const dimensionsText = isUShape
+      ? `חזית: ${inputL} ס"מ | מרכז: ${W} ס"מ | כנף שמאל: ${W + (parseFloat(uNotchDepthLeft) || 0)} | כנף ימין: ${W + (parseFloat(uNotchDepthRight) || 0)} | מגרעת: ${lW} | קיר שמ' ${uWingWallLeft || "—"} / ימ' ${uWingWallRight || "—"}`
+      : isLShape
+        ? `חזית: ${inputL + lW} ס"מ | יציאה: ${W} ס"מ`
+        : `חזית: ${L} ס"מ | יציאה: ${W} ס"מ`;
     const frameHex = pergolaResult.frameHex;
     const shadeHex = pergolaResult.shadeHex;
     const santafHexQuote = pergolaResult.santafHex;
@@ -3727,7 +3904,7 @@ ${logoBlock}
       </div>
       </div></body></html>`);
     w.document.close();
-  }, [pergolaResult, custName, custPhone, custAddress, sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, getLogoHtml, showAlert, lengthWall, exitWidth, isLShape, lWallWidth, dividerSize, dividerSmoothCount, dividerLedCount, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, frameType, shadingProfile, spacing, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postType, colorSelect, shadeColorSelect, simCaption, vatPercentLabelUi, hasVitrines, vitrineQuote, businessVatDecimal, sysQuoteDeliveryDays, sysWorkWarrantyYears, sysPaymentStage1Percent, sysPaymentStage2Percent,     sysPaymentStage3Percent, resolveActiveBundleUnitLabel, bundleProjectId, activeUnitId, crmData, pergolaCrmEditId]);
+  }, [pergolaResult, custName, custPhone, custAddress, sysContractorName, sysCompanyId, sysPhone, sysAddress, sysEmail, getLogoHtml, showAlert, lengthWall, exitWidth, isLShape, isUShape, lWallWidth, lWallDepth, uWingWallLeft, uWingWallRight, uNotchDepthLeft, uNotchDepthRight, dividerSize, dividerSmoothCount, dividerLedCount, hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, frameType, shadingProfile, spacing, postCount, postCountFront, postCountRight, postCountLeft, postCountBack, postType, colorSelect, shadeColorSelect, simCaption, vatPercentLabelUi, hasVitrines, vitrineQuote, businessVatDecimal, sysQuoteDeliveryDays, sysWorkWarrantyYears, sysPaymentStage1Percent, sysPaymentStage2Percent,     sysPaymentStage3Percent, resolveActiveBundleUnitLabel, bundleProjectId, activeUnitId, crmData, pergolaCrmEditId]);
 
   const printBundleCustomerQuote = useCallback(() => {
     if (bundleProjectId == null) {
@@ -3894,9 +4071,17 @@ ${logoBlock}
     fenceSimEnv,
     lengthWall,
     exitWidth,
+    exitLeft,
+    exitRight,
+    trapezoidMode,
     isLShape,
+    isUShape,
     lWallWidth,
     lWallDepth,
+    uWingWallLeft,
+    uWingWallRight,
+    uNotchDepthLeft,
+    uNotchDepthRight,
     lShapeSide,
     colorSelect,
     shadeColorSelect,
@@ -3970,9 +4155,17 @@ ${logoBlock}
       custInternalNotes,
       lengthWall,
       exitWidth,
+      exitLeft,
+      exitRight,
+      trapezoidMode,
       isLShape,
+      isUShape,
       lWallWidth,
       lWallDepth,
+      uNotchDepthLeft,
+      uNotchDepthRight,
+      uWingWallLeft,
+      uWingWallRight,
       lShapeSide,
       colorSelect,
       shadeColorSelect,
@@ -4009,7 +4202,7 @@ ${logoBlock}
       })),
     };
   }, [
-    custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, isLShape, lWallWidth, lWallDepth, lShapeSide,
+    custName, custPhone, custAddress, custInternalNotes, lengthWall, exitWidth, exitLeft, exitRight, trapezoidMode, isLShape, isUShape, lWallWidth, lWallDepth, uWingWallLeft, uWingWallRight, uNotchDepthLeft, uNotchDepthRight, lShapeSide,
     colorSelect, shadeColorSelect, frameType, dividerSize, dividerSmoothCount, dividerLedCount, shadingProfile, spacing,
     hasLed, ledCount, ledColor, hasFan, fanCount, hasSantaf, santafColor, dripEdgeType, postCount, postCountFront,
     postCountRight, postCountLeft, postCountBack, postHeight, postType, tensionerCount, tensionerColor, hasVitrines, vitrineOpenings,
@@ -4025,9 +4218,17 @@ ${logoBlock}
       else if (fieldKey === "custInternalNotes") setCustInternalNotes(String(v));
       else if (fieldKey === "lengthWall") setLengthWall(String(v));
       else if (fieldKey === "exitWidth") setExitWidth(String(v));
+      else if (fieldKey === "exitLeft") setExitLeft(String(v));
+      else if (fieldKey === "exitRight") setExitRight(String(v));
+      else if (fieldKey === "trapezoidMode") setTrapezoidMode(Boolean(v));
       else if (fieldKey === "isLShape") setIsLShape(Boolean(v));
+      else if (fieldKey === "isUShape") setIsUShape(Boolean(v));
       else if (fieldKey === "lWallWidth") setLWallWidth(String(v));
       else if (fieldKey === "lWallDepth") setLWallDepth(String(v));
+      else if (fieldKey === "uNotchDepthLeft") setUNotchDepthLeft(String(v));
+      else if (fieldKey === "uNotchDepthRight") setUNotchDepthRight(String(v));
+      else if (fieldKey === "uWingWallLeft") setUWingWallLeft(String(v));
+      else if (fieldKey === "uWingWallRight") setUWingWallRight(String(v));
       else if (fieldKey === "lShapeSide") setLShapeSide((v as "left") || "right");
       else if (fieldKey === "colorSelect") setColorSelect(String(v));
       else if (fieldKey === "shadeColorSelect") setShadeColorSelect(String(v));
@@ -4036,7 +4237,7 @@ ${logoBlock}
       else if (fieldKey === "dividerSmoothCount") setDividerSmoothCount(String(v));
       else if (fieldKey === "dividerLedCount") setDividerLedCount(String(v));
       else if (fieldKey === "shadingProfile") setShadingProfile(String(v));
-      else if (fieldKey === "spacing") setSpacing(String(v));
+      else if (fieldKey === "spacing") applyLoadedSpacing(v);
       else if (fieldKey === "hasLed") setHasLed(Boolean(v));
       else if (fieldKey === "ledCount") setLedCount(String(v));
       else if (fieldKey === "ledColor") setLedColor(String(v));
@@ -4057,6 +4258,8 @@ ${logoBlock}
       else if (fieldKey === "tensionerCount") setTensionerCount(String(v));
       else if (fieldKey === "tensionerColor") setTensionerColor(String(v));
     });
+    if (state.exitLeft === undefined && state.exitWidth !== undefined) setExitLeft(String(state.exitWidth));
+    if (state.exitRight === undefined && state.exitWidth !== undefined) setExitRight(String(state.exitWidth));
     setHasVitrines(Boolean(state.hasVitrines));
     if (Array.isArray(state.vitrineOpenings)) {
       const parsedOpenings = state.vitrineOpenings
@@ -4098,14 +4301,14 @@ ${logoBlock}
     setFenceCustAddress(s.fenceCustAddress ?? "");
     setFenceCustInternalNotes(s.fenceCustInternalNotes ?? "");
     setFenceSlat(s.fenceSlat ?? "100");
-    setFenceGap(s.fenceGap ?? "2");
+    applyLoadedFenceGap(s.fenceGap ?? "2");
     setFenceColor(s.fenceColor ?? "RAL 9016");
     setFenceSlatColor(s.fenceSlatColor ?? "RAL 9016");
     setFenceInGround(false);
     if (s.segs && s.segs.length > 0) setFenceSegments(s.segs.map((seg, i) => ({ id: Date.now() + i, ...seg })));
     else setFenceSegments(emptyFenceFronts());
     setFenceSimGate(normFenceShareGate(s.fenceSimGate));
-  }, []);
+  }, [applyLoadedFenceGap]);
 
   const snapshotActiveUnit = useCallback(
     (unit: ProjectUnit): ProjectUnit => {
@@ -4710,7 +4913,7 @@ ${logoBlock}
       setFenceCustAddress(s.fenceCustAddress ?? "");
       setFenceCustInternalNotes(s.fenceCustInternalNotes ?? "");
       setFenceSlat(s.fenceSlat ?? "100");
-      setFenceGap(s.fenceGap ?? "2");
+      applyLoadedFenceGap(s.fenceGap ?? "2");
       setFenceColor(s.fenceColor ?? "RAL 9016");
       setFenceSlatColor(s.fenceSlatColor ?? "RAL 9016");
       setFenceInGround(false);
@@ -4752,9 +4955,17 @@ ${logoBlock}
       else if (fieldKey === "custInternalNotes") setCustInternalNotes(String(v));
       else if (fieldKey === "lengthWall") setLengthWall(String(v));
       else if (fieldKey === "exitWidth") setExitWidth(String(v));
+      else if (fieldKey === "exitLeft") setExitLeft(String(v));
+      else if (fieldKey === "exitRight") setExitRight(String(v));
+      else if (fieldKey === "trapezoidMode") setTrapezoidMode(Boolean(v));
       else if (fieldKey === "isLShape") setIsLShape(Boolean(v));
+      else if (fieldKey === "isUShape") setIsUShape(Boolean(v));
       else if (fieldKey === "lWallWidth") setLWallWidth(String(v));
       else if (fieldKey === "lWallDepth") setLWallDepth(String(v));
+      else if (fieldKey === "uNotchDepthLeft") setUNotchDepthLeft(String(v));
+      else if (fieldKey === "uNotchDepthRight") setUNotchDepthRight(String(v));
+      else if (fieldKey === "uWingWallLeft") setUWingWallLeft(String(v));
+      else if (fieldKey === "uWingWallRight") setUWingWallRight(String(v));
       else if (fieldKey === "lShapeSide") setLShapeSide((v as "left") || "right");
       else if (fieldKey === "colorSelect") setColorSelect(String(v));
       else if (fieldKey === "shadeColorSelect") setShadeColorSelect(String(v));
@@ -4763,7 +4974,7 @@ ${logoBlock}
       else if (fieldKey === "dividerSmoothCount") setDividerSmoothCount(String(v));
       else if (fieldKey === "dividerLedCount") setDividerLedCount(String(v));
       else if (fieldKey === "shadingProfile") setShadingProfile(String(v));
-      else if (fieldKey === "spacing") setSpacing(String(v));
+      else if (fieldKey === "spacing") applyLoadedSpacing(v);
       else if (fieldKey === "hasSantaf") setHasSantaf(Boolean(v));
       else if (fieldKey === "santafColor") setSantafColor(String(v));
       else if (fieldKey === "dripEdgeType") setDripEdgeType(String(v));
@@ -4785,6 +4996,8 @@ ${logoBlock}
       else if (fieldKey === "tensionerCount") setTensionerCount(String(v));
       else if (fieldKey === "tensionerColor") setTensionerColor(String(v));
     });
+    if (state.exitLeft === undefined && state.exitWidth !== undefined) setExitLeft(String(state.exitWidth));
+    if (state.exitRight === undefined && state.exitWidth !== undefined) setExitRight(String(state.exitWidth));
     setHasVitrines(Boolean(state.hasVitrines));
     if (Array.isArray(state.vitrineOpenings)) {
       const parsedOpenings = state.vitrineOpenings
@@ -4858,9 +5071,17 @@ ${logoBlock}
         custInternalNotes,
         lengthWall,
         exitWidth,
+        exitLeft,
+        exitRight,
+        trapezoidMode,
         isLShape,
+      isUShape,
         lWallWidth,
         lWallDepth,
+        uNotchDepthLeft,
+        uNotchDepthRight,
+        uWingWallLeft,
+        uWingWallRight,
         lShapeSide,
         colorSelect,
         shadeColorSelect,
@@ -5004,9 +5225,17 @@ ${logoBlock}
     custInternalNotes,
     lengthWall,
     exitWidth,
+    exitLeft,
+    exitRight,
+    trapezoidMode,
     isLShape,
+    isUShape,
     lWallWidth,
     lWallDepth,
+    uWingWallLeft,
+    uWingWallRight,
+    uNotchDepthLeft,
+    uNotchDepthRight,
     lShapeSide,
     colorSelect,
     shadeColorSelect,
@@ -5400,8 +5629,16 @@ ${logoBlock}
     parseFloat(lengthWall) || 0,
     parseFloat(exitWidth) || 0,
     isLShape ? 1 : 0,
-    isLShape ? parseFloat(lWallWidth) || 0 : 0,
+    isUShape ? 1 : 0,
+    isLShape || isUShape ? parseFloat(lWallWidth) || 0 : 0,
     isLShape ? parseFloat(lWallDepth) || 0 : 0,
+    parseFloat(exitLeft) || parseFloat(exitWidth) || 0,
+    parseFloat(exitRight) || parseFloat(exitWidth) || 0,
+    trapezoidMode ? 1 : 0,
+    isUShape ? parseFloat(uWingWallLeft) || 0 : 0,
+    isUShape ? parseFloat(uWingWallRight) || 0 : 0,
+    isUShape ? parseFloat(uNotchDepthLeft) || 0 : 0,
+    isUShape ? parseFloat(uNotchDepthRight) || 0 : 0,
     lShapeSide,
     parseFloat(spacing) || 0,
     pergolaResult.nDividersTotal ?? 0,
@@ -5442,8 +5679,20 @@ ${logoBlock}
     params.set("santafHex", shareCfg.santafHex || (shareCfg.hasSantaf ? "#7ec8e3" : "#888888"));
     params.set("captionText", shareCfg.captionText || "");
     params.set("isLShape", shareCfg.isLShape ? "1" : "0");
+    params.set("isUShape", shareCfg.isUShape ? "1" : "0");
     params.set("lWallWidth", String(shareCfg.lWallWidth || 0));
     params.set("lWallDepth", String(shareCfg.lWallDepth || 0));
+    if (shareCfg.uWingWallLeft) params.set("uWingWallLeft", String(shareCfg.uWingWallLeft));
+    if (shareCfg.uWingWallRight) params.set("uWingWallRight", String(shareCfg.uWingWallRight));
+    if (shareCfg.uNotchDepthLeft !== undefined && shareCfg.uNotchDepthLeft !== "") {
+      params.set("uNotchDepthLeft", String(shareCfg.uNotchDepthLeft));
+    }
+    if (shareCfg.uNotchDepthRight !== undefined && shareCfg.uNotchDepthRight !== "") {
+      params.set("uNotchDepthRight", String(shareCfg.uNotchDepthRight));
+    }
+    if (shareCfg.trapezoidMode) params.set("trapezoidMode", "1");
+    if (shareCfg.exitLeft) params.set("exitLeft", String(shareCfg.exitLeft));
+    if (shareCfg.exitRight) params.set("exitRight", String(shareCfg.exitRight));
     params.set("lShapeSide", shareCfg.lShapeSide || "right");
     if (shareCfg.hasSantaf) params.set("hasSantaf", "1");
     if (shareCfg.hasLed) params.set("hasLed", "1");
@@ -6042,19 +6291,133 @@ ${logoBlock}
                   <h3 className="text-lg font-bold mb-4 border-b pb-2 text-slate-700 flex items-center gap-2">📐 מידות ומבנה (חוץ-חוץ)</h3>
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2">
-                      <div><label className="block text-sm font-bold text-blue-700 mb-1">אורך קיר ראשי (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lengthWall} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLengthWall(v); saveCurrentState(); } }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
-                      <div><label className="block text-sm font-bold text-blue-700 mb-1">יציאה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={exitWidth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setExitWidth(v); saveCurrentState(); } }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
+                      <div><label className="block text-sm font-bold text-blue-700 mb-1">{isUShape ? "אורך קיר כולל (ס״מ)" : "אורך קיר ראשי (ס״מ)"}</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lengthWall} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLengthWall(v); if (isUShape) { const sync = syncUWingWalls(v, lWallWidth, uWingWallLeft, uWingWallRight, "wall"); if (sync.left !== undefined) setUWingWallLeft(sync.left); if (sync.right !== undefined) setUWingWallRight(sync.right); } saveCurrentState(); } }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
+                      {(isLShape || isUShape || !trapezoidMode) && (
+                        <div><label className="block text-sm font-bold text-blue-700 mb-1">{isUShape ? "יציאה למרכז / מגרעת (ס״מ)" : "יציאה (ס״מ)"}</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={exitWidth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setExitWidth(v); if (!trapezoidMode) { setExitLeft(v); setExitRight(v); } saveCurrentState(); } }} placeholder="" className="w-full border rounded-lg p-2 text-center font-bold text-lg" /></div>
+                      )}
                     </div>
+                    {!isLShape && !isUShape && (
+                      <div className="p-3 bg-violet-50 rounded-xl border border-violet-200">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={trapezoidMode}
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setTrapezoidMode(on);
+                              if (on) {
+                                const seed = exitWidth || exitLeft || exitRight;
+                                if (seed) {
+                                  if (!exitLeft) setExitLeft(seed);
+                                  if (!exitRight) setExitRight(seed);
+                                }
+                              } else {
+                                const avg = syncExitWidthFromSplit(exitLeft, exitRight);
+                                if (avg) setExitWidth(avg);
+                              }
+                              saveCurrentState();
+                            }}
+                            className="w-5 h-5 accent-violet-600"
+                          />
+                          <span className="text-sm font-black text-violet-900">יציאות שונות לצדדים (פרגולה בזווית)</span>
+                        </label>
+                        {trapezoidMode && (
+                          <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-violet-200" dir="ltr">
+                            <div><label className="block text-xs font-bold text-violet-800 mb-1">יציאה שמאל (ס״מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={exitLeft} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setExitLeft(v); setExitWidth(syncExitWidthFromSplit(v, exitRight)); saveCurrentState(); } }} placeholder="" className="w-full border border-violet-300 rounded-lg p-2 text-center font-bold" /></div>
+                            <div><label className="block text-xs font-bold text-violet-800 mb-1">יציאה ימין (ס״מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={exitRight} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setExitRight(v); setExitWidth(syncExitWidthFromSplit(exitLeft, v)); saveCurrentState(); } }} placeholder="" className="w-full border border-violet-300 rounded-lg p-2 text-center font-bold" /></div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="p-3 bg-orange-50 rounded-xl border border-orange-200">
                       <label className="flex items-center gap-2 cursor-pointer mb-2 border-b border-orange-200 pb-2">
-                        <input type="checkbox" checked={isLShape} onChange={(e) => { setIsLShape(e.target.checked); saveCurrentState(); }} className="w-5 h-5 accent-orange-600" />
+                        <input type="checkbox" checked={isLShape} onChange={(e) => { setIsLShape(e.target.checked); if (e.target.checked) { setTrapezoidMode(false); setIsUShape(false); } saveCurrentState(); }} className="w-5 h-5 accent-orange-600" />
                         <span className="text-sm font-black text-orange-800">פרגולה בצורת ר&apos; (בליטת קיר)</span>
                       </label>
                       {isLShape && (
                         <div className="grid grid-cols-2 gap-2 mt-2">
                           <div><label className="block text-xs text-orange-700 mb-1">רוחב הבליטה</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lWallWidth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLWallWidth(v); saveCurrentState(); } }} className="w-full border border-orange-300 rounded-lg p-2" /></div>
                           <div><label className="block text-xs text-orange-700 mb-1">עומק הבליטה</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lWallDepth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLWallDepth(v); saveCurrentState(); } }} className="w-full border border-orange-300 rounded-lg p-2" /></div>
-                          <div className="col-span-2"><label className="block text-xs text-orange-700 mb-1">צד הבליטה</label><select value={lShapeSide} onChange={(e) => { setLShapeSide(e.target.value as "left" | "right"); saveCurrentState(); }} className="w-full border border-orange-300 rounded-lg p-2 bg-white"><option value="right">הבליטה בקיר בצד ימין</option><option value="left">הבליטה בקיר בצד שמאל</option></select></div>
+                          <div className="col-span-2">
+                            <label className="block text-xs text-orange-700 mb-1">צד הבליטה בקיר</label>
+                            <div className="grid grid-cols-2 gap-2" dir="ltr">
+                              <button
+                                type="button"
+                                onClick={() => { setLShapeSide("left"); saveCurrentState(); }}
+                                className={`rounded-lg p-2 text-sm font-bold border ${lShapeSide === "left" ? "bg-orange-500 text-white border-orange-600" : "bg-white text-orange-800 border-orange-300"}`}
+                              >
+                                צד שמאל
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setLShapeSide("right"); saveCurrentState(); }}
+                                className={`rounded-lg p-2 text-sm font-bold border ${lShapeSide === "right" ? "bg-orange-500 text-white border-orange-600" : "bg-white text-orange-800 border-orange-300"}`}
+                              >
+                                צד ימין
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
+                      <label className="flex items-center gap-2 cursor-pointer mb-2 border-b border-amber-200 pb-2">
+                        <input type="checkbox" checked={isUShape} onChange={(e) => { setIsUShape(e.target.checked); if (e.target.checked) { setTrapezoidMode(false); setIsLShape(false); } saveCurrentState(); }} className="w-5 h-5 accent-amber-600" />
+                        <span className="text-sm font-black text-amber-900">מגרעת מרכזית בקיר (ר&apos; משני צדדים)</span>
+                      </label>
+                      {isUShape && (
+                        <div className="space-y-3 mt-2">
+                          <p className="text-xs text-amber-900 font-bold">מידות הקיר האחורי (כמו בסקיצה — שמאל במסך משמאל, ימין מימין):</p>
+                          <div className="grid grid-cols-3 gap-2" dir="ltr">
+                            <div>
+                              <label className="block text-xs text-amber-800 mb-1 text-center">קיר שמאל</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={uWingWallLeft} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setUWingWallLeft(v); const sync = syncUWingWalls(lengthWall, lWallWidth, v, uWingWallRight, "left"); if (sync.right !== undefined) setUWingWallRight(sync.right); saveCurrentState(); } }} className="w-full border border-amber-300 rounded-lg p-2 text-center font-bold" placeholder="200" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-amber-800 mb-1 text-center">מגרעת (רוחב)</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={lWallWidth} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setLWallWidth(v); const sync = syncUWingWalls(lengthWall, v, uWingWallLeft, uWingWallRight, "notch"); if (sync.left !== undefined) setUWingWallLeft(sync.left); if (sync.right !== undefined) setUWingWallRight(sync.right); saveCurrentState(); } }} className="w-full border-2 border-amber-500 rounded-lg p-2 text-center font-bold bg-amber-50" placeholder="200" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-amber-800 mb-1 text-center">קיר ימין</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={uWingWallRight} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setUWingWallRight(v); const sync = syncUWingWalls(lengthWall, lWallWidth, uWingWallLeft, v, "right"); if (sync.left !== undefined) setUWingWallLeft(sync.left); saveCurrentState(); } }} className="w-full border border-amber-300 rounded-lg p-2 text-center font-bold" placeholder="100" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2" dir="ltr">
+                            <div>
+                              <label className="block text-xs text-amber-800 mb-1 text-center">תוספת כנף שמאל (ס״מ)</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={uNotchDepthLeft} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setUNotchDepthLeft(v); saveCurrentState(); } }} className="w-full border border-amber-300 rounded-lg p-2 text-center font-bold" placeholder="80" />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-amber-800 mb-1 text-center">תוספת כנף ימין (ס״מ)</label>
+                              <input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={uNotchDepthRight} onChange={(e) => { const v = e.target.value.replace(",", "."); if (/^\d*\.?\d*$/.test(v)) { setUNotchDepthRight(v); saveCurrentState(); } }} className="w-full border border-amber-300 rounded-lg p-2 text-center font-bold" placeholder="150" />
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-amber-800">כל החציצים (כנפיים + מגרעת) — אורך מרכז בלבד, נעצרים בגרונג. הצללות — עומק מלא בכל אזור.</p>
+                          {(() => {
+                            const sum = parseDimCm(uWingWallLeft) + parseDimCm(lWallWidth) + parseDimCm(uWingWallRight);
+                            const wall = parseDimCm(lengthWall);
+                            const exitW = parseDimCm(exitWidth);
+                            const notchDL = parseDimCm(uNotchDepthLeft);
+                            const notchDR = parseDimCm(uNotchDepthRight);
+                            const ok = wall > 0 && Math.abs(sum - wall) < 0.5;
+                            return (
+                              <div className={`rounded-lg px-3 py-2 text-xs font-bold ${ok ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-amber-100 text-amber-900 border border-amber-300"}`}>
+                                <p>קיר: {parseDimCm(uWingWallLeft) || "—"} + מגרעת {parseDimCm(lWallWidth) || "—"} + {parseDimCm(uWingWallRight) || "—"} = <strong>{sum > 0 ? sum : "—"}</strong> ס״מ {wall > 0 ? `(יעד: ${wall})` : ""}</p>
+                                {exitW > 0 && (
+                                  <p className="mt-1">
+                                    מרכז: {exitW} ס״מ
+                                    {(notchDL > 0 || notchDR > 0) && (
+                                      <>
+                                        {notchDL > 0 && <> · כנף שמאל: {exitW + notchDL} ס״מ</>}
+                                        {notchDR > 0 && <> · כנף ימין: {exitW + notchDR} ס״מ</>}
+                                      </>
+                                    )}
+                                  </p>
+                                )}
+                                {!ok && wall > 0 && sum > 0 && <p className="mt-1">הזן צד אחד — השני יחושב אוטומטית, או התאם ליעד.</p>}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
@@ -6207,7 +6570,44 @@ ${logoBlock}
                   <h3 className="text-lg font-bold mb-4 border-b pb-2 text-slate-700 flex items-center gap-2">☀️ הצללה וקירוי</h3>
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">סוג פרופיל הצללה</label><select value={shadingProfile} onChange={(e) => { setShadingProfile(e.target.value); saveCurrentState(); }} className="w-full border rounded-lg p-2 bg-white"><option value="20x40">20/40</option><option value="20x70">20/70</option><option value="mix">משולב (70+40+40)</option><option value="none">ללא (סנטף בלבד)</option></select></div>
-                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">מרווח בין שלבים</label><select value={spacing} onChange={(e) => { setSpacing(e.target.value); saveCurrentState(); }} className="w-full border rounded-lg p-2 bg-white"><option value="2">2 ס&quot;מ</option><option value="4">4 ס&quot;מ</option><option value="0">0 (אטום)</option></select></div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">מרווח בין שלבים</label>
+                      <select
+                        value={spacingIsCustom ? "custom" : spacing}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "custom") {
+                            setSpacingIsCustom(true);
+                            if (spacing === "0" || spacing === "2" || spacing === "4") setSpacing("3");
+                          } else {
+                            setSpacingIsCustom(false);
+                            setSpacing(v);
+                          }
+                          saveCurrentState();
+                        }}
+                        className="w-full border rounded-lg p-2 bg-white"
+                      >
+                        <option value="2">2 ס״מ</option>
+                        <option value="4">4 ס״מ</option>
+                        <option value="0">0 (אטום)</option>
+                        <option value="custom">הזן מרווח ידני…</option>
+                      </select>
+                      {spacingIsCustom && (
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={spacing}
+                          onChange={(e) => {
+                            setSpacing(e.target.value);
+                            saveCurrentState();
+                          }}
+                          placeholder="ס״מ"
+                          className="w-full border rounded-lg p-2 mt-2 bg-white"
+                          aria-label="מרווח ידני בסנטימטרים"
+                        />
+                      )}
+                    </div>
                   </div>
                   <div className="p-3 bg-green-50 rounded-xl border border-green-200">
                     <label className="flex items-center gap-2 cursor-pointer mb-2"><input type="checkbox" checked={hasSantaf} onChange={(e) => { setHasSantaf(e.target.checked); saveCurrentState(); }} className="w-5 h-5 accent-green-600" /><span className="text-sm font-bold text-green-800">הוסף קירוי סנטף BH פלרם</span></label>
@@ -6222,10 +6622,10 @@ ${logoBlock}
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 bg-slate-50">
                   <h3 className="text-lg font-bold mb-4 border-b border-slate-200 pb-2 text-slate-700 flex items-center gap-2">➕ תוספות ועמודים</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4" dir="ltr">
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">כמות עמודים חזית</label><input type="number" value={postCountFront} onChange={(e) => { setPostCountFront(e.target.value); saveCurrentState(); }} placeholder="0" min={0} className="w-full border rounded-lg p-2" /></div>
-                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">כמות עמודים צד ימין</label><input type="number" value={postCountRight} onChange={(e) => { setPostCountRight(e.target.value); saveCurrentState(); }} placeholder="0" min={0} className="w-full border rounded-lg p-2" /></div>
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">כמות עמודים צד שמאל</label><input type="number" value={postCountLeft} onChange={(e) => { setPostCountLeft(e.target.value); saveCurrentState(); }} placeholder="0" min={0} className="w-full border rounded-lg p-2" /></div>
+                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">כמות עמודים צד ימין</label><input type="number" value={postCountRight} onChange={(e) => { setPostCountRight(e.target.value); saveCurrentState(); }} placeholder="0" min={0} className="w-full border rounded-lg p-2" /></div>
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">כמות עמודים בסוף</label><input type="number" value={postCountBack} onChange={(e) => { setPostCountBack(e.target.value); saveCurrentState(); }} placeholder="0" min={0} className="w-full border rounded-lg p-2" /></div>
                     <div className="md:col-span-4"><label className="block text-[11px] text-slate-500 mb-1">כמות כוללת (אוטומטי)</label><div className="w-full border rounded-lg p-2 bg-slate-50 font-bold text-slate-700">{(parseInt(postCountFront) || 0) + (parseInt(postCountRight) || 0) + (parseInt(postCountLeft) || 0) + (parseInt(postCountBack) || 0)}</div></div>
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">גבהי עמודים (מופרדים ברווח, נקודה-פסיק או פסיק)</label><input type="text" inputMode="decimal" value={postHeight} onChange={(e) => { setPostHeight(e.target.value); saveCurrentState(); }} placeholder="250 260 או 250; 260" className="w-full border rounded-lg p-2" /></div>
@@ -6310,10 +6710,10 @@ ${logoBlock}
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-orange-500">
                   <h2 className="text-xl font-black mb-4 text-orange-800 border-b border-orange-100 pb-2 flex items-center gap-2">📐 סקיצה והוראות עבודה למסגר</h2>
-                  <div key={`sim-${lengthWall}-${exitWidth}-${spacing}-${colorSelect}-${shadeColorSelect}-${frameType}`} className="text-sm text-slate-800 space-y-2 font-medium" dangerouslySetInnerHTML={{ __html: pergolaResult.instructionsHtml }} />
+                  <div key={`sim-${lengthWall}-${trapezoidMode}-${exitLeft}-${exitRight}-${exitWidth}-${spacing}-${colorSelect}-${shadeColorSelect}-${frameType}`} className="text-sm text-slate-800 space-y-2 font-medium" dangerouslySetInnerHTML={{ __html: pergolaResult.instructionsHtml }} />
                 </div>
                 <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500">
-                  <h2 className="text-xl font-black mb-4 text-blue-800 border-b border-blue-100 pb-2 flex items-center gap-2">✂️ רשימת חיתוכים (בס&quot;מ)</h2>
+                  <h2 className="text-xl font-black mb-4 text-blue-800 border-b border-blue-100 pb-2 flex items-center gap-2">✂️ רשימת חיתוכים (בס״מ)</h2>
                   <div className="overflow-x-auto"><table className="w-full text-right border-collapse"><thead><tr className="bg-slate-50 text-slate-600 border-y border-slate-200"><th className="p-3 font-bold">פרופיל</th><th className="p-3 font-bold">ייעוד</th><th className="p-3 font-bold text-center">כמות לחיתוך</th><th className="p-3 font-bold text-center">מידה לחיתוך</th><th className="p-3 font-bold text-center">מוט</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: pergolaResult.cuttingHtml }} /></table></div>
                   {pergolaResult.shadeSlatPlanHtml ? (
                     <div className="mt-5 pt-4 border-t border-blue-100">
@@ -6322,12 +6722,26 @@ ${logoBlock}
                     </div>
                   ) : null}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500">
+                <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
+                  <div className="min-w-0 xl:col-span-3 bg-white rounded-2xl p-4 sm:p-6 shadow-md border-r-4 border-blue-500">
                     <h2 className="text-lg font-black mb-4 border-b border-blue-100 pb-2 text-blue-800 flex items-center gap-2">📦 הזמנת חומר למחסן (מוטות שלמים)</h2>
-                    <div className="overflow-x-auto"><table className="w-full text-right border-collapse text-sm"><thead><tr className="bg-slate-50 text-slate-600 border-y border-slate-200"><th className="p-2 font-bold">סוג פרופיל</th><th className="p-2 font-bold text-center">כמות מוטות</th><th className="p-2 font-bold text-center">אורך מוט</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: pergolaResult.bomHtml }} /></table></div>
+                    <div className="w-full min-w-0 overflow-x-auto xl:overflow-visible">
+                      <table className="w-full min-w-0 table-fixed text-right border-collapse text-sm">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-600 border-y border-slate-200">
+                            <th className="p-2 font-bold w-[58%] sm:w-[62%]">סוג פרופיל</th>
+                            <th className="p-2 font-bold text-center w-[22%] sm:w-[20%]">כמות מוטות</th>
+                            <th className="p-2 font-bold text-center w-[20%] sm:w-[18%]">אורך מוט</th>
+                          </tr>
+                        </thead>
+                        <tbody
+                          className="[&_td]:p-2 [&_td]:align-middle [&_td:first-child]:break-words [&_td:nth-child(2)]:text-center [&_td:nth-child(3)]:text-center [&_td:nth-child(3)]:whitespace-nowrap"
+                          dangerouslySetInnerHTML={{ __html: pergolaResult.bomHtml }}
+                        />
+                      </table>
+                    </div>
                   </div>
-                  <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-emerald-500">
+                  <div className="min-w-0 xl:col-span-2 bg-white rounded-2xl p-4 sm:p-6 shadow-md border-r-4 border-emerald-500">
                     <h2 className="text-lg font-black mb-4 text-emerald-800 border-b border-emerald-100 pb-2 flex items-center gap-2">🔩 פירזול ותוספות</h2>
                     <div className="flex flex-col gap-2 text-sm font-medium text-slate-700" dangerouslySetInnerHTML={{ __html: pergolaResult.hardwareHtml }} />
                   </div>
@@ -6451,8 +6865,8 @@ ${logoBlock}
                           </button>
                         </div>
                       ) : null}
-                      <div><label className="block text-sm font-bold text-slate-600 mb-1">אורך כולל (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "L")} onChange={(e) => setFenceSegDraft(seg.id, "L", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "L")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl bg-white" placeholder="0" /></div>
-                      <div><label className="block text-sm font-bold text-slate-600 mb-1">גובה (ס&quot;מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "H")} onChange={(e) => setFenceSegDraft(seg.id, "H", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "H")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl bg-white" placeholder="0" /></div>
+                      <div><label className="block text-sm font-bold text-slate-600 mb-1">אורך כולל (ס״מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "L")} onChange={(e) => setFenceSegDraft(seg.id, "L", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "L")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl bg-white" placeholder="0" /></div>
+                      <div><label className="block text-sm font-bold text-slate-600 mb-1">גובה (ס״מ)</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "H")} onChange={(e) => setFenceSegDraft(seg.id, "H", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "H")} className="w-full text-center font-black text-2xl p-3 border border-slate-300 rounded-xl bg-white" placeholder="0" /></div>
                       <div><label className="block text-xs font-bold text-slate-500 mb-1">מספר עמודים כולל{seg.connected ? " (כולל עמוד משותף)" : ""}</label><input type="text" inputMode="decimal" pattern="[0-9]*[\\.,]?[0-9]*" dir="ltr" value={getFenceSegInputValue(seg, "P")} onChange={(e) => setFenceSegDraft(seg.id, "P", e.target.value)} onBlur={() => commitFenceSegDraft(seg.id, "P")} className="w-full text-center font-black text-xl p-2.5 border border-slate-300 rounded-lg bg-white" placeholder="סה״כ" /></div>
                       <div className="flex flex-wrap gap-2 pt-1">
                         <button type="button" onClick={() => insertFenceAfter(seg.id, "continue")} className="text-[11px] bg-sky-100 text-sky-800 px-2.5 py-1.5 rounded-lg font-bold hover:bg-sky-200">+ המשך אחרי זה</button>
@@ -6473,7 +6887,10 @@ ${logoBlock}
                       <select value={fenceSlat} onChange={(e) => {
                         const v = e.target.value;
                         setFenceSlat(v);
-                        if (v === "zigzag") setFenceGap("0");
+                        if (v === "zigzag") {
+                          setFenceGapIsCustom(false);
+                          setFenceGap("0");
+                        }
                       }} className="w-full border rounded-lg p-2 bg-white">
                         <option value="100">רק 100/20</option>
                         <option value="70">רק 70/20</option>
@@ -6491,7 +6908,46 @@ ${logoBlock}
                         <span className="inline-flex items-center gap-1"><ProfileIcon profileName="מילוי זיגזג אטום 120/20" className="w-5 h-4 text-slate-700" />זיגזג</span>
                       </div>
                     </div>
-                    <div><label className="block text-xs font-semibold text-slate-600 mb-1">מרווח (ס&quot;מ)</label><select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 bg-white" disabled={fenceSlat === "zigzag"}><option value="0">0 (אטום)</option><option value="1">1</option><option value="1.5">1.5</option><option value="2">2</option><option value="3">3</option></select>{fenceSlat === "zigzag" ? <p className="text-[10px] text-emerald-700 mt-1 font-semibold">זיגזג אטום — בלי מרווח בין שלבים</p> : null}</div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-600 mb-1">מרווח (ס״מ)</label>
+                      <select
+                        value={fenceGapIsCustom ? "custom" : fenceGap}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "custom") {
+                            setFenceGapIsCustom(true);
+                            if (fenceGap === "0" || fenceGap === "1" || fenceGap === "1.5" || fenceGap === "2" || fenceGap === "3") {
+                              setFenceGap("2.5");
+                            }
+                          } else {
+                            setFenceGapIsCustom(false);
+                            setFenceGap(v);
+                          }
+                        }}
+                        className="w-full border rounded-lg p-2 bg-white"
+                        disabled={fenceSlat === "zigzag"}
+                      >
+                        <option value="0">0 (אטום)</option>
+                        <option value="1">1</option>
+                        <option value="1.5">1.5</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="custom">הזן מרווח ידני…</option>
+                      </select>
+                      {fenceGapIsCustom && fenceSlat !== "zigzag" && (
+                        <input
+                          type="number"
+                          min={0}
+                          step="any"
+                          value={fenceGap}
+                          onChange={(e) => setFenceGap(e.target.value)}
+                          placeholder="ס״מ"
+                          className="w-full border rounded-lg p-2 mt-2 bg-white"
+                          aria-label="מרווח ידני בסנטימטרים לגדר"
+                        />
+                      )}
+                      {fenceSlat === "zigzag" ? <p className="text-[10px] text-emerald-700 mt-1 font-semibold">זיגזג אטום — בלי מרווח בין שלבים</p> : null}
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div><label className="block text-xs font-semibold text-slate-600 mb-1">גוון עמודים ומסגרת</label><select value={fenceColor} onChange={(e) => setFenceColor(e.target.value)} className="w-full border rounded-lg p-2 bg-white">{RAL_OPTIONS.map((o) => <option key={o} value={o}>{getRalLabel(o)}</option>)}</select></div>
@@ -6559,12 +7015,32 @@ ${logoBlock}
                     {fenceHiddenCostsBox && fenceResult.sqm > 0 && (
                       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 text-center"><p className="text-slate-500 text-xs font-bold mb-1">משקל נטו</p><p className="text-xl font-black text-slate-800">{fenceResult.weight.toFixed(1)} ק&quot;ג</p></div>
-                        <div className="bg-red-50 rounded-2xl p-4 border border-red-200 text-center shadow-sm"><p className="text-red-700 text-xs font-bold mb-1">שאריות נפל</p><p className="text-xl font-black text-red-600">{fenceResult.wasteKg.toFixed(1)} ק&quot;ג</p><p className="text-[10px] font-bold text-red-500 mt-1">{fenceResult.wastePercent.toFixed(1)}% פחת</p></div>
+                        <details className="bg-red-50 rounded-2xl p-4 border border-red-200 text-center shadow-sm cursor-pointer group col-span-1 open:col-span-2 lg:open:col-span-4 [&_summary::-webkit-details-marker]:hidden">
+                          <summary className="list-none outline-none">
+                            <p className="text-red-700 text-xs font-bold mb-1">שאריות נפל</p>
+                            <p className="text-xl font-black text-red-600">{fenceResult.wasteKg.toFixed(1)} ק&quot;ג</p>
+                            <p className="text-[10px] font-bold text-red-500 mt-1">{fenceResult.wastePercent.toFixed(1)}% פחת</p>
+                            <p className="text-[10px] text-red-600/80 mt-2 font-semibold group-open:hidden">לחץ לפירוט מפרט ←</p>
+                            <p className="text-[10px] text-red-600/80 mt-2 font-semibold hidden group-open:block">לחץ לסגירה</p>
+                          </summary>
+                          <div className="overflow-x-auto mt-3 pt-3 border-t border-red-200 text-right">
+                            <table className="w-full border-collapse text-sm">
+                              <thead>
+                                <tr className="text-red-900 border-b border-red-200">
+                                  <th className="p-2">פרופיל</th>
+                                  <th className="p-2 text-center">אורך מקורי</th>
+                                  <th className="p-2 text-center">נפל (מטרים)</th>
+                                </tr>
+                              </thead>
+                              <tbody dangerouslySetInnerHTML={{ __html: fenceResult.wasteHtml || `<tr><td colspan="3" class="text-center text-slate-400 py-4">אין שאריות נפל משמעותיות</td></tr>` }} />
+                            </table>
+                          </div>
+                        </details>
                         <div className="bg-slate-800 rounded-2xl p-4 text-white text-center shadow-md"><p className="text-slate-300 text-xs font-bold mb-1">עלות חומר משוערת (לפני מע&quot;מ)</p><p className="text-xl font-black">₪ {Math.round(fenceResult.cost).toLocaleString()}</p></div>
                         <div className="bg-indigo-100 rounded-2xl p-4 text-indigo-900 text-center border border-indigo-200"><p className="text-indigo-700 text-xs font-bold mb-1">רווח גולמי (לפני מע&quot;מ)</p><p className="text-xl font-black">₪ {Math.round(fenceResult.profit).toLocaleString()}</p></div>
                       </div>
                     )}
-                    <div className="bg-white rounded-2xl p-6 shadow-md border-t-4 border-blue-500"><h2 className="text-lg font-black mb-4 text-slate-800 border-b pb-2">✂️ מידות חיתוך (ס&quot;מ)</h2><div className="overflow-x-auto"><table className="w-full text-right text-sm"><thead><tr><th>פרופיל / ייעוד</th><th className="text-center">כמות</th><th className="text-center">מידה לחיתוך</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: fenceResult?.cuttingHtml ?? "" }} /></table></div></div>
+                    <div className="bg-white rounded-2xl p-6 shadow-md border-t-4 border-blue-500"><h2 className="text-lg font-black mb-4 text-slate-800 border-b pb-2">✂️ מידות חיתוך (ס״מ)</h2><div className="overflow-x-auto"><table className="w-full text-right text-sm"><thead><tr><th>פרופיל / ייעוד</th><th className="text-center">כמות</th><th className="text-center">מידה לחיתוך</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: fenceResult?.cuttingHtml ?? "" }} /></table></div></div>
                     <div className="bg-white rounded-2xl p-6 shadow-md border-t-4 border-emerald-500"><h2 className="text-lg font-black mb-4 text-slate-800 border-b pb-2">📦 הזמנה מהמחסן (מוטות 6 מ&apos;)</h2><div className="overflow-x-auto mb-4"><table className="w-full text-right text-sm"><thead><tr><th>סוג פרופיל</th><th className="text-center">כמות מוטות</th></tr></thead><tbody dangerouslySetInnerHTML={{ __html: fenceResult?.bomHtml ?? "" }} /></table></div><div className="bg-slate-50 p-4 rounded-xl border border-slate-200"><h4 className="font-bold text-slate-700 mb-2">🔩 פירזול ואביזרים</h4><div className="space-y-2 text-sm text-slate-600" dangerouslySetInnerHTML={{ __html: fenceResult?.hardwareHtml ?? "" }} /></div></div>
                     <div className="bg-white rounded-2xl p-6 shadow-md border-r-4 border-blue-500"><h2 className="text-xl font-black mb-4 text-blue-800 border-b border-blue-100 pb-2">📐 מפרט שדות והוראות</h2><div className="text-base text-slate-800 space-y-3 font-medium" dangerouslySetInnerHTML={{ __html: fenceResult?.instructionsHtml ?? "הוסף מקטעים (אורך, גובה ועמודים) לחישוב מדויק." }} /></div>
               </div>
@@ -6758,7 +7234,10 @@ ${logoBlock}
                         <select value={fenceSlat} onChange={(e) => {
                           const v = e.target.value;
                           setFenceSlat(v);
-                          if (v === "zigzag") setFenceGap("0");
+                          if (v === "zigzag") {
+                          setFenceGapIsCustom(false);
+                          setFenceGap("0");
+                        }
                         }} className="w-full border rounded-lg p-2 text-xs bg-white">
                           <option value="100">רק 100/20</option>
                           <option value="70">רק 70/20</option>
@@ -6771,13 +7250,42 @@ ${logoBlock}
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-600 mb-1">מרווח</label>
-                        <select value={fenceGap} onChange={(e) => setFenceGap(e.target.value)} className="w-full border rounded-lg p-2 text-xs bg-white" disabled={fenceSlat === "zigzag"}>
+                        <select
+                          value={fenceGapIsCustom ? "custom" : fenceGap}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === "custom") {
+                              setFenceGapIsCustom(true);
+                              if (fenceGap === "0" || fenceGap === "1" || fenceGap === "1.5" || fenceGap === "2" || fenceGap === "3") {
+                                setFenceGap("2.5");
+                              }
+                            } else {
+                              setFenceGapIsCustom(false);
+                              setFenceGap(v);
+                            }
+                          }}
+                          className="w-full border rounded-lg p-2 text-xs bg-white"
+                          disabled={fenceSlat === "zigzag"}
+                        >
                           <option value="0">0</option>
                           <option value="1">1</option>
                           <option value="1.5">1.5</option>
                           <option value="2">2</option>
                           <option value="3">3</option>
+                          <option value="custom">הזן מרווח ידני…</option>
                         </select>
+                        {fenceGapIsCustom && fenceSlat !== "zigzag" && (
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={fenceGap}
+                            onChange={(e) => setFenceGap(e.target.value)}
+                            placeholder="ס״מ"
+                            className="w-full border rounded-lg p-2 mt-1.5 text-xs bg-white"
+                            aria-label="מרווח ידני בסנטימטרים לגדר"
+                          />
+                        )}
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-600 mb-1">גוון עמודים</label>

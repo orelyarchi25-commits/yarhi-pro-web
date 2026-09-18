@@ -241,7 +241,7 @@ export default function FieldWindowsView({
     const width = parseFloat(draft.width) || 0;
     const height = parseFloat(draft.height) || 0;
     if (width <= 0 || height <= 0) {
-      alert('יש להזין רוחב וגובה (ס&quot;מ)');
+      alert('יש להזין רוחב וגובה (ס״מ)');
       return;
     }
     const qty = Math.max(1, parseInt(draft.qty, 10) || 1);
@@ -493,11 +493,11 @@ export default function FieldWindowsView({
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className={labelCls}>רוחב (ס&quot;מ)</label>
+                    <label className={labelCls}>רוחב (ס״מ)</label>
                     <input type="number" min={1} className={inputCls} value={draft.width} onChange={(e) => setDraft({ ...draft, width: e.target.value })} />
                   </div>
                   <div>
-                    <label className={labelCls}>גובה (ס&quot;מ)</label>
+                    <label className={labelCls}>גובה (ס״מ)</label>
                     <input type="number" min={1} className={inputCls} value={draft.height} onChange={(e) => setDraft({ ...draft, height: e.target.value })} />
                   </div>
                 </div>
@@ -582,7 +582,7 @@ export default function FieldWindowsView({
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className={labelCls}>גובה מנעול (ס&quot;מ)</label>
+                        <label className={labelCls}>גובה מנעול (ס״מ)</label>
                         <input className={inputCls} value={draft.lockHeight} onChange={(e) => setDraft({ ...draft, lockHeight: e.target.value })} />
                       </div>
                       <div>
@@ -653,8 +653,8 @@ export default function FieldWindowsView({
                     <thead>
                       <tr className="border-b border-slate-200 bg-slate-100 text-slate-600">
                         <th className="p-2">מיקום</th>
-                        <th className="p-2">רוחב (ס&quot;מ)</th>
-                        <th className="p-2">גובה (ס&quot;מ)</th>
+                        <th className="p-2">רוחב (ס״מ)</th>
+                        <th className="p-2">גובה (ס״מ)</th>
                         <th className="p-2">מ&quot;ר</th>
                         <th className="p-2">פרופיל</th>
                         <th className="p-2">זכוכית</th>
